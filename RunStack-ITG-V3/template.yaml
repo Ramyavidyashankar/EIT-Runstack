@@ -1,0 +1,4012 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: DXCIT RunStack - Serverless automation solution for cross-account SSM execution (Using Existing VPC Resources)
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+
+Parameters:
+  pSolutionName:
+    Type: String
+    Default: runstack
+    Description: Solution name used as suffix for resource names
+    AllowedPattern: '^[a-z0-9-]+$'
+    ConstraintDescription: Must contain only lowercase letters, numbers, and hyphens
+
+  pUiSessionSecret:
+    Type: String
+    NoEcho: true
+    Description: >-
+      Secret used to sign local UI login session tokens (separate from
+      AzureAD/Cognito). Generate once with: openssl rand -hex 32
+    MinLength: 32
+
+  pHealthcheckDocumentName:
+    Type: String
+    Description: Name of the SSM Command document that runs the PowerShell healthcheck script
+    Default: "SQL-Database-Healthcheck"
+
+  pSharePointAppSecretArn:
+    Type: String
+    Description: >-
+      Optional Secrets Manager ARN holding {"client_secret":"..."} for the
+      SharePoint app registration. Leave blank while using the hardcoded
+      SHAREPOINT_CLIENT_SECRET_HARDCODED value in app.py for local testing —
+      fill in and redeploy before this goes anywhere shared/production.
+    Default: ""
+    
+  pCrossAccountRoleName:
+    Type: String
+    Default: runstack-cross-account-role
+    Description: Name of the IAM role to assume in target accounts for cross-account SSM execution
+  
+  pStage:
+    Type: String
+    Default: v1
+    Description: API Gateway stage name
+
+  pLambdaConcurrency:
+    Type: Number
+    Default: 100
+    Description: Reserved concurrent executions for Lambda functions
+    MinValue: 1
+    MaxValue: 1000
+
+  pMaxRetryAttempts:
+    Type: Number
+    Default: 1
+    Description: Maximum number of retry attempts for SSM automation and command executions
+    MinValue: 1
+    MaxValue: 10
+
+  pMaxWaitTimeSeconds:
+    Type: Number
+    Default: 30
+    Description: Maximum wait time in seconds between SSM execution status checks
+    MinValue: 10
+    MaxValue: 300
+
+  pThrottleBurstLimit:
+    Type: Number
+    Default: 100
+    Description: API Gateway throttle burst limit (requests per second)
+
+  pThrottleRateLimit:
+    Type: Number
+    Default: 50
+    Description: API Gateway throttle rate limit (requests per second)
+
+  pQuotaLimit:
+    Type: Number
+    Default: 10000
+    Description: API Gateway quota limit (requests per day)
+
+  # ── DR Failover thresholds — same values applied to every AG ────────────────
+  # Not a per-AG DynamoDB table: these are policy decisions (what queue lag is
+  # tolerable), not observable facts, and are assumed identical across AGs.
+  # If a specific AG genuinely needs a different threshold later, that's the
+  # trigger to revisit this — not something to solve preemptively.
+  pDrMaxLogQueueKB:
+    Type: Number
+    Default: 1024
+    Description: Max acceptable log send/redo queue size (KB) per database before DR pre-validation fails
+
+  pDrMaxTxnMinutes:
+    Type: Number
+    Default: 5
+    Description: Max acceptable active-transaction age (minutes) on the primary before DR pre-validation fails (reserved — not yet enforced, see WSFC/txn check open item)
+
+  pDrConfirmTimeoutSec:
+    Type: Number
+    Default: 120
+    Description: Seconds a DR confirmation token remains valid between /plan and /execute
+
+  pDrPollIntervalSec:
+    Type: Number
+    Default: 5
+    Description: Poll interval (seconds) when waiting on SSM command completion for DR operations
+
+  pDrReplicaOverridesJson:
+    Type: String
+    Default: '{}'
+    Description: >-
+      JSON object mapping ag_name -> explicit DR replica hostname, for AGs
+      whose topology doesn't cleanly classify as one PRIMARY + one
+      ASYNCHRONOUS_COMMIT secondary (e.g. '{"SOME_AG": "c99w999999"}').
+      Empty by default — only populate for AGs that actually need it.
+
+  pNotificationEmail:
+    Type: String
+    Description: Email address for CloudWatch alarms and job failure notifications
+    AllowedPattern: '^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    ConstraintDescription: Must be a valid email address
+
+  pDynatraceApiUrl:
+    Type: String
+    Description: >-
+      Base URL of the Dynatrace environment (e.g. https://gbk74565.live.dynatrace.com).
+      Used for the on-demand synthetic monitor execute/poll endpoints.
+
+  pExistingDynatraceFetchSecretArn:
+    Type: String
+    Default: ''
+    Description: >-
+      ARN of an EXISTING Secrets Manager secret holding the Dynatrace API
+      token used to FETCH/resolve monitors. Leave blank to have this stack
+      create a new secret (placeholder value, set after deploy). Set this
+      if you already created the secret manually — avoids a name collision.
+
+  pExistingDynatraceTriggerSecretArn:
+    Type: String
+    Default: ''
+    Description: >-
+      ARN of an EXISTING Secrets Manager secret holding the Dynatrace API
+      token used to TRIGGER executions and poll status. Same behavior as
+      pExistingDynatraceFetchSecretArn — leave blank to create a new one.
+
+  pExistingDynatraceSyntheticFetchSecretArn:
+    Type: String
+    Default: ''
+    Description: >-
+      ARN of an EXISTING Secrets Manager secret holding the Dynatrace API
+      token used to fetch/resolve SYNTHETIC monitors specifically (separate
+      from the general fetch token). Same behavior as
+      pExistingDynatraceFetchSecretArn — leave blank to create a new one.
+
+  pExistingDrTestSqlCredentialsSecretArn:
+    Type: String
+    Default: ''
+    Description: >-
+      ARN of an EXISTING Secrets Manager secret holding
+      {"username":"...","password":"..."} for the DR failover test SQL
+      account. Leave blank to have this stack create a new secret
+      (placeholder value, set after deploy).
+
+  pExistingTeamsApproveSharedSecretArn:
+    Type: String
+    Default: ''
+    Description: >-
+      ARN of an EXISTING Secrets Manager secret holding the shared secret
+      checked on the unauthenticated /dr-failover/{AGName}/approve webhook
+      called by the Power Automate Teams Adaptive Card action. Leave blank
+      to have this stack create a new secret (placeholder value, set after
+      deploy).
+
+  pExistingTeamsDrApprovalWebhookUrlSecretArn:
+    Type: String
+    Default: ''
+    Description: >-
+      ARN of an EXISTING Secrets Manager secret holding the Power Automate
+      webhook URL (contains an embedded auth signature) used to post the
+      Teams Adaptive Card for DR failover approval. Leave blank to have
+      this stack create a new secret (placeholder value, set after
+      deploy).
+
+# VPC configuration
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Existing VPC Id where Lambdas are deployed
+
+  pPrivateSubnetIds:
+    Type: CommaDelimitedList
+    Description: Private subnet Ids for Lambda ENIs
+
+  pRouteTableIds:
+    Type: CommaDelimitedList
+    Description: Route table Ids used by the private subnets (for DynamoDB gateway endpoint - optional if exists)
+
+  pVpcCidr:
+    Type: String
+    Description: CIDR of the VPC (for reference only)
+    AllowedPattern: '^([0-9]{1,3}\.){3}[0-9]{1,3}\/[0-9]{1,2}$'
+
+# Existing VPC Resources - Pre-configured by Network Team
+  pExistingLambdaSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Existing Security Group ID for Lambda functions (pre-configured by network team)
+
+  pExistingEndpointSecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+    Description: Existing Security Group ID for VPC Endpoints (pre-configured by network team)
+
+Conditions:
+  cCreateDynatraceFetchSecret: !Equals [!Ref pExistingDynatraceFetchSecretArn, '']
+  cCreateDynatraceTriggerSecret: !Equals [!Ref pExistingDynatraceTriggerSecretArn, '']
+  cCreateDynatraceSyntheticFetchSecret: !Equals [!Ref pExistingDynatraceSyntheticFetchSecretArn, '']
+  cCreateDrTestSqlCredentialsSecret: !Equals [!Ref pExistingDrTestSqlCredentialsSecretArn, '']
+  cCreateTeamsApproveSharedSecret: !Equals [!Ref pExistingTeamsApproveSharedSecretArn, '']
+  cCreateTeamsDrApprovalWebhookUrlSecret: !Equals [!Ref pExistingTeamsDrApprovalWebhookUrlSecretArn, '']
+  cSharePointSecretConfigured: !Not [!Equals [!Ref pSharePointAppSecretArn, '']]
+
+Resources:
+  # SNS Topic for notifications
+  rCsaNotificationTopic:
+    Type: AWS::SNS::Topic
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W47
+            reason: This topic doesn't need to be encrypted
+    Properties:
+      TopicName: !Sub '${pSolutionName}-notifications'
+      DisplayName: !Sub '${pSolutionName} Notifications'
+
+  # SNS Subscription for email notifications
+  rCsaNotificationSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      TopicArn: !Ref rCsaNotificationTopic
+      Protocol: email
+      Endpoint: !Ref pNotificationEmail
+
+  # Cognito User Pool for application-to-application authentication
+  rCsaCognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      UserPoolName: !Sub '${pSolutionName}-user-pool'
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 12
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+
+  # Cognito User Pool Domain
+  rCsaCognitoUserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub '${pSolutionName}-auth-${AWS::AccountId}'
+      UserPoolId: !Ref rCsaCognitoUserPool
+
+  # ── Cognito User Pool Groups ──────────────────────────────────────────────────
+  # Group membership controls access to POST /notify via Pre Token Generation trigger
+  # runstack-admins    → full access (trigger + edit schedules + view all)
+  # runstack-operators → trigger automations + view jobs
+  # runstack-readonly  → view jobs and schedules only, no trigger access
+  rCsaRunstackAdminsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      UserPoolId: !Ref rCsaCognitoUserPool
+      GroupName: runstack-admins
+      Description: Full RunStack access - trigger automations, edit schedules, view all
+
+  rCsaRunstackOperatorsGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      UserPoolId: !Ref rCsaCognitoUserPool
+      GroupName: runstack-operators
+      Description: RunStack operator access - trigger automations and view jobs
+
+  rCsaRunstackReadonlyGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      UserPoolId: !Ref rCsaCognitoUserPool
+      GroupName: runstack-readonly
+      Description: RunStack read-only access - view jobs and schedules only
+
+  # ── GDBA team group ────────────────────────────────────────────────────────
+  # Membership synced from AzureAD (same mechanism as the legacy groups
+  # above). Does NOT grant a runstack:role by itself — pre_token's
+  # LEGACY_GROUP_ROLE_MAP intentionally does not include this group, so
+  # someone can be GDBA without becoming an admin/operator/viewer. Their
+  # actual capabilities are looked up live from runstack-gdba-access,
+  # scoped per-AG, not baked into the token as a role would be.
+  rCsaRunstackTeamGdbaGroup:
+    Type: AWS::Cognito::UserPoolGroup
+    Properties:
+      UserPoolId: !Ref rCsaCognitoUserPool
+      GroupName: runstack-team-gdba
+      Description: GDBA team membership - grants capabilities looked up from runstack-gdba-access, not a RunStack role
+
+  # Cognito User Pool Resource Server
+  rCsaCognitoResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties:
+      UserPoolId: !Ref rCsaCognitoUserPool
+      Identifier: !Sub '${pSolutionName}-api'
+      Name: RunStack API Resource Server
+      Scopes:
+        - ScopeName: notify
+          ScopeDescription: Access to send notifications to RunStack API
+
+  # Cognito User Pool Client for client credentials flow
+  rCsaCognitoUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn: rCsaCognitoResourceServer
+    Properties:
+      UserPoolId: !Ref rCsaCognitoUserPool
+      ClientName: !Sub '${pSolutionName}-api-client'
+      GenerateSecret: true
+      AllowedOAuthFlows:
+        - client_credentials
+      AllowedOAuthScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      AllowedOAuthFlowsUserPoolClient: true
+      ExplicitAuthFlows: []
+      SupportedIdentityProviders: []
+
+  # Cognito Public SPA Client — for user login via AzureAD SAML
+  rCsaCognitoPublicUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    DependsOn:
+      - rCsaCognitoResourceServer
+      - rCsaCognitoAzureADIdentityProvider
+    Properties:
+      UserPoolId: !Ref rCsaCognitoUserPool
+      ClientName: !Sub '${pSolutionName}-user-public'
+      GenerateSecret: false
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - openid
+        - email
+        - !Sub '${pSolutionName}-api/notify'
+      AllowedOAuthFlowsUserPoolClient: true
+      CallbackURLs:
+        - !Sub 'https://${rCsaApi}.execute-api.${AWS::Region}.amazonaws.com/${pStage}/auth/callback'
+      LogoutURLs:
+        - !Sub 'https://${rCsaApi}.execute-api.${AWS::Region}.amazonaws.com/${pStage}/auth/logout'
+      SupportedIdentityProviders:
+        - AzureAD
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+
+  # Cognito AzureAD SAML Identity Provider
+  rCsaCognitoAzureADIdentityProvider:
+    Type: AWS::Cognito::UserPoolIdentityProvider
+    Properties:
+      UserPoolId: !Ref rCsaCognitoUserPool
+      ProviderName: AzureAD
+      ProviderType: SAML
+      ProviderDetails:
+        MetadataURL: 'https://login.microsoftonline.com/93f33571-550f-43cf-b09f-cd331338d086/federationmetadata/2007-06/federationmetadata.xml?appid=515ef5a7-b0a5-407b-aafc-59d901f6fe4b'
+        IDPSignout: 'false'
+      AttributeMapping:
+        email: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'
+
+  # API Gateway Authorizer
+  rCsaApiAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      Name: !Sub '${pSolutionName}-cognito-authorizer'
+      Type: COGNITO_USER_POOLS
+      IdentitySource: method.request.header.Authorization
+      RestApiId: !Ref rCsaApi
+      ProviderARNs:
+        - !GetAtt rCsaCognitoUserPool.Arn
+
+
+  # CloudWatch Log Group for API Gateway Access Logs
+  rCsaApiAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W84
+            reason: CloudWatchLogs LogGroup is encrypted by default
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/${pSolutionName}-api-access-logs'
+      RetentionInDays: 30
+
+  # IAM Role for API Gateway to write to CloudWatch Logs
+  rApiGatewayCloudWatchRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+
+  # API Gateway Account Configuration
+  rApiGatewayAccount:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt rApiGatewayCloudWatchRole.Arn
+
+  # API Gateway REST API
+  rCsaApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub '${pSolutionName}-api'
+      Description: Custom Serverless Automation API
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  # API Gateway Stage
+  rCsaApiStage:
+    Type: AWS::ApiGateway::Stage
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W64
+            reason: This resource is associated with an UsagePlan
+    DependsOn: rApiGatewayAccount
+    Properties:
+      RestApiId: !Ref rCsaApi
+      StageName: !Ref pStage
+      DeploymentId: !Ref rCsaApiDeployment
+      AccessLogSetting:
+        DestinationArn: !GetAtt rCsaApiAccessLogGroup.Arn
+        Format: '{"requestId":"$context.requestId","requestTime":"$context.requestTime","httpMethod":"$context.httpMethod","resourcePath":"$context.resourcePath","status":"$context.status","protocol":"$context.protocol","responseLength":"$context.responseLength","requestLength":"$context.requestLength","responseTime":"$context.responseTime","error.message":"$context.error.message","error.messageString":"$context.error.messageString","identity.sourceIp":"$context.identity.sourceIp","identity.userAgent":"$context.identity.userAgent","authorizer.principalId":"$context.authorizer.principalId"}'
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          DataTraceEnabled: true
+          MetricsEnabled: true
+
+  # API Gateway Usage Plan
+  rCsaApiUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    DependsOn: rCsaApiStage
+    Properties:
+      UsagePlanName: !Sub '${pSolutionName}-api-usage-plan'
+      Description: Usage plan for RunStack API with throttling and quota limits
+      ApiStages:
+        - ApiId: !Ref rCsaApi
+          Stage: !Ref pStage
+      Throttle:
+        BurstLimit: !Ref pThrottleBurstLimit
+        RateLimit: !Ref pThrottleRateLimit
+      Quota:
+        Limit: !Ref pQuotaLimit
+        Period: DAY
+
+  # API Gateway Deployment
+  rCsaApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W68
+            reason: This resource is associated with an UsagePlan
+          - id: W64
+            reason: This resource is associated with an UsagePlan
+    DependsOn:
+      - rCsaApiNotifyMethod
+      - rCsaApiNotifyOptionsMethod
+      - rCsaApiGetJobMethod
+      - rCsaApiJobIdOptionsMethod
+      - rCsaApiGetLatestJobsMethod
+      - rCsaApiLatestJobsOptionsMethod
+      - rCsaApiGetRecentJobsMethod
+      - rCsaApiRecentJobsOptionsMethod
+      - rCsaApiGetAuthCallbackMethod
+      - rCsaApiAuthCallbackOptionsMethod
+      - rCsaApiGetSsmDocumentsMethod
+      - rCsaApiSsmDocumentsOptionsMethod
+      - rCsaApiGetSsmDocumentMethod
+      - rCsaApiSsmDocumentNameOptionsMethod
+      - rCsaApiGetEventBridgeSchedulesMethod
+      - rCsaApiEventBridgeSchedulesOptionsMethod
+      - rCsaApiPostEventBridgeScheduleMethod
+      - rCsaApiPutEventBridgeScheduleMethod
+      - rCsaApiDeleteEventBridgeScheduleMethod
+      - rCsaApiEventBridgeScheduleNameOptionsMethod
+      - rCsaApiGetJobsDlqMethod
+      - rCsaApiDeleteJobsDlqMethod
+      - rCsaApiJobsDlqOptionsMethod
+      - rCsaApiInstancesStatusMethod
+      - rCsaApiInstancesStatusOptionsMethod
+      - rCsaApiGetAssessCheckMethod
+      - rCsaApiAssessCheckIdOptionsMethod
+    Properties:
+      RestApiId: !Ref rCsaApi
+
+  # API Gateway Resource
+  rCsaApiNotifyResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: notify
+
+  # API Gateway Method
+  # Consolidated wildcard permission covering every route on this API for
+  # rCsaProcessMessages, replacing individual per-route Lambda::Permission
+  # resources that were removed here. Each per-route permission added ~250-450
+  # bytes to this Lambda's resource-based policy; AWS caps that policy at
+  # 20,480 bytes total, and the accumulated statements had grown past that
+  # limit (deploy failure: "final policy size (20862) is bigger than the
+  # limit (20480)"). A single wildcard SourceArn covering the whole API
+  # avoids this ceiling entirely and scales to any number of future routes
+  # without revisiting this limit again.
+  rCsaProcessMessagesApiPermissionAll:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref rCsaProcessMessages
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${rCsaApi}/*/*'
+
+  rCsaApiNotifyMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifyResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 403
+        - StatusCode: 500
+
+  # API Gateway Resource - /jobs
+  rCsaApiJobsResourceV2:
+    Type: AWS::ApiGateway::Resource
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: jobs
+
+  # API Gateway Resource - /jobs/{jobId}
+  rCsaApiJobIdResourceV2:
+    Type: AWS::ApiGateway::Resource
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiJobsResourceV2
+      PathPart: "{jobId}"
+
+  # API Gateway Resource - /jobs/latest
+  rCsaApiLatestJobsResourceV2:
+    Type: AWS::ApiGateway::Resource
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiJobsResourceV2
+      PathPart: latest
+
+  # API Gateway Resource - /jobs/recent
+  rCsaApiRecentJobsResourceV2:
+    Type: AWS::ApiGateway::Resource
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiJobsResourceV2
+      PathPart: recent
+
+  # API Gateway Method - GET /jobs/{jobId}
+  rCsaApiGetJobMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiJobIdResourceV2
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 404
+        - StatusCode: 500
+
+  # API Gateway Method - GET /jobs/latest
+  rCsaApiGetLatestJobsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiLatestJobsResourceV2
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  # API Gateway Method - GET /jobs/recent
+  rCsaApiGetRecentJobsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiRecentJobsResourceV2
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  # Lambda permission for API Gateway to invoke GET /jobs/{jobId}
+  rCsaApiNotifyOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifyResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # API Gateway Method - OPTIONS /jobs/{jobId} (CORS preflight)
+  rCsaApiJobIdOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiJobIdResourceV2
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # API Gateway Method - OPTIONS /jobs/latest (CORS preflight)
+  rCsaApiLatestJobsOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiLatestJobsResourceV2
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # API Gateway Method - OPTIONS /jobs/recent (CORS preflight)
+  rCsaApiRecentJobsOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiRecentJobsResourceV2
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # API Gateway Resource - /auth
+  rCsaApiAuthResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: auth
+
+  # API Gateway Resource - /auth/callback
+  rCsaApiAuthCallbackResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiAuthResource
+      PathPart: callback
+
+  # API Gateway Method - GET /auth/callback (no auth — public endpoint)
+  rCsaApiGetAuthCallbackMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiAuthCallbackResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  # OPTIONS /auth/callback
+  rCsaApiAuthCallbackOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiAuthCallbackResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # Lambda permission for GET /auth/callback
+  rCsaApiUiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: ui
+
+  rCsaApiUiLoginResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiUiResource
+      PathPart: login
+
+  rCsaApiPostUiLoginMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiUiLoginResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 401
+        - StatusCode: 500
+
+  rCsaApiUiLoginOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiUiLoginResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-UI-Session,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  rCsaApiSsmDocumentNameResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiSsmDocumentsResource
+      PathPart: "{name}"
+
+  # API Gateway Method - GET /ssm/documents/{name}
+  rCsaApiGetSsmDocumentMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiSsmDocumentNameResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  # API Gateway Method - OPTIONS /ssm/documents/{name}
+  rCsaApiSsmDocumentNameOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiSsmDocumentNameResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # API Gateway Resource - /eventbridge/schedules/{name}
+  rCsaApiEventBridgeScheduleNameResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiEventBridgeSchedulesResource
+      PathPart: "{name}"
+
+  # API Gateway Method - PUT /eventbridge/schedules/{name}
+  rCsaApiPutEventBridgeScheduleMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiEventBridgeScheduleNameResource
+      HttpMethod: PUT
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  # API Gateway Method - DELETE /eventbridge/schedules/{name}
+  rCsaApiDeleteEventBridgeScheduleMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiEventBridgeScheduleNameResource
+      HttpMethod: DELETE
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  # API Gateway Method - POST /eventbridge/schedules
+  rCsaApiPostEventBridgeScheduleMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiEventBridgeSchedulesResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  # OPTIONS /eventbridge/schedules/{name}
+  rCsaApiEventBridgeScheduleNameOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiEventBridgeScheduleNameResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,PUT,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # Lambda permissions for new methods
+  rCsaGatewayResponseDefault4XX:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResponseType: DEFAULT_4XX
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+
+  # Gateway Response for 5XX errors (ensures CORS headers on Lambda errors)
+  rCsaGatewayResponseDefault5XX:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResponseType: DEFAULT_5XX
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+
+  # API Gateway Resource - /ssm
+  rCsaApiSsmResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: ssm
+
+  # API Gateway Resource - /ssm/documents
+  rCsaApiSsmDocumentsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiSsmResource
+      PathPart: documents
+
+  # API Gateway Method - GET /ssm/documents
+  rCsaApiGetSsmDocumentsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiSsmDocumentsResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  # API Gateway Method - OPTIONS /ssm/documents (CORS preflight)
+  rCsaApiSsmDocumentsOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiSsmDocumentsResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # API Gateway Resource - /eventbridge
+  rCsaApiEventBridgeResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: eventbridge
+
+  # ── File Uploads (S3) ────────────────────────────────────────────────────
+
+  # API Gateway Resource - /uploads
+  rCsaApiUploadsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: uploads
+
+  # API Gateway Resource - /uploads/presign
+  rCsaApiUploadsPresignResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiUploadsResource
+      PathPart: presign
+
+  # API Gateway Resource - /uploads/{key+}  (greedy, to allow nested S3 keys)
+  rCsaApiUploadsKeyResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiUploadsResource
+      PathPart: "{key+}"
+
+  # GET /uploads — list uploaded files
+  rCsaApiGetUploadsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiUploadsResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  rCsaApiUploadsOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiUploadsResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # POST /uploads/presign — get a presigned S3 PUT URL
+  rCsaApiPostUploadsPresignMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiUploadsPresignResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  rCsaApiUploadsPresignOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiUploadsPresignResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-UI-Session,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # DELETE /uploads/{key+} — delete an uploaded file
+  rCsaApiDeleteUploadsKeyMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiUploadsKeyResource
+      HttpMethod: DELETE
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  rCsaApiUploadsKeyOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiUploadsKeyResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-UI-Session,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # Lambda permissions for API Gateway to invoke the uploads routes
+  rCsaApiAdminResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: admin
+
+  # API Gateway Resource - /admin/users
+  rCsaApiAdminUsersResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiAdminResource
+      PathPart: users
+
+  # API Gateway Resource - /admin/users/{username}
+  rCsaApiAdminUsersUsernameResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiAdminUsersResource
+      PathPart: "{username}"
+
+  # API Gateway Resource - /admin/users/{username}/role
+  rCsaApiAdminUsersRoleResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiAdminUsersUsernameResource
+      PathPart: role
+
+  # GET /admin/users — list users with current role
+  rCsaApiGetAdminUsersMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiAdminUsersResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  rCsaApiAdminUsersOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiAdminUsersResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # POST /admin/users/{username}/role — change a user's role
+  rCsaApiPostAdminUsersRoleMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiAdminUsersRoleResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  rCsaApiAdminUsersRoleOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiAdminUsersRoleResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-UI-Session,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  rCsaApiEventBridgeSchedulesResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiEventBridgeResource
+      PathPart: schedules
+
+  # API Gateway Method - GET /eventbridge/schedules
+  rCsaApiGetEventBridgeSchedulesMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiEventBridgeSchedulesResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  # API Gateway Method - OPTIONS /eventbridge/schedules (CORS preflight)
+  rCsaApiEventBridgeSchedulesOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiEventBridgeSchedulesResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # Lambda permission for API Gateway to invoke GET /jobs/recent
+  rCsaApiJobsDlqResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiJobsResourceV2
+      PathPart: dlq
+
+  # API Gateway Method - GET /jobs/dlq
+  rCsaApiGetJobsDlqMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiJobsDlqResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  # API Gateway Method - DELETE /jobs/dlq
+  rCsaApiDeleteJobsDlqMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiJobsDlqResource
+      HttpMethod: DELETE
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  # API Gateway Method - OPTIONS /jobs/dlq (CORS preflight)
+  rCsaApiJobsDlqOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiJobsDlqResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # Lambda permission for GET /jobs/dlq
+  rCsaApiInstancesResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: instances
+
+  # API Gateway Resource - /app-instances
+  # Note: PathPart 'app-instances' used instead of 'instances' due to a
+  # corporate network/proxy device intercepting requests whose path matched
+  # the literal string '/instances' and returning a synthetic 403
+  # IncompleteSignatureException before reaching API Gateway. Confirmed via
+  # testing on 2026-06-18 — query string appended to /instances bypassed the
+  # block, isolating it to exact-path matching outside of AWS.
+  rCsaApiAppInstancesResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: app-instances
+
+  # ── Machine-only agent catalog lookup (separate from /app-instances) ──────
+  # Dedicated to system/agent callers (Database Healthcheck Agent etc.) that
+  # need server_name → instance_id resolution without user-scoping. Kept as
+  # its own resource/route so /app-instances' user-scoped logic — relied on
+  # by other agents — is never touched by this one.
+
+  # API Gateway Resource - /agent
+  rCsaApiAgentResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: agent
+
+  # API Gateway Resource - /agent/instances
+  rCsaApiAgentInstancesResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiAgentResource
+      PathPart: instances
+
+  # GET /agent/instances — machine-only catalog lookup
+  rCsaApiGetAgentInstancesMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiAgentInstancesResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: '200'
+        - StatusCode: '404'
+        - StatusCode: '500'
+
+  rCsaApiAgentInstancesOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiAgentInstancesResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  rCsaApiTidalResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: tidal
+
+  rCsaApiTidalAppsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiTidalResource
+      PathPart: apps
+
+  rCsaApiTidalAppIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiTidalAppsResource
+      PathPart: "{AppId}"
+
+  rCsaApiTidalAgentsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiTidalAppIdResource
+      PathPart: agents
+
+  rCsaApiGetTidalAgentsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiTidalAgentsResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      RequestParameters:
+        method.request.path.AppId: true
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: '200'
+        - StatusCode: '404'
+        - StatusCode: '500'
+
+  rCsaApiTidalAgentsOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiTidalAgentsResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  rCsaApiDynatraceResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: dynatrace
+
+  rCsaApiDynatraceAgsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiDynatraceResource
+      PathPart: ags
+
+  rCsaApiDynatraceAgNameResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiDynatraceAgsResource
+      PathPart: "{AGName}"
+
+  rCsaApiDynatraceAgServersResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiDynatraceAgNameResource
+      PathPart: servers
+
+  rCsaApiDynatraceAgRolesResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiDynatraceAgNameResource
+      PathPart: roles
+
+  # GET /dynatrace/ags
+  rCsaApiGetDynatraceAgsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDynatraceAgsResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 500
+
+  rCsaApiDynatraceAgsOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDynatraceAgsResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # GET /dynatrace/ags/{AGName}/servers
+  rCsaApiGetDynatraceAgServersMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDynatraceAgServersResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 404
+        - StatusCode: 500
+
+  rCsaApiDynatraceAgServersOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDynatraceAgServersResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # GET /dynatrace/ags/{AGName}/roles
+  rCsaApiGetDynatraceAgRolesMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDynatraceAgRolesResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 404
+        - StatusCode: 500
+
+  rCsaApiDynatraceAgRolesOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDynatraceAgRolesResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  rCsaApiDrFailoverResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: dr-failover
+
+  rCsaApiDrFailoverAgNameResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiDrFailoverResource
+      PathPart: "{AGName}"
+
+  rCsaApiDrFailoverConfigResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiDrFailoverAgNameResource
+      PathPart: config
+
+  rCsaApiDrFailoverPlanResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiDrFailoverAgNameResource
+      PathPart: plan
+
+  rCsaApiDrFailoverExecuteResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiDrFailoverAgNameResource
+      PathPart: execute
+
+  rCsaApiDrFailoverStatusResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiDrFailoverAgNameResource
+      PathPart: status
+
+  rCsaApiDrFailoverStatusRunIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiDrFailoverStatusResource
+      PathPart: "{RunId}"
+
+  # GET /dr-failover/{AGName}/config
+  rCsaApiGetDrConfigMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDrFailoverConfigResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 404
+        - StatusCode: 500
+
+  rCsaApiDrFailoverConfigOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDrFailoverConfigResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # POST /dr-failover/{AGName}/plan — pre-validation only, issues one-time token
+  rCsaApiPostDrPlanMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDrFailoverPlanResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  rCsaApiDrFailoverPlanOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDrFailoverPlanResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # POST /dr-failover/{AGName}/execute — requires valid token from /plan
+  rCsaApiPostDrExecuteMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDrFailoverExecuteResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 403
+        - StatusCode: 500
+
+  rCsaApiDrFailoverExecuteOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDrFailoverExecuteResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # GET /dr-failover/{AGName}/status/{RunId}
+  rCsaApiGetDrStatusMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDrFailoverStatusRunIdResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 404
+        - StatusCode: 500
+
+  rCsaApiDrFailoverStatusOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDrFailoverStatusRunIdResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  rCsaApiDrFailoverAgApproveResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiDrFailoverAgNameResource
+      PathPart: approve
+
+  rCsaApiDrFailoverAgApproveMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDrFailoverAgApproveResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+
+  rCsaApiDrFailoverAgApproveOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDrFailoverAgApproveResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Headers: false
+
+  rCsaApiNotifySyncResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: notify-sync
+
+  rCsaApiNotifySyncMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifySyncResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+
+  rCsaApiNotifySyncOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifySyncResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'OPTIONS,POST'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: false
+            method.response.header.Access-Control-Allow-Methods: false
+            method.response.header.Access-Control-Allow-Headers: false
+
+  rCsaApiNotifySyncAasResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiNotifySyncResource
+      PathPart: aas-status-check
+
+  rCsaApiNotifySyncAasMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifySyncAasResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+  rCsaApiNotifySyncAscsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiNotifySyncResource
+      PathPart: ascs-status-check
+
+  rCsaApiNotifySyncAscsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifySyncAscsResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+  rCsaApiNotifySyncPasResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiNotifySyncResource
+      PathPart: pas-status-check
+
+  rCsaApiNotifySyncPasMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifySyncPasResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+  rCsaApiNotifySyncDbResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiNotifySyncResource
+      PathPart: db-status-check
+
+  rCsaApiNotifySyncDbMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifySyncDbResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+  rCsaApiNotifySyncEc2Resource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiNotifySyncResource
+      PathPart: ec2-statuscheck
+
+  rCsaApiNotifySyncEc2Method:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifySyncEc2Resource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+  rCsaApiNotifySyncDbStartResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiNotifySyncDbResource
+      PathPart: start
+
+  rCsaApiNotifySyncDbStartMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifySyncDbStartResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+
+  rCsaApiNotifySyncDbStopResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiNotifySyncDbResource
+      PathPart: stop
+
+  rCsaApiNotifySyncDbStopMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifySyncDbStopResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+
+  rCsaApiNotifySyncAscsStartResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiNotifySyncAscsResource
+      PathPart: start
+
+  rCsaApiNotifySyncAscsStartMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifySyncAscsStartResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+
+  rCsaApiNotifySyncAscsStopResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiNotifySyncAscsResource
+      PathPart: stop
+
+  rCsaApiNotifySyncAscsStopMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifySyncAscsStopResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+
+  rCsaApiNotifySyncPasStartResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiNotifySyncPasResource
+      PathPart: start
+
+  rCsaApiNotifySyncPasStartMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifySyncPasStartResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+
+  rCsaApiNotifySyncPasStopResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiNotifySyncPasResource
+      PathPart: stop
+
+  rCsaApiNotifySyncPasStopMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifySyncPasStopResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+
+  rCsaApiNotifySyncAasStartResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiNotifySyncAasResource
+      PathPart: start
+
+  rCsaApiNotifySyncAasStartMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifySyncAasStartResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+
+  rCsaApiNotifySyncAasStopResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiNotifySyncAasResource
+      PathPart: stop
+
+  rCsaApiNotifySyncAasStopMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiNotifySyncAasStopResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+  rCsaApiDynatraceAgRolesJobIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiDynatraceAgRolesResource
+      PathPart: "{JobId}"
+
+  rCsaApiGetDynatraceAgRolesJobIdMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDynatraceAgRolesJobIdResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+
+  # Added — the live manually-created route had no OPTIONS method, which
+  # meant it was never actually callable from a browser (only tools like
+  # curl/Postman that don't send a CORS preflight). The React UI's polling
+  # call fails at the preflight stage without this.
+  rCsaApiDynatraceAgRolesJobIdOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiDynatraceAgRolesJobIdResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  rCsaApiBatchHealthcheckResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: batch-healthcheck
+
+  rCsaApiPostBatchHealthcheckMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiBatchHealthcheckResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: '200'
+        - StatusCode: '400'
+        - StatusCode: '500'
+
+  rCsaApiBatchHealthcheckOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiBatchHealthcheckResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  rCsaApiInstancesStatusResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiInstancesResource
+      PathPart: status
+
+  # API Gateway Method - POST /instances/status
+  rCsaApiInstancesStatusMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiInstancesStatusResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 500
+
+  # API Gateway Method - OPTIONS /instances/status (CORS preflight)
+  rCsaApiInstancesStatusOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiInstancesStatusResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # Lambda permission for POST /instances/status
+  rCsaApiAssessResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: assess
+
+  # API Gateway Resource - /assess/{checkId}
+  rCsaApiAssessCheckIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiAssessResource
+      PathPart: "{checkId}"
+
+  # API Gateway Method - GET /assess/{checkId}
+  rCsaApiGetAssessCheckMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiAssessCheckIdResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 404
+        - StatusCode: 500
+
+  # API Gateway Method - OPTIONS /assess/{checkId} (CORS preflight)
+  rCsaApiAssessCheckIdOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiAssessCheckIdResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # Lambda permission for GET /assess/{checkId}
+  rCsaApiSyntheticResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !GetAtt rCsaApi.RootResourceId
+      PathPart: synthetic
+
+  # API Gateway Resource - /synthetic/execute
+  rCsaApiSyntheticExecuteResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiSyntheticResource
+      PathPart: execute
+
+  # API Gateway Method - POST /synthetic/execute
+  rCsaApiSyntheticExecuteMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiSyntheticExecuteResource
+      HttpMethod: POST
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 404
+        - StatusCode: 500
+
+  # API Gateway Method - OPTIONS /synthetic/execute (CORS preflight)
+  rCsaApiSyntheticExecuteOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiSyntheticExecuteResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # Lambda permission for POST /synthetic/execute
+  rCsaApiSyntheticJobIdResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiSyntheticResource
+      PathPart: "{syntheticJobId}"
+
+  # API Gateway Method - GET /synthetic/{syntheticJobId}
+  rCsaApiGetSyntheticJobMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiSyntheticJobIdResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 404
+        - StatusCode: 500
+
+  # API Gateway Method - OPTIONS /synthetic/{syntheticJobId} (CORS preflight)
+  rCsaApiSyntheticJobIdOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiSyntheticJobIdResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # Lambda permission for GET /synthetic/{syntheticJobId}
+  rApiGatewaySqsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SQSSendMessagePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !GetAtt rCsaNotificationQueue.Arn
+
+  # Dead Letter Queue
+  rCsaNotificationDlq:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      QueueName: !Sub '${pSolutionName}-notification-dlq'
+      KmsMasterKeyId: alias/aws/sqs
+      MessageRetentionPeriod: 1209600  # 14 days
+
+  # Main SQS Queue
+  rCsaNotificationQueue:
+    Type: AWS::SQS::Queue
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      QueueName: !Sub '${pSolutionName}-notification-queue'
+      KmsMasterKeyId: alias/aws/sqs
+      VisibilityTimeout: 180
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt rCsaNotificationDlq.Arn
+        maxReceiveCount: 3
+
+  # CloudWatch Alarm for DLQ
+  rCsaDlqCwAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: The solution requires a static name for this resource
+    Properties:
+      AlarmName: !Sub '${pSolutionName}-dlq-cw-alarm'
+      AlarmDescription: Alarm when messages are in the DLQ
+      MetricName: ApproximateNumberOfVisibleMessages
+      Namespace: AWS/SQS
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: QueueName
+          Value: !GetAtt rCsaNotificationDlq.QueueName
+      AlarmActions:
+        - !Ref rCsaNotificationTopic
+
+  # DynamoDB Table
+  rCsaJobsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: The solution requires a static name for this resource
+    Properties:
+      TableName: !Sub '${pSolutionName}-jobs-table'
+      BillingMode: PAY_PER_REQUEST
+      SSESpecification:
+        SSEEnabled: true
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      AttributeDefinitions:
+        - AttributeName: job_id
+          AttributeType: S
+        - AttributeName: notification_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: job_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: notification-id-index
+          KeySchema:
+            - AttributeName: notification_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+# ========================================================================
+# REMOVED: Security Groups and VPC Endpoints
+# These resources are now pre-configured by the network team
+# References changed to use parameters: pExistingLambdaSecurityGroupId and pExistingEndpointSecurityGroupId
+# ========================================================================
+
+  # ── Pre Token Generation Lambda ───────────────────────────────────────────────
+  # IMPORTANT: This Lambda intentionally has NO VpcConfig.
+  # Cognito Pre Token Generation triggers invoke Lambda synchronously and cannot
+  # reach functions in private subnets without a Cognito VPC endpoint.
+  # All other Lambdas in this stack are in VPC — this one must remain public.
+  rCsaPreTokenFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: The solution requires a static name for this resource
+          - id: W11
+            reason: This role needs cognito-idp access for group lookup
+    Properties:
+      FunctionName: !Sub '${pSolutionName}-pre-token'
+      CodeUri: src/pre_token/
+      Handler: app.lambda_handler
+      # No VpcConfig — Cognito cannot invoke VPC Lambdas without Cognito VPC endpoint
+      Environment:
+        Variables:
+          APP_ACCESS_TABLE: !Ref rCsaAppAccessTable
+          USER_ROLES_TABLE: !Ref rCsaUserRolesTable
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - cognito-idp:AdminListGroupsForUser
+              # Using Sub instead of !GetAtt rCsaCognitoUserPool.Arn to avoid
+              # circular dependency: UserPool→PreTokenFunction→UserPool
+              Resource: !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*'
+            # Consolidated: same action set / resource pattern as
+            # rCsaProcessMessages, so any new runstack-* table (or new
+            # action need on an existing one) needs no IAM change here.
+            - Sid: RunStackDynamoDBAllTables
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:BatchGetItem
+                - dynamodb:BatchWriteItem
+                - dynamodb:DescribeTable
+                - dynamodb:ConditionCheckItem
+              Resource:
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/runstack-*'
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/runstack-*/index/*'
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: '*'
+
+  # Cognito permission to invoke Pre Token Lambda
+  rCsaPreTokenFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt rCsaPreTokenFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: !GetAtt rCsaCognitoUserPool.Arn
+
+  # IAM Role for the attach trigger custom resource Lambda
+  rCsaAttachPreTokenTriggerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${pSolutionName}-attach-pretoken-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: AttachPreTokenPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:DescribeUserPool
+                  - cognito-idp:UpdateUserPool
+                Resource: !GetAtt rCsaCognitoUserPool.Arn
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+
+  # Custom Resource Lambda to attach Pre Token trigger to UserPool
+  # Uses AWS::Lambda::Function (not SAM) because InlineCode requires it
+  rCsaAttachPreTokenTriggerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${pSolutionName}-attach-pretoken-trigger'
+      Runtime: python3.12
+      Timeout: 30
+      Role: !GetAtt rCsaAttachPreTokenTriggerRole.Arn
+      Handler: index.handler
+      Code:
+        ZipFile: |
+          import boto3, json
+          import cfnresponse
+          def handler(event, context):
+            try:
+              client = boto3.client('cognito-idp')
+              user_pool_id = event['ResourceProperties']['UserPoolId']
+              lambda_arn = event['ResourceProperties']['LambdaArn']
+              if event['RequestType'] in ('Create', 'Update'):
+                pool = client.describe_user_pool(UserPoolId=user_pool_id)['UserPool']
+                triggers = pool.get('LambdaConfig', {})
+                triggers['PreTokenGeneration'] = lambda_arn
+                client.update_user_pool(UserPoolId=user_pool_id, LambdaConfig=triggers)
+              elif event['RequestType'] == 'Delete':
+                pool = client.describe_user_pool(UserPoolId=user_pool_id)['UserPool']
+                triggers = pool.get('LambdaConfig', {})
+                triggers.pop('PreTokenGeneration', None)
+                client.update_user_pool(UserPoolId=user_pool_id, LambdaConfig=triggers)
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            except Exception as e:
+              print(str(e))
+              cfnresponse.send(event, context, cfnresponse.FAILED, {'Error': str(e)})
+
+  rCsaAttachPreTokenTrigger:
+    Type: AWS::CloudFormation::CustomResource
+    DependsOn:
+      - rCsaPreTokenFunctionPermission
+    Properties:
+      ServiceToken: !GetAtt rCsaAttachPreTokenTriggerFunction.Arn
+      UserPoolId: !Ref rCsaCognitoUserPool
+      LambdaArn: !GetAtt rCsaPreTokenFunction.Arn
+
+  # Lambda function to process SQS messages
+  rCsaProcessMessages:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: The solution requires a static name for this resource
+          - id: W11
+            reason: This role needs to be able to access any resource
+    Properties:
+      FunctionName: !Sub '${pSolutionName}-process-messages'
+      CodeUri: src/process_messages/
+      Handler: app.lambda_handler
+      ReservedConcurrentExecutions: !Ref pLambdaConcurrency
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref pExistingLambdaSecurityGroupId
+        SubnetIds: !Ref pPrivateSubnetIds
+      Environment:
+        Variables:
+          DYNAMODB_TABLE_NAME: !Ref rCsaJobsTable
+          QUEUE_URL: !Ref rCsaNotificationQueue
+          SOLUTION_NAME: !Ref pSolutionName
+          APP_ACCESS_TABLE: !Ref rCsaAppAccessTable
+          USER_ROLES_TABLE: !Ref rCsaUserRolesTable
+          INSTANCE_CATALOG_TABLE: !Ref rCsaInstanceCatalogTable
+          DLQ_URL: !Ref rCsaNotificationDlq
+          COGNITO_DOMAIN: !Sub 'https://${rCsaCognitoUserPoolDomain}.auth.${AWS::Region}.amazoncognito.com'
+          COGNITO_CLIENT_ID: !Ref rCsaCognitoPublicUserPoolClient
+          COGNITO_REDIRECT_URI: !Sub 'https://${rCsaApi}.execute-api.${AWS::Region}.amazonaws.com/${pStage}/auth/callback'
+          CROSS_ACCOUNT_ROLE_NAME: !Ref pCrossAccountRoleName
+          UPLOADS_S3_BUCKET: !Ref rCsaSchedulerBucket
+          UPLOADS_S3_PREFIX: uploads/
+          UPLOADS_PRESIGN_EXPIRY: '300'
+          UPLOADS_MAX_BYTES: '104857600'
+          COGNITO_USER_POOL_ID: !Ref rCsaCognitoUserPool
+          UI_LOGINS_TABLE: !Ref rCsaUiLoginsTable
+          UI_SESSION_SECRET: !Ref pUiSessionSecret
+          UI_SESSION_TTL_SECONDS: '28800'
+          DYNATRACE_API_URL: !Ref pDynatraceApiUrl
+          DYNATRACE_FETCH_TOKEN_SECRET_ARN: !If [cCreateDynatraceFetchSecret, !Ref rDynatraceFetchApiToken, !Ref pExistingDynatraceFetchSecretArn]
+          DYNATRACE_TRIGGER_TOKEN_SECRET_ARN: !If [cCreateDynatraceTriggerSecret, !Ref rDynatraceTriggerApiToken, !Ref pExistingDynatraceTriggerSecretArn]
+          DYNATRACE_SYNTHETIC_FETCH_TOKEN_SECRET_ARN: !If [cCreateDynatraceSyntheticFetchSecret, !Ref rDynatraceSyntheticFetchApiToken, !Ref pExistingDynatraceSyntheticFetchSecretArn]
+          DYNATRACE_CATALOG_S3_KEY: app-catalogs/dynatrace-monitor-catalog.csv
+          TIDAL_AGENT_MAPPING_TABLE: !Ref rCsaTidalAgentMappingTable
+          HEALTHCHECK_DOCUMENT_NAME: !Ref pHealthcheckDocumentName
+          SHAREPOINT_APP_SECRET_ARN: !Ref pSharePointAppSecretArn
+          DR_RUN_LOG_TABLE: !Ref rCsaDrRunLogTable
+          DR_TOKENS_TABLE: !Ref rCsaDrTokensTable
+          GDBA_ACCESS_TABLE: !Ref rCsaGdbaAccessTable
+          TEAM_CAPABILITIES_TABLE: !Ref rCsaTeamCapabilitiesTable
+          # Same thresholds for every AG — deploy-time parameters, not a
+          # per-AG DynamoDB table. See pDrMaxLogQueueKB etc. in Parameters.
+          DR_MAX_LOG_QUEUE_KB: !Ref pDrMaxLogQueueKB
+          DR_MAX_TXN_MINUTES: !Ref pDrMaxTxnMinutes
+          DR_CONFIRM_TIMEOUT_SEC: !Ref pDrConfirmTimeoutSec
+          DR_POLL_INTERVAL_SEC: !Ref pDrPollIntervalSec
+          DR_REPLICA_OVERRIDES_JSON: !Ref pDrReplicaOverridesJson
+          DR_TEST_SQL_CREDENTIALS_SECRET_ARN: !If [cCreateDrTestSqlCredentialsSecret, !Ref rDrTestSqlCredentials, !Ref pExistingDrTestSqlCredentialsSecretArn]
+          TEAMS_APPROVE_SHARED_SECRET_SECRET_ARN: !If [cCreateTeamsApproveSharedSecret, !Ref rTeamsApproveSharedSecret, !Ref pExistingTeamsApproveSharedSecretArn]
+          TEAMS_DR_APPROVAL_WEBHOOK_URL_SECRET_ARN: !If [cCreateTeamsDrApprovalWebhookUrlSecret, !Ref rTeamsDrApprovalWebhookUrl, !Ref pExistingTeamsDrApprovalWebhookUrlSecretArn]
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt rCsaNotificationQueue.Arn
+            BatchSize: 10
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ec2:CreateNetworkInterface
+                - ec2:DescribeNetworkInterfaces
+                - ec2:DeleteNetworkInterface
+                - ec2:AssignPrivateIpAddresses
+                - ec2:UnassignPrivateIpAddresses
+              Resource: '*'
+        - Version: '2012-10-17'
+          Statement:
+            # ============================================================
+            # CONSOLIDATED: full CRUD on every runstack-* table + its GSIs,
+            # one statement. Any new table (and any new capability needed
+            # on an existing one, including InstanceCatalog/UiLogins) is
+            # covered automatically — no IAM edit or ServiceNow ticket
+            # needed when tables are added. Replaces the 7 individual
+            # DynamoDBCrudPolicy/ReadPolicy/WritePolicy entries plus the
+            # AppAccess/InstanceCatalog/UserRoles/UiLogins statements this
+            # Lambda used to carry.
+            # ============================================================
+            - Sid: RunStackDynamoDBAllTables
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+                - dynamodb:Scan
+                - dynamodb:BatchGetItem
+                - dynamodb:BatchWriteItem
+                - dynamodb:DescribeTable
+                - dynamodb:ConditionCheckItem
+              Resource:
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/runstack-*'
+                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/runstack-*/index/*'
+        - Version: '2012-10-17'
+          Statement:
+            # Added to match production — used for the admin cognito-groups
+            # lookup endpoints (list groups / members of a group).
+            - Sid: RunStackListCognitoGroups
+              Effect: Allow
+              Action:
+                - cognito-idp:ListGroups
+                - cognito-idp:ListUsersInGroup
+              Resource: !GetAtt rCsaCognitoUserPool.Arn
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: RunStackBatchHealthcheckSsm
+              Effect: Allow
+              Action:
+                - ssm:SendCommand
+                - ssm:GetCommandInvocation
+              Resource: '*'
+            # NOTE: SharePoint client_secret is currently hardcoded in app.py
+            # for local testing (SHAREPOINT_CLIENT_SECRET_HARDCODED). Once the
+            # real Secrets Manager secret exists, set pSharePointAppSecretArn
+            # to its ARN and add back:
+            #   - Sid: RunStackSharePointSecretRead
+            #     Effect: Allow
+            #     Action:
+            #       - secretsmanager:GetSecretValue
+            #     Resource: !Ref pSharePointAppSecretArn
+            # ^ done — runstack-sharepoint-app-secret now exists. Wrapped in
+            # Fn::If (rather than an unconditional statement) so this is
+            # omitted entirely when pSharePointAppSecretArn is blank, instead
+            # of being included with Resource: "" — an invalid empty ARN that
+            # sat unnoticed in the live IAM policy until CloudFormation's
+            # newer early-validation hook started flagging it.
+            - !If
+              - cSharePointSecretConfigured
+              - Sid: RunStackSharePointSecretRead
+                Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref pSharePointAppSecretArn
+              - !Ref AWS::NoValue
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: '*'
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: RunStackUIPermissions
+              Effect: Allow
+              Action:
+                - ssm:ListDocuments
+                - ssm:DescribeDocument
+                - ssm:GetDocument
+                - events:ListRules
+                - events:ListTargetsByRule
+                - events:PutRule
+                - events:PutTargets
+                - events:DeleteRule
+                - events:RemoveTargets
+                - events:DescribeRule
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                - sqs:GetQueueAttributes
+              Resource: '*'
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: RunStackAssessPermissions
+              Effect: Allow
+              Action:
+                - ssm:SendCommand
+                - ssm:GetCommandInvocation
+                - ssm:ListCommandInvocations
+              Resource: '*'
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: RunStackCrossAccountAssess
+              Effect: Allow
+              Action:
+                - sts:AssumeRole
+              Resource: !Sub 'arn:aws:iam::*:role/${pCrossAccountRoleName}'
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource: !GetAtt rCsaNotificationQueue.Arn
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: RunStackUploadsPermissions
+              Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+                - s3:DeleteObject
+              Resource: !Sub '${rCsaSchedulerBucket.Arn}/uploads/*'
+            - Effect: Allow
+              Action:
+                - s3:ListBucket
+              Resource: !GetAtt rCsaSchedulerBucket.Arn
+              Condition:
+                StringLike:
+                  's3:prefix': 'uploads/*'
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: RunStackUserRoleManagement
+              Effect: Allow
+              Action:
+                - cognito-idp:ListUsers
+                - cognito-idp:AdminListGroupsForUser
+                - cognito-idp:AdminAddUserToGroup
+                - cognito-idp:AdminRemoveUserFromGroup
+              Resource: !GetAtt rCsaCognitoUserPool.Arn
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: RunStackDynatraceFetchTokenRead
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !If [cCreateDynatraceFetchSecret, !Ref rDynatraceFetchApiToken, !Ref pExistingDynatraceFetchSecretArn]
+            - Sid: RunStackDynatraceTriggerTokenRead
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !If [cCreateDynatraceTriggerSecret, !Ref rDynatraceTriggerApiToken, !Ref pExistingDynatraceTriggerSecretArn]
+            - Sid: RunStackDynatraceSyntheticFetchTokenRead
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !If [cCreateDynatraceSyntheticFetchSecret, !Ref rDynatraceSyntheticFetchApiToken, !Ref pExistingDynatraceSyntheticFetchSecretArn]
+            - Sid: RunStackDynatraceCatalogRead
+              Effect: Allow
+              Action:
+                - s3:GetObject
+              Resource: !Sub '${rCsaSchedulerBucket.Arn}/app-catalogs/*'
+            - Sid: RunStackDrTestSqlCredentialsRead
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !If [cCreateDrTestSqlCredentialsSecret, !Ref rDrTestSqlCredentials, !Ref pExistingDrTestSqlCredentialsSecretArn]
+            - Sid: RunStackTeamsApproveSharedSecretRead
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !If [cCreateTeamsApproveSharedSecret, !Ref rTeamsApproveSharedSecret, !Ref pExistingTeamsApproveSharedSecretArn]
+            - Sid: RunStackTeamsDrApprovalWebhookUrlRead
+              Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource: !If [cCreateTeamsDrApprovalWebhookUrlSecret, !Ref rTeamsDrApprovalWebhookUrl, !Ref pExistingTeamsDrApprovalWebhookUrlSecretArn]
+
+  # Lambda function to process DynamoDB streams
+  rCsaProcessJobs:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: The solution requires a static name for this resource
+          - id: W11
+            reason: This role needs to be able to access any resource
+    Properties:
+      FunctionName: !Sub '${pSolutionName}-process-jobs'
+      CodeUri: src/process_jobs/
+      Handler: app.lambda_handler
+      ReservedConcurrentExecutions: !Ref pLambdaConcurrency
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref pExistingLambdaSecurityGroupId
+        SubnetIds: !Ref pPrivateSubnetIds
+      Environment:
+        Variables:
+          STEP_FUNCTION_ARN: !Ref rCsaWorkflow
+      Events:
+        DynamoDBStream:
+          Type: DynamoDB
+          Properties:
+            Stream: !GetAtt rCsaJobsTable.StreamArn
+            StartingPosition: LATEST
+            BatchSize: 10
+            MaximumBatchingWindowInSeconds: 5
+            ParallelizationFactor: 2
+            MaximumRetryAttempts: 3
+            BisectBatchOnFunctionError: true
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ec2:CreateNetworkInterface
+                - ec2:DescribeNetworkInterfaces
+                - ec2:DeleteNetworkInterface
+                - ec2:AssignPrivateIpAddresses
+                - ec2:UnassignPrivateIpAddresses
+              Resource: '*'
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - states:StartExecution
+              Resource: !Ref rCsaWorkflow
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: '*'
+
+  # S3 Bucket for scheduler instance lists and SSM outputs
+  rCsaSchedulerBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub '${pSolutionName}-job-scheduler-${AWS::AccountId}-${AWS::Region}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            Status: Enabled
+            NoncurrentVersionExpirationInDays: 30
+
+  # S3 Bucket Policy to allow cross-account SSM to write outputs
+  #rCsaSchedulerBucketPolicy:
+  #  Type: AWS::S3::BucketPolicy
+  #  Properties:
+  #    Bucket: !Ref rCsaSchedulerBucket
+  #    PolicyDocument:
+  #      Version: '2012-10-17'
+  #      Statement:
+  #        - Sid: AllowCrossAccountSSMOutputs
+  #          Effect: Allow
+  #          Principal:
+  #            AWS: !Sub 'arn:aws:iam::*:role/${pCrossAccountRoleName}'
+  #          Action:
+  #            - s3:PutObject
+  #            - s3:PutObjectAcl
+  #            - s3:GetObject
+  #          Resource: !Sub '${rCsaSchedulerBucket.Arn}/ssm-outputs/*'
+  #        - Sid: AllowCrossAccountBucketAccess
+  #          Effect: Allow
+  #          Principal:
+  #            AWS: !Sub 'arn:aws:iam::*:role/${pCrossAccountRoleName}'
+  #          Action:
+  #            - s3:GetBucketLocation
+  #            - s3:ListBucket
+  #          Resource: !GetAtt rCsaSchedulerBucket.Arn
+
+  # Lambda function for scheduled automation
+  rCsaJobScheduler:
+    Type: AWS::Serverless::Function
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: The solution requires a static name for this resource
+    Properties:
+      FunctionName: !Sub '${pSolutionName}-job-scheduler'
+      CodeUri: src/scheduler/
+      Handler: app.lambda_handler
+      ReservedConcurrentExecutions: !Ref pLambdaConcurrency
+      VpcConfig:
+        SecurityGroupIds:
+          - !Ref pExistingLambdaSecurityGroupId
+        SubnetIds: !Ref pPrivateSubnetIds
+      Environment:
+        Variables:
+          SQS_QUEUE_URL: !Ref rCsaNotificationQueue
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - ec2:CreateNetworkInterface
+                - ec2:DescribeNetworkInterfaces
+                - ec2:DeleteNetworkInterface
+                - ec2:AssignPrivateIpAddresses
+                - ec2:UnassignPrivateIpAddresses
+              Resource: '*'
+        - S3ReadPolicy:
+            BucketName: !Ref rCsaSchedulerBucket
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt rCsaNotificationQueue.QueueName
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: '*'
+
+  # IAM Role for Step Function
+  rCsaWorkflowRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W11
+            reason: This role needs to be able to access any resource for cross-account operations
+          - id: W28
+            reason: The solution requires a static name for this resource
+    Properties:
+      RoleName: !Sub '${pSolutionName}-workflow-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: workflow-policy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                  - dynamodb:GetItem
+                Resource: !GetAtt rCsaJobsTable.Arn
+              - Effect: Allow
+                Action:
+                  - sts:AssumeRole
+                Resource: !Sub 'arn:aws:iam::*:role/${pCrossAccountRoleName}'
+              - Effect: Allow
+                Action:
+                  - ssm:StartAutomationExecution
+                  - ssm:SendCommand
+                  - ssm:Get*
+                  - ssm:Describe*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeInstances
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: !Ref rCsaNotificationTopic
+
+  # Secrets Manager secrets holding the two Dynatrace API tokens used by the
+  # /synthetic/execute and /synthetic/{jobId} endpoints — Dynatrace commonly
+  # scopes a read-only token (fetch monitors) separately from a token that
+  # can trigger executions. Each is only created when its corresponding
+  # pExistingDynatrace*SecretArn param is blank. Initial values are
+  # placeholders — after deploy, update them with:
+  #   aws secretsmanager put-secret-value --secret-id <name> --secret-string '<token>'
+  rDynatraceFetchApiToken:
+    Type: AWS::SecretsManager::Secret
+    Condition: cCreateDynatraceFetchSecret
+    Properties:
+      Name: !Sub '${pSolutionName}-dynatrace-fetch-api-token'
+      Description: Dynatrace API token (Api-Token auth) used to fetch/resolve synthetic monitors
+      SecretString: 'REPLACE_ME_AFTER_DEPLOY'
+
+  rDynatraceTriggerApiToken:
+    Type: AWS::SecretsManager::Secret
+    Condition: cCreateDynatraceTriggerSecret
+    Properties:
+      Name: !Sub '${pSolutionName}-dynatrace-trigger-api-token'
+      Description: Dynatrace API token (Api-Token auth) used to trigger synthetic monitor executions and poll status
+      SecretString: 'REPLACE_ME_AFTER_DEPLOY'
+
+  rDynatraceSyntheticFetchApiToken:
+    Type: AWS::SecretsManager::Secret
+    Condition: cCreateDynatraceSyntheticFetchSecret
+    Properties:
+      Name: !Sub '${pSolutionName}-dynatrace-synthetic-fetch-api-token'
+      Description: Dynatrace API token (Api-Token auth) used to fetch/resolve synthetic monitors specifically
+      SecretString: 'REPLACE_ME_AFTER_DEPLOY'
+
+  # DR test SQL credentials + Teams approval secrets — same
+  # create-unless-existing-ARN-supplied pattern as the Dynatrace tokens
+  # above. Initial values are placeholders — after deploy, update with:
+  #   aws secretsmanager put-secret-value --secret-id <name> --secret-string '<value>'
+  rDrTestSqlCredentials:
+    Type: AWS::SecretsManager::Secret
+    Condition: cCreateDrTestSqlCredentialsSecret
+    Properties:
+      Name: !Sub '${pSolutionName}-dr-test-sql-credentials'
+      Description: JSON {"username":"...","password":"..."} for the DR failover test SQL account
+      SecretString: '{"username":"REPLACE_ME_AFTER_DEPLOY","password":"REPLACE_ME_AFTER_DEPLOY"}'
+
+  rTeamsApproveSharedSecret:
+    Type: AWS::SecretsManager::Secret
+    Condition: cCreateTeamsApproveSharedSecret
+    Properties:
+      Name: !Sub '${pSolutionName}-teams-approve-shared-secret'
+      Description: Shared secret checked on the unauthenticated /dr-failover/{AGName}/approve Teams webhook
+      SecretString: 'REPLACE_ME_AFTER_DEPLOY'
+
+  rTeamsDrApprovalWebhookUrl:
+    Type: AWS::SecretsManager::Secret
+    Condition: cCreateTeamsDrApprovalWebhookUrlSecret
+    Properties:
+      Name: !Sub '${pSolutionName}-teams-dr-approval-webhook-url'
+      Description: Power Automate webhook URL (contains embedded auth signature) for posting the DR approval Teams card
+      SecretString: 'REPLACE_ME_AFTER_DEPLOY'
+
+  # Step Function State Machine
+  rCsaWorkflow:
+    Type: AWS::Serverless::StateMachine
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: The solution requires a static name for this resource
+    Properties:
+      Name: !Sub '${pSolutionName}-workflow'
+      DefinitionUri: src/step_function/workflow.asl.json
+      DefinitionSubstitutions:
+        CrossAccountRoleName: !Ref pCrossAccountRoleName
+        JobsTableName: !Ref rCsaJobsTable
+        MaxRetryAttempts: !Ref pMaxRetryAttempts
+        MaxWaitTimeSeconds: !Ref pMaxWaitTimeSeconds
+        NotificationTopicArn: !Ref rCsaNotificationTopic
+      Role: !GetAtt rCsaWorkflowRole.Arn
+
+  # CloudWatch Alarm for API Gateway Throttling
+  rCsaApiThrottleAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: The solution requires a static name for this resource
+    Properties:
+      AlarmName: !Sub '${pSolutionName}-api-throttle-alarm'
+      AlarmDescription: 'Alarm for API Gateway throttling events'
+      MetricName: 4XXError
+      Namespace: AWS/ApiGateway
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ApiName
+          Value: !Ref rCsaApi
+        - Name: Stage
+          Value: !Ref pStage
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref rCsaNotificationTopic
+
+  # CloudWatch Alarm for Lambda Concurrent Executions
+  rCsaLambdaConcurrencyAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: The solution requires a static name for this resource
+    Properties:
+      AlarmName: !Sub '${pSolutionName}-lambda-concurrency-alarm'
+      AlarmDescription: 'Alarm for Lambda concurrent executions approaching limit'
+      MetricName: ConcurrentExecutions
+      Namespace: AWS/Lambda
+      Statistic: Maximum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: !Ref pLambdaConcurrency
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Ref rCsaNotificationTopic
+
+
+  # ── App Access Table ─────────────────────────────────────────────────────────
+  rCsaAppAccessTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: runstack-app-access
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_email
+          AttributeType: S
+        - AttributeName: app_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_email
+          KeyType: HASH
+        - AttributeName: app_id
+          KeyType: RANGE
+      Tags:
+        - Key: Solution
+          Value: !Ref pSolutionName
+
+  # Split from runstack-app-access: that table is scoping-only (which apps a
+  # user can see). This table is role-only (admin/operator/viewer) — one row
+  # per person, eliminating the "which row do I set role on" ambiguity that
+  # came from storing a global property per-app-row.
+  rCsaUserRolesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: runstack-user-roles
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: user_email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: user_email
+          KeyType: HASH
+      Tags:
+        - Key: Solution
+          Value: !Ref pSolutionName
+
+  # ── UI Local Login Table ──────────────────────────────────────────────────────
+  # Separate from runstack-user-roles / Cognito — used only so the React UI
+  # can identify the person at the browser for button-level role gating in
+  # the UI itself (Admin/Operator/Viewer). Does not affect AzureAD, the
+  # agent, or any machine-token (Dynatrace/EventBridge) flows.
+  rCsaUiLoginsTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: runstack-ui-logins
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: username
+          AttributeType: S
+      KeySchema:
+        - AttributeName: username
+          KeyType: HASH
+      Tags:
+        - Key: Solution
+          Value: !Ref pSolutionName
+
+  # ── Instance Catalog Table ────────────────────────────────────────────────────
+  # Recreated under IaC — was manually created, ITG test data only,
+  # confirmed safe to delete-and-recreate (not production yet). Delete the
+  # manual table/API resources BEFORE deploying this template.
+  # Schema confirmed via live scan: AppId (S, HASH only, no sort key/GSI),
+  # ApplicationName (S), Enabled (BOOL), Agents (L of M: Selection (S), AgentName (S)),
+  # LastUpdated (S).
+  rCsaTidalAgentMappingTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: runstack-tidal-agent-mapping
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: AppId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: AppId
+          KeyType: HASH
+      Tags:
+        - Key: Solution
+          Value: !Ref pSolutionName
+
+  # NOTE: The original rCsaDrConfigTable (per-AG instance identity + thresholds)
+  # was removed. Instance identity (which host is currently Primary/DR replica)
+  # is now derived live from the Dynatrace + SQL role query every time — a
+  # static "east/west" config went stale the moment a failover happened, since
+  # roles flip. Thresholds are the same across all AGs (see pDrMaxLogQueueKB
+  # etc. below), so they're deploy-time parameters, not per-AG DynamoDB rows.
+
+  # ── DR Run Log Table (plan/execute history, queryable by AG) ──────────────────
+  rCsaDrRunLogTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: runstack-dr-run-log
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: run_id
+          AttributeType: S
+        - AttributeName: ag_name
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: run_id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: ag_name-created_at-index
+          KeySchema:
+            - AttributeName: ag_name
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Solution
+          Value: !Ref pSolutionName
+
+  # ── DR Confirmation Tokens (short-lived, TTL-expiring, plan→execute gate) ──────
+  rCsaDrTokensTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      TableName: runstack-dr-confirmation-tokens
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: token
+          AttributeType: S
+      KeySchema:
+        - AttributeName: token
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+      Tags:
+        - Key: Solution
+          Value: !Ref pSolutionName
+
+  # ── GDBA Team Access (capability → scope, single-team table) ──────────────────
+  # PK = capability only (not team_name + capability) — this table is
+  # deliberately scoped to one team. Reusable for any future GDBA activity,
+  # not just DR: add a new capability row, no schema change. `scope` is
+  # either the string "ALL" or a list of resource IDs (AG names today;
+  # instance IDs, app_ids, etc. for future capabilities — the check code
+  # decides what the ID means, not the table).
+  rCsaGdbaAccessTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: runstack-gdba-access
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: capability
+          AttributeType: S
+      KeySchema:
+        - AttributeName: capability
+          KeyType: HASH
+      Tags:
+        - Key: Solution
+          Value: !Ref pSolutionName
+
+  # ── Team Capabilities (generic multi-team access, PK=team, SK=capability) ─────
+  # Generalized successor to rCsaGdbaAccessTable. One row per (team, capability):
+  #   enabled  - bool, whether the capability is currently switched on
+  #   scope    - "ALL" or a list of resource IDs the capability applies to
+  #   updated_by / updated_at - audit fields
+  # A reserved capability value "_meta" holds team-level config on a separate
+  # item: { team, capability: "_meta", cognito_group, description }. This lets
+  # new teams/capabilities be onboarded by adding rows only — no template or
+  # Lambda env var changes required. rCsaGdbaAccessTable is left untouched;
+  # existing GDBA checks keep reading it as-is.
+  rCsaTeamCapabilitiesTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: runstack-team-capabilities
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: team
+          AttributeType: S
+        - AttributeName: capability
+          AttributeType: S
+      KeySchema:
+        - AttributeName: team
+          KeyType: HASH
+        - AttributeName: capability
+          KeyType: RANGE
+      Tags:
+        - Key: Solution
+          Value: !Ref pSolutionName
+
+  rCsaInstanceCatalogTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: runstack-instance-catalog
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: instance_id
+          AttributeType: S
+        - AttributeName: app_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: instance_id
+          KeyType: HASH
+        - AttributeName: app_id
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: app_id-index
+          KeySchema:
+            - AttributeName: app_id
+              KeyType: HASH
+            - AttributeName: instance_id
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Solution
+          Value: !Ref pSolutionName
+
+  # ── Catalog Sync Lambda ───────────────────────────────────────────────────────
+  rCsaCatalogSyncFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub '${pSolutionName}-catalog-sync'
+      CodeUri: src/catalog_sync/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Timeout: 300
+      MemorySize: 256
+      Environment:
+        Variables:
+          INSTANCE_CATALOG_TABLE: !Ref rCsaInstanceCatalogTable
+          CATALOG_S3_BUCKET: !Sub '${pSolutionName}-job-scheduler-${AWS::AccountId}-${AWS::Region}'
+          CATALOG_S3_KEY: app-catalogs/instance-catalog.csv
+          LOG_LEVEL: INFO
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref rCsaInstanceCatalogTable
+        - S3ReadPolicy:
+            BucketName: !Sub '${pSolutionName}-job-scheduler-${AWS::AccountId}-${AWS::Region}'
+      Tags:
+        Solution: !Ref pSolutionName
+
+  # ── Catalog Sync Schedule ─────────────────────────────────────────────────────
+  rCsaCatalogSyncSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${pSolutionName}-catalog-sync-schedule'
+      Description: Daily sync of instance catalog from S3 to DynamoDB
+      ScheduleExpression: cron(0 1 * * ? *)
+      State: ENABLED
+      Targets:
+        - Id: CatalogSyncTarget
+          Arn: !GetAtt rCsaCatalogSyncFunction.Arn
+
+  rCsaCatalogSyncPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt rCsaCatalogSyncFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt rCsaCatalogSyncSchedule.Arn
+
+  # ── API Gateway - GET /app-instances ───────────────────────────────────────────
+  rCsaApiGetAppInstancesMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiAppInstancesResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: '200'
+        - StatusCode: '403'
+        - StatusCode: '500'

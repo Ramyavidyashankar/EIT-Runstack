@@ -1,0 +1,4 @@
+app_id,instance_id,name,account_id,region,environment,description
+App1,i-0555494bdfd9d21ca,ec2-dxcitrundeck-app-itg-us-east-1-01,975050354211,us-east-1,ITG,Rundeck App Server 01
+App1,i-07043b106e0d3f00c,ec2-dxcitrundeck-app-itg-us-east-1-02,975050354211,us-east-1,ITG,Rundeck App Server 02
+App2,i-0e9976e84ddf92031,ec2-sql-server-itg-01,246314649749,us-east-1,ITG,SQL Server 01

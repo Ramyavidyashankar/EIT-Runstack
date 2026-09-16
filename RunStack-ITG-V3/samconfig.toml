@@ -1,0 +1,37 @@
+version = 0.1
+
+[default]
+
+[default.global.parameters]
+stack_name = "runstack-custom-automation"
+region = "us-east-1"
+
+[default.validate.parameters]
+lint = true
+
+[default.sync.parameters]
+watch = true
+
+[default.deploy]
+
+[default.deploy.parameters]
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-2hd2nwqct54g"
+s3_prefix = "runstack-app"
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+confirm_changeset = false
+disable_rollback = false
+
+[default.deploy.parameters.parameter_overrides]
+pNotificationEmail="dxc-it-ore-automation@dxc.com" 
+pVpcId="vpc-09e9048bb52678ea6"
+pPrivateSubnetIds="subnet-03f3ef7f701f66e19,subnet-00007901afbe1055e"
+pRouteTableIds="rtb-06c6d8b9ef10607b6,rtb-0387db9fbb9f38ae1"
+pVpcCidr="10.144.36.64/26"
+pExistingLambdaSecurityGroupId="sg-096b82686c39ad82a"
+pExistingEndpointSecurityGroupId="sg-0c038cabeb67f84ac"
+pUiSessionSecret="c78731603fcd0088a6bd3c54c56dabd26ff73efe3008f31b70f9d2f66373cf28"
+pExistingDrTestSqlCredentialsSecretArn="arn:aws:secretsmanager:us-east-1:246314649749:secret:runstack-dr-test-sql-credentials-ZVI8ap"
+pExistingTeamsApproveSharedSecretArn="arn:aws:secretsmanager:us-east-1:246314649749:secret:runstack-teams-approve-shared-secret-afNGUD"
+pExistingTeamsDrApprovalWebhookUrlSecretArn="arn:aws:secretsmanager:us-east-1:246314649749:secret:runstack-teams-dr-approval-webhook-url-muqmnU"
+pExistingDynatraceSyntheticFetchSecretArn="arn:aws:secretsmanager:us-east-1:246314649749:secret:runstack-dynatrace-synthetic-fetch-api-token-62ENrQ"
+pSharePointAppSecretArn="arn:aws:secretsmanager:us-east-1:246314649749:secret:runstack-sharepoint-app-secret-qHjxQe"

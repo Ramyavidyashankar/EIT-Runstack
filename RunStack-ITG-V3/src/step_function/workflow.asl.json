@@ -1,0 +1,1073 @@
+{
+  "Comment": "RunStack Workflow - SSM Automation and Run Command support with native TargetLocations for cross-region/cross-account execution.",
+  "StartAt": "UpdateExecutionId",
+  "States": {
+    "UpdateExecutionId": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "runstack-jobs-table",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, execution_id = :execution_id, updated_at = :updated_at",
+        "ExpressionAttributeNames": {
+          "#status": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "RUNNING"
+          },
+          ":execution_id": {
+            "S.$": "$$.Execution.Name"
+          },
+          ":updated_at": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Next": "CheckAutomationType",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "UpdateStatusFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "CheckAutomationType": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.automation_type",
+          "StringEquals": "EC2-Action",
+          "Next": "GetEC2Status"
+        },
+        {
+          "Variable": "$.automation_type",
+          "StringEquals": "SSM-Automation",
+          "Next": "SSMAutomationWorkflow"
+        },
+        {
+          "Variable": "$.automation_type",
+          "StringEquals": "SSM-RunCommand",
+          "Next": "SSMRunCommandWorkflow"
+        }
+      ],
+      "Default": "UpdateStatusFailed"
+    },
+    "GetEC2Status": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstances",
+      "Parameters": {
+        "InstanceIds.$": "States.Array($.resource_id)"
+      },
+      "Credentials": {
+        "RoleArn.$": "States.Format('arn:aws:iam::{}:role/runstack-cross-account-role', $.account_id)"
+      },
+      "ResultPath": "$.ec2_result",
+      "Next": "NormalizeEC2Output",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "UpdateStatusFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "NormalizeEC2Output": {
+      "Type": "Pass",
+      "Parameters": [
+        {
+          "job_id.$": "$.job_id",
+          "notification_id.$": "$.notification_id",
+          "account_id.$": "$.account_id",
+          "region.$": "$.region",
+          "resource_id.$": "$.resource_id",
+          "automation_type.$": "$.automation_type",
+          "status": "COMPLETED",
+          "ec2_state.$": "$.ec2_result.Reservations[0].Instances[0].State.Name"
+        }
+      ],
+      "ResultPath": "$",
+      "Next": "UpdateStatusCompletedEC2"
+    },
+    "UpdateStatusCompletedEC2": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "runstack-jobs-table",
+        "Key": {
+          "job_id": {
+            "S.$": "$[0].job_id"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, ec2_state = :ec2_state, updated_at = :updated_at",
+        "ExpressionAttributeNames": {
+          "#status": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "COMPLETED"
+          },
+          ":ec2_state": {
+            "S.$": "$[0].ec2_state"
+          },
+          ":updated_at": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "ResultPath": null,
+      "End": true
+    },
+    "SSMAutomationWorkflow": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "InitializeAutomationRetry",
+          "States": {
+            "InitializeAutomationRetry": {
+              "Type": "Pass",
+              "Parameters": {
+                "retry": 1,
+                "job_id.$": "$.job_id",
+                "notification_id.$": "$.notification_id",
+                "account_id.$": "$.account_id",
+                "region.$": "$.region",
+                "resource_id.$": "$.resource_id",
+                "automation_type.$": "$.automation_type",
+                "automation_data.$": "$.automation_data"
+              },
+              "Next": "CheckAutomationRegion"
+            },
+            "CheckAutomationRegion": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.region",
+                  "StringEquals": "us-east-1",
+                  "Next": "ExecuteSSMAutomationCommand"
+                }
+              ],
+              "Default": "ExecuteSSMAutomationCommandCrossRegion"
+            },
+            "ExecuteSSMAutomationCommand": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:ssm:startAutomationExecution",
+              "Comment": "us-east-1 path - unchanged from original working version. Pure pass-through of automation_data.Parameters. No AutomationAssumeRole injected here.",
+              "Parameters": {
+                "DocumentName.$": "$.automation_data.DocumentName",
+                "DocumentVersion.$": "$.automation_data.DocumentVersion",
+                "Parameters.$": "$.automation_data.Parameters",
+                "TargetParameterName.$": "$.automation_data.TargetParameterName",
+                "Targets.$": "$.automation_data.Targets",
+                "TargetMaps.$": "$.automation_data.TargetMaps",
+                "MaxConcurrency.$": "$.automation_data.MaxConcurrency",
+                "MaxErrors.$": "$.automation_data.MaxErrors",
+                "Tags.$": "$.automation_data.Tags",
+                "ClientToken.$": "$.automation_data.ClientToken",
+                "Mode.$": "$.automation_data.Mode"
+              },
+              "Credentials": {
+                "RoleArn.$": "States.Format('arn:aws:iam::{}:role/runstack-cross-account-role', $.account_id)"
+              },
+              "ResultPath": "$.command_result",
+              "Next": "WaitForAutomationCommand",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "CheckAutomationRetry",
+                  "ResultPath": "$.error"
+                }
+              ]
+            },
+            "ExecuteSSMAutomationCommandCrossRegion": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:ssm:startAutomationExecution",
+              "Comment": "Cross-region path via native TargetLocations. AutomationAssumeRole is auto-injected as the central admin role - caller never needs to set it.",
+              "Parameters": {
+                "DocumentName.$": "$.automation_data.DocumentName",
+                "DocumentVersion.$": "$.automation_data.DocumentVersion",
+                "Parameters": {
+                  "InstanceId.$": "$.automation_data.Parameters.InstanceId",
+                  "AutomationAssumeRole": [
+                    "arn:aws:iam::246314649749:role/AWS-SystemsManager-AutomationAdministrationRole"
+                  ]
+                },
+                "TargetParameterName.$": "$.automation_data.TargetParameterName",
+                "Targets.$": "$.automation_data.Targets",
+                "TargetMaps.$": "$.automation_data.TargetMaps",
+                "TargetLocations.$": "$.automation_data.TargetLocations",
+                "MaxConcurrency.$": "$.automation_data.MaxConcurrency",
+                "MaxErrors.$": "$.automation_data.MaxErrors",
+                "Tags.$": "$.automation_data.Tags",
+                "ClientToken.$": "$.automation_data.ClientToken",
+                "Mode.$": "$.automation_data.Mode"
+              },
+              "Credentials": {
+                "RoleArn": "arn:aws:iam::246314649749:role/runstack-cross-account-role"
+              },
+              "ResultPath": "$.command_result",
+              "Next": "WaitForAutomationCommand",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "CheckAutomationRetry",
+                  "ResultPath": "$.error"
+                }
+              ]
+            },
+            "WaitForAutomationCommand": {
+              "Type": "Wait",
+              "Seconds": 30,
+              "Next": "CheckAutomationRegionForMonitor"
+            },
+            "CheckAutomationRegionForMonitor": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.region",
+                  "StringEquals": "us-east-1",
+                  "Next": "MonitorSSMAutomationCommand"
+                }
+              ],
+              "Default": "MonitorSSMAutomationCommandCentral"
+            },
+            "MonitorSSMAutomationCommand": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:ssm:getAutomationExecution",
+              "Parameters": {
+                "AutomationExecutionId.$": "$.command_result.AutomationExecutionId"
+              },
+              "Credentials": {
+                "RoleArn.$": "States.Format('arn:aws:iam::{}:role/runstack-cross-account-role', $.account_id)"
+              },
+              "ResultPath": "$.automation_status",
+              "Next": "CheckAutomationStatus",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "CheckAutomationRetry",
+                  "ResultPath": "$.error"
+                }
+              ]
+            },
+            "MonitorSSMAutomationCommandCentral": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:ssm:getAutomationExecution",
+              "Parameters": {
+                "AutomationExecutionId.$": "$.command_result.AutomationExecutionId"
+              },
+              "Credentials": {
+                "RoleArn": "arn:aws:iam::246314649749:role/runstack-cross-account-role"
+              },
+              "ResultPath": "$.automation_status",
+              "Next": "CheckAutomationStatus",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "CheckAutomationRetry",
+                  "ResultPath": "$.error"
+                }
+              ]
+            },
+            "CheckAutomationStatus": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.automation_status.AutomationExecution.AutomationExecutionStatus",
+                  "StringEquals": "Success",
+                  "Next": "CheckIfChildOutputNeeded"
+                },
+                {
+                  "Or": [
+                    {
+                      "Variable": "$.automation_status.AutomationExecution.AutomationExecutionStatus",
+                      "StringEquals": "InProgress"
+                    },
+                    {
+                      "Variable": "$.automation_status.AutomationExecution.AutomationExecutionStatus",
+                      "StringEquals": "Pending"
+                    },
+                    {
+                      "Variable": "$.automation_status.AutomationExecution.AutomationExecutionStatus",
+                      "StringEquals": "Waiting"
+                    }
+                  ],
+                  "Next": "WaitForAutomationCommand"
+                }
+              ],
+              "Default": "CheckAutomationRetry"
+            },
+            "CheckIfChildOutputNeeded": {
+              "Type": "Choice",
+              "Comment": "For us-east-1, the parent StepExecutions already contains the real output. For cross-region, the parent only has a pointer (ExecutionId) - fetch the child execution to get the real output.",
+              "Choices": [
+                {
+                  "Variable": "$.region",
+                  "StringEquals": "us-east-1",
+                  "Next": "AutomationCompleted"
+                }
+              ],
+              "Default": "GetChildAutomationOutput"
+            },
+            "GetChildAutomationOutput": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Comment": "Step Functions cannot make cross-region SDK calls natively, so this proxies through the existing runstack-ssm-region-proxy Lambda, which can target any region via boto3.",
+              "Parameters": {
+                "FunctionName": "arn:aws:lambda:us-east-1:246314649749:function:runstack-ssm-region-proxy",
+                "Payload": {
+                  "action": "get_child_output",
+                  "account_id.$": "$.account_id",
+                  "region.$": "$.region",
+                  "execution_id.$": "$.automation_status.AutomationExecution.StepExecutions[0].Outputs.ExecutionId[0]"
+                }
+              },
+              "ResultSelector": {
+                "AutomationExecution.$": "$.Payload.AutomationExecution"
+              },
+              "ResultPath": "$.child_automation_status",
+              "Next": "AutomationCompleted",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "AutomationCompleted",
+                  "ResultPath": "$.child_output_error"
+                }
+              ]
+            },
+            "AutomationCompleted": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Or": [
+                    {
+                      "Variable": "$.automation_data.DocumentName",
+                      "StringEquals": "AWS-StartEC2Instance"
+                    },
+                    {
+                      "Variable": "$.automation_data.DocumentName",
+                      "StringEquals": "AWS-StopEC2Instance"
+                    }
+                  ],
+                  "Next": "WaitForEC2Validation"
+                },
+                {
+                  "IsPresent": true,
+                  "Variable": "$.child_output_error",
+                  "Next": "SetWestOutputFailed"
+                }
+              ],
+              "Default": "AutomationCompletedFinal"
+            },
+            "WaitForEC2Validation": {
+              "Type": "Wait",
+              "Seconds": 20,
+              "Next": "CheckRegionForEC2Validation"
+            },
+            "CheckRegionForEC2Validation": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.region",
+                  "StringEquals": "us-east-1",
+                  "Next": "ValidateEC2State"
+                }
+              ],
+              "Default": "ValidateEC2StateCentral"
+            },
+            "ValidateEC2State": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstances",
+              "Parameters": {
+                "InstanceIds.$": "States.Array($.resource_id)"
+              },
+              "Credentials": {
+                "RoleArn.$": "States.Format('arn:aws:iam::{}:role/runstack-cross-account-role', $.account_id)"
+              },
+              "ResultPath": "$.ec2_validation",
+              "Next": "CheckValidatedState"
+            },
+            "ValidateEC2StateCentral": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstances",
+              "Parameters": {
+                "InstanceIds.$": "States.Array($.resource_id)"
+              },
+              "Credentials": {
+                "RoleArn": "arn:aws:iam::246314649749:role/runstack-cross-account-role"
+              },
+              "ResultPath": "$.ec2_validation",
+              "Next": "CheckValidatedState"
+            },
+            "CheckValidatedState": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "And": [
+                    {
+                      "Variable": "$.automation_data.DocumentName",
+                      "StringEquals": "AWS-StartEC2Instance"
+                    },
+                    {
+                      "Variable": "$.ec2_validation.Reservations[0].Instances[0].State.Name",
+                      "StringEquals": "running"
+                    }
+                  ],
+                  "Next": "AutomationCompletedWithEC2Validation"
+                },
+                {
+                  "And": [
+                    {
+                      "Variable": "$.automation_data.DocumentName",
+                      "StringEquals": "AWS-StopEC2Instance"
+                    },
+                    {
+                      "Variable": "$.ec2_validation.Reservations[0].Instances[0].State.Name",
+                      "StringEquals": "stopped"
+                    }
+                  ],
+                  "Next": "AutomationCompletedWithEC2Validation"
+                }
+              ],
+              "Default": "WaitForEC2Validation"
+            },
+            "AutomationCompletedFinal": {
+              "Type": "Choice",
+              "Comment": "Route to the correct output source - east reads directly from the parent's StepExecutions, west reads from the child execution fetched via Lambda.",
+              "Choices": [
+                {
+                  "Variable": "$.region",
+                  "StringEquals": "us-east-1",
+                  "Next": "SetEastOutput"
+                }
+              ],
+              "Default": "SetWestOutput"
+            },
+            "SetEastOutput": {
+              "Type": "Pass",
+              "Parameters": {
+                "job_id.$": "$.job_id",
+                "notification_id.$": "$.notification_id",
+                "status": "COMPLETED",
+                "qualys_output.$": "$.automation_status.AutomationExecution.StepExecutions[0].Outputs.Output[0]",
+                "exit_code": -1
+              },
+              "End": true
+            },
+            "SetWestOutput": {
+              "Type": "Pass",
+              "Parameters": {
+                "job_id.$": "$.job_id",
+                "notification_id.$": "$.notification_id",
+                "status": "COMPLETED",
+                "qualys_output.$": "$.child_automation_status.AutomationExecution.StepExecutions[0].Outputs.Output[0]",
+                "exit_code": -1
+              },
+              "End": true
+            },
+            "SetWestOutputFailed": {
+              "Type": "Pass",
+              "Comment": "Safety fallback - automation itself succeeded, but the child output lookup failed (e.g. Lambda error). Complete the job without crashing the whole execution.",
+              "Parameters": {
+                "job_id.$": "$.job_id",
+                "notification_id.$": "$.notification_id",
+                "status": "COMPLETED",
+                "qualys_output": "Automation succeeded but output could not be retrieved due to a cross-region lookup error.",
+                "exit_code": -1
+              },
+              "End": true
+            },
+            "AutomationFailed": {
+              "Type": "Pass",
+              "Parameters": {
+                "job_id.$": "$.job_id",
+                "notification_id.$": "$.notification_id",
+                "status": "FAILED"
+              },
+              "Next": "FailAutomationWorkflow"
+            },
+            "FailAutomationWorkflow": {
+              "Type": "Fail",
+              "Cause": "Automation execution failed after 1 retry attempts"
+            },
+            "AutomationCompletedWithEC2Validation": {
+              "Type": "Pass",
+              "Parameters": {
+                "job_id.$": "$.job_id",
+                "notification_id.$": "$.notification_id",
+                "status": "COMPLETED",
+                "qualys_output": "",
+                "ec2_state.$": "$.ec2_validation.Reservations[0].Instances[0].State.Name",
+                "exit_code": -1
+              },
+              "End": true
+            },
+            "CheckAutomationRetry": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.retry",
+                  "NumericLessThan": 1,
+                  "Next": "IncrementAutomationRetry"
+                }
+              ],
+              "Default": "AutomationFailed"
+            },
+            "IncrementAutomationRetry": {
+              "Type": "Pass",
+              "Parameters": {
+                "retry.$": "States.MathAdd($.retry, 1)",
+                "job_id.$": "$.job_id",
+                "notification_id.$": "$.notification_id",
+                "account_id.$": "$.account_id",
+                "region.$": "$.region",
+                "resource_id.$": "$.resource_id",
+                "automation_type.$": "$.automation_type",
+                "automation_data.$": "$.automation_data"
+              },
+              "Next": "CheckAutomationRegion"
+            }
+          }
+        }
+      ],
+      "Next": "UpdateStatusCompleted",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "UpdateStatusFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "SSMRunCommandWorkflow": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "InitializeCommandRetry",
+          "States": {
+            "InitializeCommandRetry": {
+              "Type": "Pass",
+              "Parameters": {
+                "retry": 1,
+                "job_id.$": "$.job_id",
+                "notification_id.$": "$.notification_id",
+                "account_id.$": "$.account_id",
+                "region.$": "$.region",
+                "resource_id.$": "$.resource_id",
+                "automation_type.$": "$.automation_type",
+                "automation_data.$": "$.automation_data"
+              },
+              "Next": "CheckRegionForDispatch"
+            },
+            "CheckRegionForDispatch": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.region",
+                  "StringEquals": "us-east-1",
+                  "Next": "ExecuteSSMRunCommand"
+                }
+              ],
+              "Default": "ExecuteSSMRunCommandCrossRegion"
+            },
+            "ExecuteSSMRunCommand": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:ssm:sendCommand",
+              "Parameters": {
+                "AlarmConfiguration.$": "$.automation_data.AlarmConfiguration",
+                "CloudWatchOutputConfig.$": "$.automation_data.CloudWatchOutputConfig",
+                "Comment.$": "$.automation_data.Comment",
+                "DocumentHash.$": "$.automation_data.DocumentHash",
+                "DocumentHashType.$": "$.automation_data.DocumentHashType",
+                "DocumentName.$": "$.automation_data.DocumentName",
+                "DocumentVersion.$": "$.automation_data.DocumentVersion",
+                "InstanceIds.$": "$.automation_data.InstanceIds",
+                "MaxConcurrency.$": "$.automation_data.MaxConcurrency",
+                "MaxErrors.$": "$.automation_data.MaxErrors",
+                "NotificationConfig.$": "$.automation_data.NotificationConfig",
+                "OutputS3BucketName.$": "$.automation_data.OutputS3BucketName",
+                "OutputS3KeyPrefix.$": "$.automation_data.OutputS3KeyPrefix",
+                "OutputS3Region.$": "$.automation_data.OutputS3Region",
+                "Parameters.$": "$.automation_data.Parameters",
+                "ServiceRoleArn.$": "$.automation_data.ServiceRoleArn",
+                "Targets.$": "$.automation_data.Targets",
+                "TimeoutSeconds.$": "$.automation_data.TimeoutSeconds"
+              },
+              "Credentials": {
+                "RoleArn.$": "States.Format('arn:aws:iam::{}:role/runstack-cross-account-role', $.account_id)"
+              },
+              "ResultPath": "$.command_result",
+              "Next": "WaitForCommand",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "CheckCommandRetry",
+                  "ResultPath": "$.error"
+                }
+              ]
+            },
+            "ExecuteSSMRunCommandCrossRegion": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:ssm:startAutomationExecution",
+              "Comment": "Cross-region RunCommand executes via a wrapper Automation document using native TargetLocations. StartAutomationExecution's Parameters field is always Map<String,List<String>> at the API level regardless of the document's own declared parameter types - every value must be array-wrapped, and StringMap-typed parameters (CommandParameters) must be a single-element array containing a JSON-encoded string.",
+              "Parameters": {
+                "DocumentName": "RunStack-Generic-RunCommand-Wrapper",
+                "Parameters": {
+                  "TargetDocumentName.$": "States.Array($.automation_data.TargetDocumentName)",
+                  "InstanceId.$": "$.automation_data.InstanceIds",
+                  "CommandParameters.$": "States.Array(States.JsonToString($.automation_data.Parameters))",
+                  "AutomationAssumeRole": [
+                    "arn:aws:iam::246314649749:role/AWS-SystemsManager-AutomationAdministrationRole"
+                  ]
+                },
+                "TargetLocations.$": "$.automation_data.TargetLocations"
+              },
+              "Credentials": {
+                "RoleArn": "arn:aws:iam::246314649749:role/runstack-cross-account-role"
+              },
+              "ResultPath": "$.command_result",
+              "Next": "WaitForCommand",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "CheckCommandRetry",
+                  "ResultPath": "$.error"
+                }
+              ]
+            },
+            "WaitForCommand": {
+              "Type": "Wait",
+              "Seconds": 30,
+              "Next": "CheckRegionForMonitor"
+            },
+            "CheckRegionForMonitor": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.region",
+                  "StringEquals": "us-east-1",
+                  "Next": "MonitorSSMRunCommand"
+                }
+              ],
+              "Default": "MonitorSSMRunCommandCrossRegion"
+            },
+            "MonitorSSMRunCommand": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:ssm:getCommandInvocation",
+              "Parameters": {
+                "CommandId.$": "$.command_result.Command.CommandId",
+                "InstanceId.$": "$.resource_id"
+              },
+              "Credentials": {
+                "RoleArn.$": "States.Format('arn:aws:iam::{}:role/runstack-cross-account-role', $.account_id)"
+              },
+              "ResultPath": "$.command_status",
+              "Next": "CheckCommandStatus",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "CheckCommandRetry",
+                  "ResultPath": "$.error"
+                }
+              ]
+            },
+            "MonitorSSMRunCommandCrossRegion": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::aws-sdk:ssm:getAutomationExecution",
+              "Comment": "Monitors the wrapper Automation execution (central account) rather than a direct command invocation.",
+              "Parameters": {
+                "AutomationExecutionId.$": "$.command_result.AutomationExecutionId"
+              },
+              "Credentials": {
+                "RoleArn": "arn:aws:iam::246314649749:role/runstack-cross-account-role"
+              },
+              "ResultPath": "$.automation_status_wrapper",
+              "Next": "CheckWrapperStatusForChildFetch",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "CheckCommandRetry",
+                  "ResultPath": "$.error"
+                }
+              ]
+            },
+            "CheckWrapperStatusForChildFetch": {
+              "Type": "Choice",
+              "Comment": "Wait while the central TargetLocations wrapper is still running. Once terminal, fetch the target-region child Automation execution, which contains the real aws:runCommand step and its output.",
+              "Choices": [
+                {
+                  "Or": [
+                    {
+                      "Variable": "$.automation_status_wrapper.AutomationExecution.AutomationExecutionStatus",
+                      "StringEquals": "InProgress"
+                    },
+                    {
+                      "Variable": "$.automation_status_wrapper.AutomationExecution.AutomationExecutionStatus",
+                      "StringEquals": "Pending"
+                    },
+                    {
+                      "Variable": "$.automation_status_wrapper.AutomationExecution.AutomationExecutionStatus",
+                      "StringEquals": "Waiting"
+                    }
+                  ],
+                  "Next": "NormalizeCrossRegionCommandStatusInProgress"
+                },
+                {
+                  "Or": [
+                    {
+                      "Variable": "$.automation_status_wrapper.AutomationExecution.AutomationExecutionStatus",
+                      "StringEquals": "Success"
+                    },
+                    {
+                      "Variable": "$.automation_status_wrapper.AutomationExecution.AutomationExecutionStatus",
+                      "StringEquals": "Failed"
+                    }
+                  ],
+                  "Next": "GetRunCommandChildOutput"
+                }
+              ],
+              "Default": "CheckCommandRetry"
+            },
+            "NormalizeCrossRegionCommandStatusInProgress": {
+              "Type": "Pass",
+              "Parameters": {
+                "job_id.$": "$.job_id",
+                "notification_id.$": "$.notification_id",
+                "account_id.$": "$.account_id",
+                "region.$": "$.region",
+                "resource_id.$": "$.resource_id",
+                "automation_type.$": "$.automation_type",
+                "automation_data.$": "$.automation_data",
+                "retry.$": "$.retry",
+                "command_result.$": "$.command_result",
+                "command_status": {
+                  "Status.$": "$.automation_status_wrapper.AutomationExecution.AutomationExecutionStatus",
+                  "StandardOutputContent": "",
+                  "StandardErrorContent": "",
+                  "ResponseCode": 0
+                }
+              },
+              "ResultPath": "$",
+              "Next": "CheckCommandStatus"
+            },
+            "GetRunCommandChildOutput": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::lambda:invoke",
+              "Comment": "Fetch the TargetLocations child Automation from the target region/account through the existing region proxy Lambda.",
+              "Parameters": {
+                "FunctionName": "arn:aws:lambda:us-east-1:246314649749:function:runstack-ssm-region-proxy",
+                "Payload": {
+                  "action": "get_child_output",
+                  "account_id.$": "$.account_id",
+                  "region.$": "$.region",
+                  "execution_id.$": "$.automation_status_wrapper.AutomationExecution.StepExecutions[0].Outputs.ExecutionId[0]"
+                }
+              },
+              "ResultSelector": {
+                "AutomationExecution.$": "$.Payload.AutomationExecution"
+              },
+              "ResultPath": "$.runcommand_child_status",
+              "Next": "NormalizeCrossRegionCommandStatus",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "CheckCommandRetry",
+                  "ResultPath": "$.error"
+                }
+              ]
+            },
+            "NormalizeCrossRegionCommandStatus": {
+              "Type": "Pass",
+              "Comment": "Normalize the target-region child Automation result into the same command_status shape used by the existing RunCommand workflow.",
+              "Parameters": {
+                "job_id.$": "$.job_id",
+                "notification_id.$": "$.notification_id",
+                "account_id.$": "$.account_id",
+                "region.$": "$.region",
+                "resource_id.$": "$.resource_id",
+                "automation_type.$": "$.automation_type",
+                "automation_data.$": "$.automation_data",
+                "retry.$": "$.retry",
+                "command_result.$": "$.command_result",
+                "command_status": {
+                  "Status.$": "$.runcommand_child_status.AutomationExecution.AutomationExecutionStatus",
+                  "StandardOutputContent.$": "$.runcommand_child_status.AutomationExecution.StepExecutions[0].Outputs.Output[0]",
+                  "StandardErrorContent": "",
+                  "ResponseCode": 0
+                }
+              },
+              "ResultPath": "$",
+              "Next": "CheckCommandStatus"
+            },
+            "CheckCommandStatus": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.command_status.Status",
+                  "StringEquals": "Success",
+                  "Next": "EnsureOutputField"
+                },
+                {
+                  "Or": [
+                    {
+                      "Variable": "$.command_status.Status",
+                      "StringEquals": "InProgress"
+                    },
+                    {
+                      "Variable": "$.command_status.Status",
+                      "StringEquals": "Pending"
+                    },
+                    {
+                      "Variable": "$.command_status.Status",
+                      "StringEquals": "Delayed"
+                    },
+                    {
+                      "Variable": "$.command_status.Status",
+                      "StringEquals": "Waiting"
+                    }
+                  ],
+                  "Next": "WaitForCommand"
+                }
+              ],
+              "Default": "CheckCommandRetry"
+            },
+            "CheckCommandRetry": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.retry",
+                  "NumericLessThan": 1,
+                  "Next": "IncrementCommandRetry"
+                }
+              ],
+              "Default": "EnsureFailureOutputField"
+            },
+            "IncrementCommandRetry": {
+              "Type": "Pass",
+              "Parameters": {
+                "retry.$": "States.MathAdd($.retry, 1)",
+                "job_id.$": "$.job_id",
+                "notification_id.$": "$.notification_id",
+                "account_id.$": "$.account_id",
+                "region.$": "$.region",
+                "resource_id.$": "$.resource_id",
+                "automation_type.$": "$.automation_type",
+                "automation_data.$": "$.automation_data"
+              },
+              "Next": "CheckRegionForDispatch"
+            },
+            "CommandCompleted": {
+              "Type": "Pass",
+              "ResultPath": "$",
+              "Parameters": {
+                "job_id.$": "$.job_id",
+                "notification_id.$": "$.notification_id",
+                "status": "COMPLETED",
+                "resource_id.$": "$.resource_id",
+                "qualys_output.$": "$.command_status.StandardOutputContent",
+                "exit_code.$": "$.command_status.ResponseCode"
+              },
+              "End": true
+            },
+            "CommandFailed": {
+              "Type": "Pass",
+              "Parameters": {
+                "job_id.$": "$.job_id",
+                "notification_id.$": "$.notification_id",
+                "status": "FAILED",
+                "qualys_output.$": "$.command_status.StandardOutputContent",
+                "stderr_output.$": "$.command_status.StandardErrorContent",
+                "exit_code.$": "$.command_status.ResponseCode"
+              },
+              "Next": "UpdateStatusFailedDetailed"
+            },
+            "FailCommandWorkflow": {
+              "Type": "Fail",
+              "Cause": "Command execution failed after 1 retry attempts"
+            },
+            "EnsureOutputField": {
+              "Type": "Pass",
+              "Parameters": {
+                "job_id.$": "$.job_id",
+                "notification_id.$": "$.notification_id",
+                "resource_id.$": "$.resource_id",
+                "account_id.$": "$.account_id",
+                "region.$": "$.region",
+                "automation_type.$": "$.automation_type",
+                "automation_data.$": "$.automation_data",
+                "command_status.$": "States.JsonMerge(States.StringToJson('{\"StandardOutputContent\": \"\", \"StandardErrorContent\": \"\", \"ResponseCode\": -1}'), $.command_status, false)"
+              },
+              "ResultPath": "$",
+              "Next": "CommandCompleted"
+            },
+            "UpdateStatusFailedDetailed": {
+              "Type": "Task",
+              "Resource": "arn:aws:states:::dynamodb:updateItem",
+              "Parameters": {
+                "TableName": "runstack-jobs-table",
+                "Key": {
+                  "job_id": {
+                    "S.$": "$.job_id"
+                  }
+                },
+                "UpdateExpression": "SET #status = :status, qualys_output = :output, stderr_output = :stderr, exit_code = :exit_code, updated_at = :updated_at",
+                "ExpressionAttributeNames": {
+                  "#status": "status"
+                },
+                "ExpressionAttributeValues": {
+                  ":status": {
+                    "S.$": "$.status"
+                  },
+                  ":output": {
+                    "S.$": "$.qualys_output"
+                  },
+                  ":stderr": {
+                    "S.$": "$.stderr_output"
+                  },
+                  ":updated_at": {
+                    "S.$": "$$.State.EnteredTime"
+                  },
+                  ":exit_code": {
+                    "N.$": "States.Format('{}', $.exit_code)"
+                  }
+                }
+              },
+              "ResultPath": null,
+              "Next": "FailCommandWorkflow"
+            },
+            "EnsureFailureOutputField": {
+              "Type": "Pass",
+              "Comment": "Hardcoded empty shape rather than JsonMerge against a possibly-nonexistent $.command_status, since this state runs on the failure/retry-exhausted path where no real command status was ever set.",
+              "Parameters": {
+                "job_id.$": "$.job_id",
+                "notification_id.$": "$.notification_id",
+                "command_status": {
+                  "StandardOutputContent": "",
+                  "StandardErrorContent": "",
+                  "ResponseCode": -1
+                }
+              },
+              "ResultPath": "$",
+              "Next": "CommandFailed"
+            }
+          }
+        }
+      ],
+      "Next": "UpdateStatusCompleted",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "UpdateStatusFailed",
+          "ResultPath": "$.error"
+        }
+      ]
+    },
+    "UpdateStatusCompleted": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "runstack-jobs-table",
+        "Key": {
+          "job_id": {
+            "S.$": "$[0].job_id"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, qualys_output = :output, exit_code = :exit_code, updated_at = :updated_at",
+        "ExpressionAttributeNames": {
+          "#status": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S.$": "$[0].status"
+          },
+          ":output": {
+            "S.$": "$[0].qualys_output"
+          },
+          ":updated_at": {
+            "S.$": "$$.State.EnteredTime"
+          },
+          ":exit_code": {
+            "N.$": "States.Format('{}', $[0].exit_code)"
+          }
+        }
+      },
+      "ResultPath": null,
+      "End": true
+    },
+    "UpdateStatusFailed": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::dynamodb:updateItem",
+      "Parameters": {
+        "TableName": "runstack-jobs-table",
+        "Key": {
+          "job_id": {
+            "S.$": "$.job_id"
+          }
+        },
+        "UpdateExpression": "SET #status = :status, updated_at = :updated_at",
+        "ExpressionAttributeNames": {
+          "#status": "status"
+        },
+        "ExpressionAttributeValues": {
+          ":status": {
+            "S": "FAILED"
+          },
+          ":updated_at": {
+            "S.$": "$$.State.EnteredTime"
+          }
+        }
+      },
+      "ResultPath": null,
+      "Next": "NotifyJobFailure"
+    },
+    "NotifyJobFailure": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::sns:publish",
+      "Parameters": {
+        "TopicArn": "arn:aws:sns:us-east-1:246314649749:runstack-notifications",
+        "Subject.$": "States.Format('RunStack Job Failure - {} ({})', $.automation_type, $.notification_id)",
+        "Message.$": "States.Format('RUNSTACK - JOB FAILURE NOTIFICATION\n\n=== JOB DETAILS ===\nJob ID: {}\nNotification ID: {}\nStatus: FAILED\nTimestamp: {}\n\n=== RESOURCE INFORMATION ===\nAWS Account: {}\nRegion: {}\nResource ID: {}\nAutomation Type: {}\n\n=== ERROR DETAILS ===\n{}\n\nThis is an automated notification from the RunStack solution.', $.job_id, $.notification_id, $$.State.EnteredTime, $.account_id, $.region, $.resource_id, $.automation_type, $.error.Cause)"
+      },
+      "ResultPath": null,
+      "Next": "WorkflowFailed"
+    },
+    "WorkflowFailed": {
+      "Type": "Fail",
+      "Cause": "Workflow execution failed"
+    }
+  }
+}
