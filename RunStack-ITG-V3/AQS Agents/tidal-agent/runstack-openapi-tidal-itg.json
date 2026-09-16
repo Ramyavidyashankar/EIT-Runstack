@@ -1,0 +1,1804 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "RunStack Automation API Tidal",
+    "version": "3.0.0",
+    "summary": "RunStack Infrastructure Automation API \u2014 Tidal scope",
+    "description": "API for triggering AWS SSM RunCommand, SSM Automation, and EC2 Actions via RunStack.\n\n## Authentication\nThis API supports two authentication flows:\n- **User auth (QuickSuite)**: OAuth2 Authorization Code flow via Azure AD SSO.\n- **System auth (Dynatrace/EventBridge)**: OAuth2 Client Credentials flow.\n\nBoth flows use Cognito user pool (us-east-1_ViOMjHyze) and require the `runstack-api/notify` scope.\n\n## Authorization\nUser tokens are granted `authorized=true` through either of two independent paths:\n- **Platform-wide access** \u2014 user is in the `runstack-admins` or `runstack-operators` Cognito group. These users can see and act on every instance across every app, with no scoping applied.\n- **App-scoped access** \u2014 user has at least one entry in the `runstack-app-access` table mapping their email to one or more `app_id` values. These users are restricted to only the instances belonging to their assigned app(s), enforced on both `GET /app-instances` and `POST /notify`.\n\nMachine tokens (Dynatrace/EventBridge) are always allowed and are never subject to app-level scoping.\n\nUsers with neither group membership nor an app-access entry receive `403 Forbidden` on every endpoint.\n\n## Recommended Discovery + Polling Flow\n1. `GET /app-instances` \u2014 discover which instances the current user is allowed to act on\n2. `POST /notify` \u2014 trigger automation on one of those instances, get back `job_id`\n3. Poll `GET /jobs/{jobId}` every 3-5 seconds until `status` is `COMPLETED` or `FAILED`\n4. Read `ec2_state` from the response for EC2-Action jobs\n\n## EC2 Action Flow\n1. `POST /notify` with `automation_type: EC2-Action` and `automation_data: {}`\n2. Step Function calls `ec2:DescribeInstances` via cross-account role\n3. Poll `GET /jobs/{jobId}` \u2014 when `status=COMPLETED`, read `ec2_state` field\n\n## EC2 Start/Stop Flow\n1. `POST /notify` with `automation_type: SSM-Automation`\n2. Set `DocumentName` to `AWS-StartEC2Instance` or `AWS-StopEC2Instance`\n3. Poll `GET /jobs/{jobId}` until `status=COMPLETED`\n\n## Synchronous Status Check Flow (NEW)\nFor status-check-only calls (EC2-Action or a short-running SSM-RunCommand), use `POST /notify-sync` instead of `POST /notify` \u2014 it triggers the automation, polls internally for up to ~25 seconds, and returns the final job result directly, with no client-side polling required. If the job hasn't completed within that window, it returns `202` with the `job_id` so the caller can fall back to manually polling `GET /jobs/{jobId}`. Do NOT use `/notify-sync` for Start/Stop actions that may run longer than ~25 seconds \u2014 use `POST /notify` + `GET /jobs/{jobId}` polling for those instead.\n\n## v3.0.0 \u2014 full API surface\nExtended from the v2.9.0 notify/notify-sync-focused spec to cover every route currently deployed: admin (users, team capabilities, Cognito group audit \u2014 all admin-role-gated), SSM document catalog, EventBridge schedules, jobs DLQ, Tidal agent mapping, batch/async healthchecks, Dynatrace AG discovery, DR failover (GDBA team-capability-gated), auth callback/local login, and S3 uploads. Role-based and team-capability-based restrictions are enforced server-side (require_role() / require_gdba_capability()) and are documented in each operation's description, not expressed as separate OAuth2 scopes \u2014 every user-facing operation uses the same `runstack-api/notify` scope shown in `security`."
+  },
+  "servers": [
+    {
+      "url": "https://ovl7azq404.execute-api.us-east-1.amazonaws.com/v1"
+    }
+  ],
+  "paths": {
+    "/app-instances": {
+      "get": {
+        "operationId": "GetAppInstances",
+        "summary": "List instances the current user is allowed to access",
+        "description": "Returns the EC2 instances scoped to the authenticated user.\n\n- **Platform admins/operators** receive every instance in the catalog, with `apps` set to `[\"ALL\"]`.\n- **App-scoped users** receive only instances belonging to the app(s) listed in their `runstack-app-access` entry.\n- Optionally filter the result down to a single app using the `app_id` query parameter \u2014 this is rejected with `403` if the requesting user is not scoped to that app.\n\nUse this endpoint before `POST /notify` to know which `resource_id` values are valid for the current user, rather than guessing or hardcoding instance IDs.",
+        "security": [
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "description": "Restrict the result to a single app the user is scoped to",
+            "schema": {
+              "type": "string"
+            },
+            "example": "App1"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Instances the user is allowed to access",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceListResponse"
+                },
+                "example": {
+                  "instances": [
+                    {
+                      "instance_id": "i-0555494bdfd9d21ca",
+                      "app_id": "App1",
+                      "name": "ec2-dxcitrundeck-app-itg-us-east-1-01",
+                      "account_id": "975050354211",
+                      "region": "us-east-1",
+                      "environment": "ITG",
+                      "description": "Rundeck App Server 01"
+                    }
+                  ],
+                  "count": 1,
+                  "apps": [
+                    "App1"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized \u2014 missing or invalid token"
+          },
+          "403": {
+            "description": "Forbidden \u2014 user has no app access entries, or requested app_id is not in the user's scope"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/notify-sync": {
+      "post": {
+        "operationId": "TriggerAutomationSync",
+        "summary": "Trigger a status check and wait synchronously for the result (status checks only \u2014 do not use for Start/Stop)",
+        "description": "Same request body as `POST /notify`. Internally triggers the automation and polls `GET /jobs/{jobId}` on the server side for up to ~25 seconds, returning the final job result directly \u2014 no client-side polling loop required.\n\nUse this for: EC2-Action status checks, and short-running SSM-RunCommand status scripts (e.g. the SAP DB/ASCS/PAS/AAS status checks, which typically complete in a few seconds).\n\nDo NOT use this for Start/Stop actions \u2014 those can legitimately run longer than the ~25 second window this endpoint waits before giving up, and API Gateway's own 29-second integration timeout makes waiting longer than that impossible for a synchronous call. Use `POST /notify` + `GET /jobs/{jobId}` polling for Start/Stop instead.\n\nIf the job has not completed within ~25 seconds, this returns `202` with the `job_id` \u2014 fall back to polling `GET /jobs/{jobId}` manually in that case.",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotifyRequest"
+              },
+              "examples": {
+                "EC2-Status-Check-Sync": {
+                  "summary": "Get EC2 instance state, waiting for the result",
+                  "value": {
+                    "id": "status-check-sync-001",
+                    "region": "us-east-1",
+                    "account_id": "123456789012",
+                    "resource_id": "i-1234567890abcdef0",
+                    "automation_type": "EC2-Action",
+                    "automation_data": {}
+                  }
+                },
+                "SSM-RunCommand-Status-Sync": {
+                  "summary": "Run a short status-check script, waiting for the result",
+                  "value": {
+                    "id": "status-check-sync-002",
+                    "region": "us-east-1",
+                    "account_id": "123456789012",
+                    "resource_id": "i-1234567890abcdef0",
+                    "automation_type": "SSM-RunCommand",
+                    "automation_data": {
+                      "DocumentName": "AWS-RunShellScript",
+                      "InstanceIds": [
+                        "i-1234567890abcdef0"
+                      ],
+                      "Parameters": {
+                        "commands": [
+                          "/home/orag1d/DB_SCRIPTS/check_oracle_status.sh G1D; true"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Job completed within the wait window \u2014 final result included",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still running after ~25s \u2014 fall back to polling GET /jobs/{jobId} using the returned job_id",
+            "content": {
+              "application/json": {
+                "example": {
+                  "job_id": "7fd30a92-392f-4c59-839b-2bee8351bf49",
+                  "status": "RUNNING",
+                  "message": "Still running after 25s \u2014 poll GET /jobs/{jobId} to continue."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request \u2014 invalid payload"
+          },
+          "401": {
+            "description": "Unauthorized \u2014 missing or invalid token"
+          },
+          "403": {
+            "description": "Forbidden \u2014 either the user has no authorization path (not in an allowed group and no app-access entry), or the targeted instance does not belong to one of the user's assigned apps"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/jobs/latest": {
+      "get": {
+        "operationId": "GetLatestAutomationJobStatus",
+        "summary": "Get latest automation execution status",
+        "description": "Returns the most recent automation execution matching the provided filters. For EC2-Action jobs, the response includes `ec2_state` field with the instance state.\n\n**Note**: Prefer `GET /jobs/{jobId}` when you have a specific job ID from `POST /notify`.",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "query",
+            "required": false,
+            "description": "Correlation ID from NotifyRequest.id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "notification_id",
+            "in": "query",
+            "required": false,
+            "description": "Notification identifier",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "resource_id",
+            "in": "query",
+            "required": false,
+            "description": "EC2 instance ID \u2014 filter by specific instance",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "account_id",
+            "in": "query",
+            "required": false,
+            "description": "AWS account ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "region",
+            "in": "query",
+            "required": false,
+            "description": "AWS region",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Latest automation job status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "No matching jobs found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/jobs/recent": {
+      "get": {
+        "operationId": "GetRecentAutomationJobs",
+        "summary": "Get recent automation executions",
+        "description": "Returns the latest automation execution history with pagination support.",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Number of recent jobs to return",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 10
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Filter by job status",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "PENDING",
+                "RUNNING",
+                "COMPLETED",
+                "FAILED",
+                "TIMED_OUT"
+              ]
+            }
+          },
+          {
+            "name": "last_key",
+            "in": "query",
+            "required": false,
+            "description": "Pagination token from previous response next_token field",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Recent job history",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/jobs/{jobId}": {
+      "get": {
+        "operationId": "GetAutomationJobStatusById",
+        "summary": "Get automation execution status by job ID",
+        "description": "**Primary polling endpoint.** Use the `job_id` returned from `POST /notify` to poll this endpoint.\n\n- Poll every 3-5 seconds until `status` is `COMPLETED` or `FAILED`\n- For EC2-Action jobs, read `ec2_state` when `status=COMPLETED`\n- `ec2_state` values: `running`, `stopped`, `pending`, `stopping`, `terminated`",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "description": "Automation job identifier returned by POST /notify",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Automation job status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Job not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/notify-sync/ec2-statuscheck": {
+      "post": {
+        "operationId": "TriggerEC2Check",
+        "summary": "Check EC2 power state for a given instance",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Correlation ID",
+                    "example": "demo-check-001"
+                  },
+                  "resource_id": {
+                    "type": "string",
+                    "description": "EC2 instance ID for the host to check",
+                    "example": "i-0ab8a936306d80b24"
+                  }
+                },
+                "required": [
+                  "id",
+                  "resource_id"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Check completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Still running after ~18s"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/synthetic/execute": {
+      "post": {
+        "operationId": "TriggerDynatraceSyntheticCheck",
+        "summary": "Run an on-demand Dynatrace synthetic check for an app",
+        "description": "Looks up the Dynatrace monitor mapped to the given `app_id` or `app_name` (via the RunStack app-to-monitor catalog) and triggers it immediately.\n\n**Important**: The response includes a `job_id` field, distinct from the `job_id` returned by `POST /notify` \u2014 poll `GET /synthetic/{jobId}` (not `GET /jobs/{jobId}`) for the result.\n\n## Authorization\nSame rules as `POST /notify`: machine tokens (Dynatrace/EventBridge) and platform admins/operators are always allowed. Viewer-role users are blocked with `403`.",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SyntheticExecuteRequest"
+              },
+              "example": {
+                "app_id": "209167"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Execution triggered. Use the returned `job_id` to poll `GET /synthetic/{jobId}` for the result.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyntheticExecuteResponse"
+                },
+                "example": {
+                  "job_id": "6a2bc979-f8ec-45fe-8ffe-367a0bf11607",
+                  "status": "RUNNING",
+                  "monitor_name": "Quality Assurance and Remedy Enablement-prd:209167",
+                  "message": "Triggered. Poll GET /synthetic/6a2bc979-f8ec-45fe-8ffe-367a0bf11607 for result."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request \u2014 missing both app_id and app_name"
+          },
+          "401": {
+            "description": "Unauthorized \u2014 missing or invalid token"
+          },
+          "403": {
+            "description": "Forbidden \u2014 viewer role, or no authorization path"
+          },
+          "404": {
+            "description": "No Dynatrace monitor mapping found for the given app_id/app_name, or monitor not found in Dynatrace"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/agent/instances": {
+      "get": {
+        "operationId": "GetAgentInstances",
+        "summary": "List instances (agent-facing variant of /app-instances)",
+        "description": "Same underlying instance catalog as GET /app-instances, with an additional optional `server_name` filter for exact-match lookup by hostname.",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "app_id",
+            "in": "query",
+            "required": false,
+            "description": "Filter to one app ID",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "server_name",
+            "in": "query",
+            "required": false,
+            "description": "Exact-match filter by server_name or name",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Instances",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InstanceListResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "server_name filter provided but no match found"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/ssm/documents": {
+      "get": {
+        "operationId": "ListSsmDocuments",
+        "summary": "List SSM documents available for automation",
+        "description": "Filters by document type (Automation vs Command) and owner (Self = your custom documents, Amazon = AWS-managed).",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "description": "Automation or Command",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "owner",
+            "in": "query",
+            "required": false,
+            "description": "Self or Amazon",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Documents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "documents": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SsmDocument"
+                      }
+                    },
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/ssm/documents/{name}": {
+      "get": {
+        "operationId": "GetSsmDocumentDetail",
+        "summary": "Get full content/parameter schema for one SSM document",
+        "description": "Returns the document's own parameter definitions as stored in SSM (not a RunStack-specific schema).",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "description": "SSM document name",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Document detail",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Document not found"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/tidal/apps/{AppId}/agents": {
+      "get": {
+        "operationId": "GetTidalAgents",
+        "summary": "Get Tidal automation agent mapping for an application",
+        "description": "Returns the ordered list of Tidal agents configured for this AppId, used to route Tidal job execution.",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "AppId",
+            "in": "path",
+            "required": true,
+            "description": "Application ID",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agent mapping",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "app_id": {
+                      "type": "string"
+                    },
+                    "application_name": {
+                      "type": "string"
+                    },
+                    "agents": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "last_updated": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No mapping found, or mapping is disabled"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/instances/status": {
+      "post": {
+        "operationId": "TriggerAssessCheck",
+        "summary": "Trigger an async pre-check (e.g. disk usage) on an instance",
+        "description": "Dispatches an SSM command and returns immediately with a check_id \u2014 poll GET /assess/{checkId} for the result.",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "account_id",
+                  "region",
+                  "resource_id"
+                ],
+                "properties": {
+                  "account_id": {
+                    "type": "string"
+                  },
+                  "region": {
+                    "type": "string"
+                  },
+                  "resource_id": {
+                    "type": "string"
+                  },
+                  "check_type": {
+                    "type": "string",
+                    "default": "disk_usage"
+                  },
+                  "parameters": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Check started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "check_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "check_type": {
+                      "type": "string"
+                    },
+                    "resource_id": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/dynatrace/ags": {
+      "get": {
+        "operationId": "ListDynatraceSqlAGs",
+        "summary": "List all known SQL Availability Groups from Dynatrace",
+        "description": "Returns AG names discoverable via Dynatrace host groups.",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "AG names",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ag_names": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/dynatrace/ags/{AGName}/servers": {
+      "get": {
+        "operationId": "GetDynatraceSqlAGServers",
+        "summary": "List servers belonging to one AG",
+        "description": "",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "AGName",
+            "in": "path",
+            "required": true,
+            "description": "Availability Group name",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Servers",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ag_name": {
+                      "type": "string"
+                    },
+                    "servers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "AG not found in Dynatrace"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/dynatrace/ags/{AGName}/roles": {
+      "get": {
+        "operationId": "TriggerSqlAGRoleCheck",
+        "summary": "Trigger an async SQL AG role check (PRIMARY/SECONDARY per replica)",
+        "description": "Async \u2014 returns 202 with a job_id immediately. Poll GET /dynatrace/ags/{AGName}/roles/{JobId} for the result. This is the required first step before POST /dr-failover/{AGName}/plan.",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "AGName",
+            "in": "path",
+            "required": true,
+            "description": "Availability Group name",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Check triggered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ag_name": {
+                      "type": "string"
+                    },
+                    "resolved_via_host": {
+                      "type": "string"
+                    },
+                    "instance_id": {
+                      "type": "string"
+                    },
+                    "job_id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "AG not found in Dynatrace"
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/dynatrace/ags/{AGName}/roles/{JobId}": {
+      "get": {
+        "operationId": "GetSqlAGRoleCheckResult",
+        "summary": "Poll the result of an AG role check",
+        "description": "Poll until roles are returned (non-empty result with PRIMARY identified).",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "AGName",
+            "in": "path",
+            "required": true,
+            "description": "Availability Group name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "JobId",
+            "in": "path",
+            "required": true,
+            "description": "Job ID returned by GET .../roles",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Role check result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ag_name": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "roles": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "ReplicaName": {
+                            "type": "string"
+                          },
+                          "Role": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid or expired job_id"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/synthetic/{syntheticJobId}": {
+      "get": {
+        "operationId": "GetDynatraceSyntheticCheckStatus",
+        "summary": "Get the result of a previously triggered Dynatrace synthetic check",
+        "description": "Poll using the `job_id` returned from `POST /synthetic/execute`.\n\n- Poll every 5-10 seconds until `status` is `COMPLETE` or `FAILED`\n- A monitor can run from multiple locations \u2014 `result.locations` gives the per-location outcome; `result.status` is `SUCCESS` only if every location succeeded",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "syntheticJobId",
+            "in": "path",
+            "required": true,
+            "description": "Job identifier returned by POST /synthetic/execute",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Synthetic check status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyntheticStatusResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Job not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cognitoClientCredentials": {
+        "type": "oauth2",
+        "description": "Cognito OAuth2 Client Credentials Flow \u2014 for system-to-system integrations (Dynatrace, EventBridge, schedulers). No user login required. Never subject to app-level instance scoping.",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "https://runstack-auth-693426599691.auth.us-east-1.amazoncognito.com/oauth2/token",
+            "scopes": {
+              "runstack-api/notify": "Permission to execute RunStack automations"
+            }
+          }
+        }
+      },
+      "cognitoUserAuth": {
+        "type": "oauth2",
+        "description": "Cognito OAuth2 Authorization Code Flow \u2014 for user-initiated flows via Amazon QuickSuite. Users authenticate with corporate Azure AD credentials via SAML SSO.\n\nA successfully authenticated user is granted `runstack:authorized=true` through either:\n- Membership in the `runstack-admins` or `runstack-operators` Cognito group (platform-wide access, no instance scoping), or\n- An entry in the `runstack-app-access` table mapping their email to one or more app IDs (scoped access \u2014 restricted to instances belonging to their assigned app(s))\n\nUsers with neither receive `runstack:authorized=false` and are blocked with `403` on every endpoint.",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://runstack-auth-693426599691.auth.us-east-1.amazoncognito.com/oauth2/authorize?identity_provider=AzureAD",
+            "tokenUrl": "https://runstack-auth-693426599691.auth.us-east-1.amazoncognito.com/oauth2/token",
+            "scopes": {
+              "openid": "OpenID Connect \u2014 required for user identity",
+              "email": "User email address",
+              "runstack-api/notify": "Permission to execute RunStack automations"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "NotifyRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "region",
+          "account_id",
+          "resource_id",
+          "automation_type",
+          "automation_data"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique request identifier \u2014 used for correlation"
+          },
+          "region": {
+            "type": "string",
+            "description": "AWS region from instance catalog",
+            "example": "us-east-1"
+          },
+          "account_id": {
+            "type": "string",
+            "description": "AWS account ID from instance catalog",
+            "example": "123456789012"
+          },
+          "resource_id": {
+            "type": "string",
+            "description": "EC2 instance ID. For app-scoped users, must be an instance returned by GET /app-instances",
+            "example": "i-1234567890abcdef0"
+          },
+          "automation_type": {
+            "type": "string",
+            "description": "SSM-Automation: run SSM automation document. SSM-RunCommand: run command on instances. EC2-Action: get EC2 instance state via Step Function cross-account role.",
+            "enum": [
+              "SSM-RunCommand",
+              "SSM-Automation",
+              "EC2-Action"
+            ]
+          },
+          "automation_data": {
+            "$ref": "#/components/schemas/AutomationData"
+          }
+        }
+      },
+      "AutomationData": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "Automation parameters. For EC2-Action, pass empty object `{}`. For SSM types, DocumentName is required.",
+        "properties": {
+          "DocumentName": {
+            "type": "string",
+            "description": "AWS SSM document name. Required for SSM-Automation and SSM-RunCommand. Not required for EC2-Action.",
+            "examples": [
+              "AWS-RunRemoteScript",
+              "AWS-StopEC2Instance",
+              "AWS-StartEC2Instance"
+            ]
+          },
+          "InstanceIds": {
+            "type": "array",
+            "description": "Used for SSM-RunCommand. Should contain the resource_id.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "Parameters": {
+            "type": "object",
+            "description": "SSM document parameters. Values must be arrays of strings.",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "JobStatusResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "job_id",
+          "status",
+          "region",
+          "account_id",
+          "resource_id",
+          "automation_type"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "execution_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "PENDING \u2192 RUNNING \u2192 COMPLETED or FAILED",
+            "enum": [
+              "PENDING",
+              "RUNNING",
+              "COMPLETED",
+              "IN_PROGRESS",
+              "SUCCEEDED",
+              "FAILED",
+              "TIMED_OUT",
+              "CANCELLED"
+            ]
+          },
+          "ec2_state": {
+            "type": "string",
+            "description": "EC2 instance state \u2014 populated for EC2-Action jobs when status=COMPLETED",
+            "enum": [
+              "pending",
+              "running",
+              "stopping",
+              "stopped",
+              "terminated"
+            ]
+          },
+          "instance_state": {
+            "type": "string",
+            "description": "Alias for ec2_state",
+            "enum": [
+              "PENDING",
+              "RUNNING",
+              "STOPPING",
+              "STOPPED",
+              "TERMINATED"
+            ]
+          },
+          "region": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "resource_id": {
+            "type": "string"
+          },
+          "automation_type": {
+            "type": "string",
+            "enum": [
+              "SSM-RunCommand",
+              "SSM-Automation",
+              "EC2-Action"
+            ]
+          },
+          "notification_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "automation_data": {
+            "$ref": "#/components/schemas/AutomationData"
+          },
+          "ssm": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "automationExecutionId": {
+                "type": "string"
+              },
+              "commandId": {
+                "type": "string"
+              }
+            }
+          },
+          "exit_code": {
+            "type": "integer",
+            "description": "The script's own process exit code (distinct from SSM-level status). -1 or absent means SSM did not report an exit code (e.g. EC2-Action jobs)."
+          },
+          "script_result": {
+            "type": "string",
+            "description": "PASSED if exit_code == 0, FAILED if exit_code is non-zero. Note: a status script using \"; true\" always exits 0, so script_result will always read PASSED for those calls -- read the parsed output field instead for actual service health.",
+            "enum": [
+              "PASSED",
+              "FAILED"
+            ]
+          },
+          "output": {
+            "type": "string",
+            "description": "Raw stdout captured from the RunCommand script (e.g. the JSON printed by check_oracle_status.sh, or plain text from other scripts). This is the field to parse for actual service state -- status and script_result only describe whether the command executed, not what it found."
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "JobListResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "description": "List of automation jobs",
+            "items": {
+              "$ref": "#/components/schemas/JobStatusResponse"
+            }
+          },
+          "next_token": {
+            "type": "string",
+            "description": "Pagination token \u2014 pass as last_key query param to get next page"
+          },
+          "count": {
+            "type": "integer"
+          }
+        }
+      },
+      "InstanceItem": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "instance_id",
+          "app_id"
+        ],
+        "properties": {
+          "instance_id": {
+            "type": "string",
+            "example": "i-0555494bdfd9d21ca"
+          },
+          "app_id": {
+            "type": "string",
+            "example": "App1"
+          },
+          "name": {
+            "type": "string",
+            "example": "ec2-dxcitrundeck-app-itg-us-east-1-01"
+          },
+          "account_id": {
+            "type": "string",
+            "example": "975050354211"
+          },
+          "region": {
+            "type": "string",
+            "example": "us-east-1"
+          },
+          "environment": {
+            "type": "string",
+            "example": "ITG"
+          },
+          "description": {
+            "type": "string"
+          },
+          "synced_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "InstanceListResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "instances",
+          "count",
+          "apps"
+        ],
+        "properties": {
+          "instances": {
+            "type": "array",
+            "description": "Instances the current user is scoped to",
+            "items": {
+              "$ref": "#/components/schemas/InstanceItem"
+            }
+          },
+          "count": {
+            "type": "integer",
+            "description": "Number of instances returned"
+          },
+          "apps": {
+            "type": "array",
+            "description": "App IDs this response was scoped to. Contains [\"ALL\"] for admins/operators.",
+            "items": {
+              "type": "string"
+            },
+            "example": [
+              "App1"
+            ]
+          }
+        }
+      },
+      "SyntheticExecuteRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "app_id": {
+            "type": "string",
+            "description": "The application ID to run the Dynatrace check for",
+            "example": "209167"
+          },
+          "app_name": {
+            "type": "string",
+            "description": "The application name to run the check for, if app_id is not known",
+            "example": "QARE-SSZ"
+          }
+        },
+        "description": "Provide either app_id or app_name (at least one required)."
+      },
+      "SyntheticExecuteResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "example": "RUNNING"
+          },
+          "app_id": {
+            "type": "string"
+          },
+          "app_name": {
+            "type": "string"
+          },
+          "monitors_triggered": {
+            "type": "array",
+            "description": "Every Dynatrace monitor name actually triggered. An app can map to more than one distinct monitor (e.g. per-region checks) \u2014 this lists all of them, not just one.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "monitors_not_found": {
+            "type": "array",
+            "description": "Present only if some (not all) mapped monitors weren't found in Dynatrace \u2014 those were skipped rather than failing the whole request.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "warning": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "SyntheticLocationResult": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "execution_id": {
+            "type": "string"
+          },
+          "location_id": {
+            "type": "string"
+          },
+          "monitor_id": {
+            "type": "string"
+          },
+          "monitor_name": {
+            "type": "string",
+            "description": "Which of the app's (possibly several) distinct monitors this execution belongs to"
+          },
+          "execution_stage": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "SUCCESS",
+              "FAILED"
+            ]
+          },
+          "executed_steps": {
+            "type": "integer"
+          },
+          "total_time": {
+            "type": "integer",
+            "description": "Milliseconds"
+          },
+          "failure_message": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "SyntheticStatusResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "job_id",
+          "status"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "RUNNING -> COMPLETE or FAILED",
+            "enum": [
+              "RUNNING",
+              "COMPLETE",
+              "FAILED"
+            ]
+          },
+          "app_id": {
+            "type": "string"
+          },
+          "app_name": {
+            "type": "string"
+          },
+          "monitors_triggered": {
+            "type": "array",
+            "description": "Every monitor name that was triggered for this job",
+            "items": {
+              "type": "string"
+            }
+          },
+          "execution_stage": {
+            "type": "string",
+            "description": "Present while status=RUNNING",
+            "example": "TRIGGERED"
+          },
+          "result": {
+            "type": "object",
+            "description": "Combined result across every monitor x every location it runs from. Present once status is COMPLETE or FAILED.",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "SUCCESS",
+                  "FAILED"
+                ]
+              },
+              "locations": {
+                "type": "array",
+                "description": "One entry per monitor x location combination",
+                "items": {
+                  "$ref": "#/components/schemas/SyntheticLocationResult"
+                }
+              }
+            }
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "SsmDocument": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "owner": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "platform": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "document_format": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}
