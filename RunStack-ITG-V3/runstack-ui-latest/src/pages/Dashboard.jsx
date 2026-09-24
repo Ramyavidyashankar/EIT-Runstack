@@ -8,21 +8,30 @@ import { Topbar } from '../components/Layout';
 import { Card, CardHead, StatusBadge, TypeTag, Spinner, ErrorBanner, Btn, Empty } from '../components/ui';
 import { fetchRecentJobs } from '../api/client';
 import { fmtRelative } from '../utils/helpers';
+import { FixedSizeList as List } from 'react-window';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const PAGE_SIZE = 25;
 const POLL_MS   = 15000;
 const FETCH_LIMIT = 100;    // backend hard cap — Lambda rejects limit outside 10–100
 const MAX_AUTO_PAGES = 50;  // safety valve: auto-load stops at ~5000 jobs, "Load more" continues past it
+const ROW_HEIGHT = 58;      // fixed row height required by react-window
+// Column widths shared between the header row and each virtualized row so they stay aligned.
+const COLS = [
+  { key: 'job',     label: 'Job ID',            width: 170 },
+  { key: 'doc',     label: 'Document',          width: null }, // flex: 1
+  { key: 'account', label: 'Account / Region',  width: 170 },
+  { key: 'status',  label: 'Status',             width: 110 },
+  { key: 'created', label: 'Created',            width: 130 },
+];
 
 // DXC brand tokens (mirrors src/index.css — inline styles can't read CSS vars
 // for SVG fill/stroke props, so the hexes are restated here on purpose).
 const C = {
   midnight: '#0A0F1C',
   canvas:   '#F1F5F9',
-  orange:   '#2554E0',   // primary accent (kept the name to minimize diff noise below)
-  blue:     '#2554E0',
-  royal:    '#1E44BD',
+  orange:   '#0F766E',   // now the single accent — see index.css --brand
+  blue:     '#0F766E',
+  royal:    '#0B5C56',
   gold:     '#B45309',
   green:    '#0F9D6D',
   red:      '#DC2626',
@@ -199,6 +208,65 @@ function ChartTooltip({ active, payload, label }) {
   );
 }
 
+// ─── Table header row — shares COLS widths with the virtualized rows below ───
+function TableHeader() {
+  return (
+    <div style={{ display: 'flex', background: C.tint, borderBottom: `1px solid ${C.border}` }}>
+      {COLS.map(c => (
+        <div key={c.key} style={{
+          flex: c.width ? `0 0 ${c.width}px` : '1 1 auto',
+          padding: '10px 14px',
+          fontSize: 10, fontWeight: 700, color: C.textTer,
+          textTransform: 'uppercase', letterSpacing: 0.6,
+        }}>{c.label}</div>
+      ))}
+    </div>
+  );
+}
+
+// ─── One virtualized job row ──────────────────────────────────────────────────
+function JobRow({ job: j, style, onClick }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <div
+      style={{
+        ...style,
+        display: 'flex', alignItems: 'center', cursor: 'pointer',
+        borderBottom: `1px solid ${C.canvas}`,
+        background: hov ? C.tint : 'transparent',
+      }}
+      onClick={onClick}
+      onMouseEnter={() => setHov(true)}
+      onMouseLeave={() => setHov(false)}
+    >
+      <div style={{ flex: `0 0 ${COLS[0].width}px`, padding: '0 14px', minWidth: 0 }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: C.royal, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {j.job_id?.slice(0, 12) || '—'}
+        </div>
+        <div style={{ fontSize: 10, color: C.textTer, marginTop: 2, fontFamily: 'var(--font-mono)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {j.notification_id?.slice(0, 28) || '—'}
+        </div>
+      </div>
+      <div style={{ flex: '1 1 auto', padding: '0 14px', minWidth: 0 }}>
+        <div style={{ fontWeight: 600, color: C.ink, marginBottom: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {j.automation_data?.DocumentName || '—'}
+        </div>
+        <TypeTag type={j.automation_type} />
+      </div>
+      <div style={{ flex: `0 0 ${COLS[2].width}px`, padding: '0 14px', minWidth: 0 }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: C.textSec, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{j.account_id || '—'}</div>
+        <div style={{ fontSize: 10, color: C.textTer, marginTop: 2 }}>{j.region}</div>
+      </div>
+      <div style={{ flex: `0 0 ${COLS[3].width}px`, padding: '0 14px' }}>
+        <StatusBadge status={j.status} />
+      </div>
+      <div style={{ flex: `0 0 ${COLS[4].width}px`, padding: '0 14px', color: C.textTer, fontSize: 12 }}>
+        {fmtRelative(j.created_at)}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function Dashboard() {
   const nav = useNavigate();
@@ -214,7 +282,6 @@ export default function Dashboard() {
   const [search, setSearch]       = useState('');
   const [statusFilter, setStatus] = useState('');
   const [typeFilter, setType]     = useState('');
-  const [page, setPage]           = useState(1);
   const [rangeIdx, setRangeIdx]   = useState(0); // chart time-range preset — see RANGE_PRESETS
   const range = RANGE_PRESETS[rangeIdx];
 
@@ -224,7 +291,7 @@ export default function Dashboard() {
   // (last_key is empty) or MAX_AUTO_PAGES is hit. Updates state after each
   // page so the table/chart fill in progressively instead of one long wait.
   const loadJobs = useCallback(async (reset = true) => {
-    if (reset) { setLoading(true); setError(null); setPage(1); setLoadProgress(0); }
+    if (reset) { setLoading(true); setError(null); setLoadProgress(0); }
 
     try {
       let cursor;
@@ -381,8 +448,6 @@ export default function Dashboard() {
     return result;
   }, [allJobs, statusFilter, typeFilter, search]);
 
-  const pageCount = Math.ceil(filtered.length / PAGE_SIZE);
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   const timeStr = loading
     ? `Loading job history… ${loadProgress} loaded so far`
     : lastFetched ? `Last refreshed ${fmtRelative(lastFetched.toISOString())}` : 'Connecting…';
@@ -402,7 +467,7 @@ export default function Dashboard() {
               <IconDownload size={13} color={C.textSec} /> Export CSV
             </Btn>
             <Btn variant="primary" size="sm" onClick={() => nav('/trigger')}>
-              <IconPlay size={12} color="#fff" /> Run job
+              <IconPlay size={12} color="#fff" /> Run automation
             </Btn>
           </>
         }
@@ -436,12 +501,12 @@ export default function Dashboard() {
         </div>
 
         {/* Metric cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 14, marginBottom: 16 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 16 }}>
           <MetricCard label="Jobs loaded" value={loading ? loadProgress : stats.total} sub={hasMore ? `Capped at ${MAX_AUTO_PAGES * FETCH_LIMIT} — load more below` : 'Full job history'} accent={C.royal} icon={IconList} />
           <MetricCard label="Success rate" value={loading ? '—' : `${stats.rate}%`} sub={`${stats.completed} completed`} accent={C.green} icon={IconCheck} />
           <MetricCard label="Failed" value={loading ? '—' : stats.failed} sub="Requires attention" accent={C.red} icon={IconAlert} />
           <MetricCard label="Running now" value={loading ? '—' : stats.running} sub="Active executions" accent={C.gold} icon={IconBolt} />
-          <MetricCard label="Avg duration" value={loading ? '—' : stats.avgLabel} sub={stats.avgSample ? `Across ${stats.avgSample} completed jobs` : 'No completed jobs yet'} accent={'#7C3AED'} icon={IconClock} />
+          {/*<MetricCard label="Avg duration" value={loading ? '—' : stats.avgLabel} sub={stats.avgSample ? `Across ${stats.avgSample} completed jobs` : 'No completed jobs yet'} accent={'#7C3AED'} icon={IconClock} />*/}
         </div>
 
         {/* Job activity — the bar chart */}
@@ -504,7 +569,8 @@ export default function Dashboard() {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>All jobs</div>
+                {/*<div style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>All jobs</div>*/}
+                <div style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>Recent executions</div>
                 <div style={{ fontSize: 10.5, color: C.textTer }}>Live data via DynamoDB · auto-refreshes every 15s</div>
               </div>
               <button
@@ -515,11 +581,12 @@ export default function Dashboard() {
               </button>
             </div>
 
-            <div style={{ marginBottom: 12 }}>
+            {/* Sticky so the filters stay visible while scrolling the virtualized list below */}
+            <div style={{ marginBottom: 12, position: 'sticky', top: 0, zIndex: 2, background: C.canvas, paddingTop: 4 }}>
               <FilterBar
-                statusFilter={statusFilter} setStatusFilter={s => { setStatus(s); setPage(1); }}
-                typeFilter={typeFilter} setTypeFilter={t => { setType(t); setPage(1); }}
-                search={search} setSearch={s => { setSearch(s); setPage(1); }}
+                statusFilter={statusFilter} setStatusFilter={setStatus}
+                typeFilter={typeFilter} setTypeFilter={setType}
+                search={search} setSearch={setSearch}
                 total={filtered.length}
               />
             </div>
@@ -531,71 +598,30 @@ export default function Dashboard() {
                 <Empty message="No jobs match the current filters." />
               ) : (
                 <>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                    <thead>
-                      <tr style={{ background: C.tint }}>
-                        {['Job ID', 'Document', 'Account / Region', 'Status', 'Created'].map(h => (
-                          <th key={h} style={{
-                            textAlign: 'left', padding: '10px 14px',
-                            fontSize: 10, fontWeight: 700, color: C.textTer,
-                            textTransform: 'uppercase', letterSpacing: 0.6,
-                            borderBottom: `1px solid ${C.border}`,
-                          }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {paginated.map((j, idx) => (
-                        <tr key={j.job_id || idx}
-                          onClick={() => nav(`/jobs/${j.job_id}`)}
-                          style={{ cursor: 'pointer', borderBottom: `1px solid ${C.canvas}` }}
-                          onMouseEnter={e => e.currentTarget.style.background = C.tint}
-                          onMouseLeave={e => e.currentTarget.style.background = ''}
-                        >
-                          <td style={{ padding: '11px 14px' }}>
-                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, color: C.royal }}>
-                              {j.job_id?.slice(0, 12) || '—'}
-                            </span>
-                            <div style={{ fontSize: 10, color: C.textTer, marginTop: 2, fontFamily: 'var(--font-mono)' }}>
-                              {j.notification_id?.slice(0, 28) || '—'}
-                            </div>
-                          </td>
-                          <td style={{ padding: '11px 14px' }}>
-                            <div style={{ fontWeight: 600, color: C.ink, marginBottom: 4 }}>
-                              {j.automation_data?.DocumentName || '—'}
-                            </div>
-                            <TypeTag type={j.automation_type} />
-                          </td>
-                          <td style={{ padding: '11px 14px' }}>
-                            <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: C.textSec }}>{j.account_id || '—'}</div>
-                            <div style={{ fontSize: 10, color: C.textTer, marginTop: 2 }}>{j.region}</div>
-                          </td>
-                          <td style={{ padding: '11px 14px' }}>
-                            <StatusBadge status={j.status} />
-                          </td>
-                          <td style={{ padding: '11px 14px', color: C.textTer, fontSize: 12 }}>
-                            {fmtRelative(j.created_at)}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <TableHeader />
+                  <List
+                    height={Math.min(640, filtered.length * ROW_HEIGHT)}
+                    itemCount={filtered.length}
+                    itemSize={ROW_HEIGHT}
+                    width="100%"
+                  >
+                    {({ index, style }) => (
+                      <JobRow
+                        job={filtered[index]}
+                        style={style}
+                        onClick={() => nav(`/jobs/${filtered[index].job_id}`)}
+                      />
+                    )}
+                  </List>
 
                   <div style={{
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                     padding: '12px 16px', borderTop: `1px solid ${C.border}`, background: C.tint,
                   }}>
                     <div style={{ fontSize: 12, color: C.textTer }}>
-                      Showing {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)}–{Math.min(page * PAGE_SIZE, filtered.length)} of {filtered.length}
+                      {filtered.length} job{filtered.length === 1 ? '' : 's'} shown
                       {hasMore && <span style={{ color: C.orange, marginLeft: 6, cursor: 'pointer', fontWeight: 600 }}
                         onClick={loadMore}>{loadingMore ? 'Loading…' : '· Load more from DB'}</span>}
-                    </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <Btn variant="default" size="sm" onClick={() => setPage(p => Math.max(1, p - 1))} disabled={page === 1}>‹ Prev</Btn>
-                      <span style={{ padding: '4px 10px', fontSize: 12, color: C.textSec, fontWeight: 600 }}>
-                        {page} / {pageCount || 1}
-                      </span>
-                      <Btn variant="default" size="sm" onClick={() => setPage(p => Math.min(pageCount, p + 1))} disabled={page >= pageCount}>Next ›</Btn>
                     </div>
                   </div>
                 </>
@@ -639,8 +665,9 @@ export default function Dashboard() {
                 Quick actions
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <ActionCard label="Trigger new job" sub="POST to /v1/notify" icon={IconPlay} color={C.orange} onClick={() => nav('/trigger')} />
-                <ActionCard label="View all jobs" sub="Browse & filter jobs" icon={IconList} color={C.royal} onClick={() => nav('/jobs')} />
+                <ActionCard label="Run automation" sub="POST to /v1/notify" icon={IconPlay} color={C.orange} onClick={() => nav('/trigger')} />
+                {/*<ActionCard label="View all jobs" sub="Browse & filter jobs" icon={IconList} color={C.royal} onClick={() => nav('/jobs')} />*/}
+                <ActionCard label="View all executions" sub="Browse & filter executions" icon={IconList} color={C.royal} onClick={() => nav('/jobs')} />
                 <ActionCard label="Manage schedules" sub="EventBridge rules" icon={IconClock} color={C.gold} onClick={() => nav('/schedules')} />
                 <ActionCard label="DLQ messages" sub="Failed message queue" icon={IconAlert} color={C.red} onClick={() => nav('/dlq')} />
               </div>
