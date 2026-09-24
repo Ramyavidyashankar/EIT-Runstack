@@ -23,11 +23,11 @@
   --slate-50:  #F8FAFC;   /* tinted surface (table head, hover) */
 
   /* ── Brand — Signal Blue (primary), used sparingly & with intent ──────── */
-  --brand:         #2554E0;
-  --brand-hover:   #1E44BD;
-  --brand-active:  #17369A;
-  --brand-bg:      #EBF1FE;
-  --brand-border:  #BFD3FB;
+  --brand:         #0F766E;
+  --brand-hover:   #0B5C56;
+  --brand-active:  #084A45;
+  --brand-bg:      #E6F5F3;
+  --brand-border:  #A9DED8;
 
   /* ── Semantic status colors ────────────────────────────────────────────*/
   --success:        #0F9D6D;
