@@ -101,7 +101,7 @@ SHAREPOINT_CLIENT_SECRET_HARDCODED = ""
 SHAREPOINT_SITE_HOSTNAME_HARDCODED = "dxcportal.sharepoint.com"
 SHAREPOINT_SITE_PATH_HARDCODED = "/sites/dxcitRundeck"
 SHAREPOINT_FOLDER_PATH = "MSSQL Auto-update SQL Version"
-SHAREPOINT_TARGET_FILE_NAME = "GDBA MSSQL Auto Version Update Details bkp21.xlsx"
+SHAREPOINT_TARGET_FILE_NAME = "GDBA MSSQL Auto Version Update Details.xlsx"
 
 SHAREPOINT_TENANT_ID = os.getenv("SHAREPOINT_TENANT_ID", "") or SHAREPOINT_TENANT_ID_HARDCODED
 SHAREPOINT_APP_SECRET_ARN = os.getenv("SHAREPOINT_APP_SECRET_ARN", "")
@@ -301,6 +301,58 @@ def normalize_runcommand_data(
 
     return data
 
+def normalize_ssm_automation_data(
+    automation_data: Dict[str, Any],
+    account_id: str,
+    region: str
+) -> Dict[str, Any]:
+    """
+    Generic normalization for ALL SSM-Automation jobs, mirroring
+    normalize_runcommand_data() for SSM-RunCommand.
+
+    Fixed-template callers (e.g. Dynatrace webhooks) send the same
+    automation_data shape regardless of the target's actual region:
+    DocumentName always pointed at the primary region (us-east-1), no
+    TargetLocations, no AutomationAssumeRole. Each Step Functions branch
+    needs something different filled in before it can run:
+
+    us-east-1 (primary) path:
+        ExecuteSSMAutomationCommand is a pure pass-through of Parameters
+        with no AutomationAssumeRole injection — add it here.
+
+    Cross-region (west) path:
+        ExecuteSSMAutomationCommandCrossRegion reads TargetLocations
+        directly from automation_data.TargetLocations and the state
+        fails immediately if it's missing. Build it here from
+        account_id/region. AutomationAssumeRole must NOT be added here —
+        that path injects its own fixed central role inside the state
+        machine already.
+    """
+    data = dict(automation_data or {})
+
+    primary_region = os.getenv("RUNSTACK_PRIMARY_REGION", "us-east-1")
+
+    if region == primary_region:
+        params = dict(data.get("Parameters") or {})
+        if "AutomationAssumeRole" not in params:
+            params["AutomationAssumeRole"] = [
+                f"arn:aws:iam::{account_id}:role/runstack-cross-account-role"
+            ]
+        data["Parameters"] = params
+    else:
+        if not data.get("TargetLocations"):
+            data["TargetLocations"] = [
+                {
+                    "Accounts": [account_id],
+                    "Regions": [region],
+                    "ExecutionRoleName": "AWS-SystemsManager-AutomationExecutionRole",
+                    "TargetLocationMaxConcurrency": "1",
+                    "TargetLocationMaxErrors": "1"
+                }
+            ]
+
+    return data
+
 def transform_message_data(payload: Dict[str, Any], job_id: str) -> Dict[str, Any]:
     try:
 
@@ -315,6 +367,16 @@ def transform_message_data(payload: Dict[str, Any], job_id: str) -> Dict[str, An
                 account_id=payload["account_id"],
                 region=payload["region"]
             )
+
+        # ------------------------------------------------------
+        # Generic normalization for ALL SSM-Automation jobs
+        # ------------------------------------------------------
+        #if payload["automation_type"] == "SSM-Automation":
+        #    automation_data = normalize_ssm_automation_data(
+        #        automation_data=automation_data,
+        #        account_id=payload["account_id"],
+        #        region=payload["region"]
+        #    )
 
         transformed_data = {
             "job_id": job_id,
@@ -2329,7 +2391,7 @@ def create_ssm_runcommand_job(instance_id: str, account_id: str, region: str, co
     return job_id
 
 DR_STATUS_CHECK_DOCUMENT_NAME = os.getenv("DR_STATUS_CHECK_DOCUMENT_NAME", "RunStack-DR-Status-Check")
-DR_DOCUMENT_OWNER_ACCOUNT = os.getenv("DR_DOCUMENT_OWNER_ACCOUNT", "246314649749")
+DR_DOCUMENT_OWNER_ACCOUNT = os.getenv("DR_DOCUMENT_OWNER_ACCOUNT", "693426599691")
 TEAMS_DR_APPROVAL_WEBHOOK_URL_SECRET_ARN = os.getenv("TEAMS_DR_APPROVAL_WEBHOOK_URL_SECRET_ARN", "")
 TEAMS_APPROVE_SHARED_SECRET_SECRET_ARN = os.getenv("TEAMS_APPROVE_SHARED_SECRET_SECRET_ARN", "")
 # Local-testing overrides only — leave unset in deployed environments.
