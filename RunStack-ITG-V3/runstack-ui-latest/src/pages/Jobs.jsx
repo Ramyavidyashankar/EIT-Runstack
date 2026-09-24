@@ -136,7 +136,8 @@ export default function Jobs() {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
-      <Topbar title="Jobs" subtitle={`${allJobs.length} records loaded${hasMore ? ' — more available' : ' — all loaded'}`}
+      {/* <Topbar title="Jobs" subtitle={`${allJobs.length} records loaded${hasMore ? ' — more available' : ' — all loaded'}`} */}
+      <Topbar title="Automation Executions" subtitle={`${allJobs.length} records loaded${hasMore ? ' — more available' : ' — all loaded'}`}
         actions={
           <div style={{ display:'flex', gap:8 }}>
             {hasMore && (
@@ -320,8 +321,11 @@ export function JobDetail() {
 
   return (
     <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
-      <Topbar title="Job Detail"
+      {/*<Topbar title="Job Detail"
         actions={<Btn variant="ghost" size="sm" onClick={() => nav('/jobs')}>← Back to jobs</Btn>}
+      />*/}
+      <Topbar title="Execution Detail"
+       actions={<Btn variant="ghost" size="sm" onClick={() => nav('/jobs')}>← Back to executions</Btn>}
       />
       <div style={{ flex:1, overflowY:'auto', padding:24 }}>
         {loading && <div style={{ display:'flex', justifyContent:'center', padding:48 }}><Spinner/></div>}
