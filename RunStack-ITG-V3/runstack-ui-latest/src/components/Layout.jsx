@@ -6,14 +6,16 @@ import { useAuth } from '../auth/AuthContext';
 const NAV = [
   { group: 'Monitor', items: [
     { to: '/',          label: 'Dashboard',        icon: IconGrid  },
-    { to: '/jobs',      label: 'Jobs',             icon: IconList  },
+    //{ to: '/jobs',      label: 'Jobs',             icon: IconList  },
+    { to: '/jobs',      label: 'Automation Executions', icon: IconList  },
     { to: '/dlq',       label: 'Dead Letter Queue', icon: IconAlert, badge: '!', badgeColor: '#DC2626', minRole: 'operator' },
   ]},
   { group: 'Automate', items: [
-    { to: '/trigger',   label: 'Trigger Job',      icon: IconPlay  },
+    { to: '/trigger',   label: 'Run Automation',      icon: IconPlay  },
     { to: '/schedules', label: 'Schedules',        icon: IconClock, minRole: 'operator' },
     { to: '/accounts',  label: 'Target Accounts',  icon: IconCloud },
-    { to: '/dr-failover', label: 'DR Failover',    icon: IconShield, minRole: 'operator', orGroup: 'runstack-team-gdba' },
+    //{ to: '/dr-failover', label: 'DR Failover',    icon: IconShield, minRole: 'operator', orGroup: 'runstack-team-gdba' },*/},
+    { to: '/dr-failover', label: 'DR Failover',    icon: IconShield, minRole: 'operator', orGroup: 'runstack-team-gdba-sql' },
   ]},
   { group: 'Config', items: [
     { to: '/docs',      label: 'SSM Documents',    icon: IconDoc   },
