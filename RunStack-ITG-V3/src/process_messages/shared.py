@@ -85,6 +85,7 @@ DR_MAX_TXN_MINUTES = int(os.getenv("DR_MAX_TXN_MINUTES", "5"))
 DR_CONFIRM_TIMEOUT_SEC = int(os.getenv("DR_CONFIRM_TIMEOUT_SEC", "120"))
 DR_POLL_INTERVAL_SEC = int(os.getenv("DR_POLL_INTERVAL_SEC", "5"))
 DR_REPLICA_OVERRIDES = json.loads(os.getenv("DR_REPLICA_OVERRIDES_JSON", "{}"))
+DR_ACTION_LOCK_TTL_SECONDS = int(os.getenv("DR_ACTION_LOCK_TTL_SECONDS", "1800"))
 
 DR_MANUAL_AGS = {
     "SANDBOX-GDBA-AG": ["c40w301187", "c40w301188", "c41w301189"],
@@ -895,8 +896,13 @@ def get_instances_for_apps(app_ids: list) -> list:
         table = ddb.Table(INSTANCE_CATALOG_TABLE)
 
         if "ALL" in app_ids:
+            items = []
             response = table.scan()
-            return response.get("Items", [])
+            items.extend(response.get("Items", []))
+            while "LastEvaluatedKey" in response:
+                response = table.scan(ExclusiveStartKey=response["LastEvaluatedKey"])
+                items.extend(response.get("Items", []))
+            return items
 
         instances = []
         for app_id in app_ids:
@@ -1047,11 +1053,11 @@ import re as _re
 
 _SAFE_NAME_RE = _re.compile(r"[^A-Za-z0-9._\-]")
 
-def acquire_action_lock(resource_id: str, user_email: str, job_id: str) -> Optional[Dict[str, Any]]:
+def acquire_action_lock(resource_id: str, user_email: str, job_id: str, ttl_seconds: int = None) -> Optional[Dict[str, Any]]:
     ddb = boto3.resource("dynamodb")
     table = ddb.Table(ACTION_LOCKS_TABLE)
     now = datetime.utcnow()
-    expires_at = int(time.time()) + ACTION_LOCK_TTL_SECONDS
+    expires_at = int(time.time()) + (ttl_seconds if ttl_seconds is not None else ACTION_LOCK_TTL_SECONDS)
 
     try:
         table.put_item(
@@ -1075,6 +1081,16 @@ def acquire_action_lock(resource_id: str, user_email: str, job_id: str) -> Optio
             }
         raise
 
+def check_and_acquire_lock(event, lock_key, ttl_seconds=None, job_id="n/a (debounce lock)"):
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
+    username = claims.get("username", "")
+    user_email = username.replace("AzureAD_", "") if username.startswith("AzureAD_") else claims.get("email", username)
+    user_email = user_email or "unknown"
+
+    lock_conflict = acquire_action_lock(lock_key, user_email, job_id=job_id, ttl_seconds=ttl_seconds)
+    if lock_conflict and lock_conflict.get("locked_by") != user_email:
+        return lock_conflict
+    return None
 
 def release_action_lock(resource_id: str) -> None:
     ddb = boto3.resource("dynamodb")
@@ -1167,6 +1183,13 @@ ROLE_RANK = {"admin": 4, "operator": 3, "app_operator": 2, "viewer": 1, "none": 
 
 def get_claims_and_role(event: Dict[str, Any]) -> tuple:
     claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
+
+    if not claims.get("username") and claims.get("token_use") == "access":
+        return claims, "admin"   # changed from "operator" — admin is the only
+                                   # role that bypasses per-instance app-access
+                                   # scoping, and a machine caller has no stable
+                                   # user_email to register an app-access row for
+
     role = claims.get("runstack:role", "none")
     return claims, role
 
@@ -2462,13 +2485,13 @@ def poll_ssm_invocation(ssm, command_id: str, instance_id: str, timeout_sec: int
         try:
             inv = ssm.get_command_invocation(CommandId=command_id, InstanceId=instance_id)
         except ssm.exceptions.InvocationDoesNotExist:
-            time.sleep(2)
+            time.sleep(DR_POLL_INTERVAL_SEC)
             continue
         if inv["Status"] in ("Success", "Failed", "Cancelled", "TimedOut"):
             if inv["Status"] != "Success":
                 raise RuntimeError(f"SSM command {inv['Status']}: {inv.get('StandardErrorContent','')}")
             return inv["StandardOutputContent"]
-        time.sleep(2)
+        time.sleep(DR_POLL_INTERVAL_SEC)
     raise TimeoutError(f"SSM command {command_id} on {instance_id} did not complete in {timeout_sec}s")
 
 
@@ -2501,8 +2524,128 @@ def trigger_ag_status_check_job(ag_name: str, candidate_hosts: list) -> Dict[str
         return {"ok": False, "reason": f"Could not create status-check job for host '{host}'"}
     return {"ok": True, "job_id": job_id, "resolved_via_host": host, "instance_id": inst["instance_id"]}
 
+def trigger_ag_status_check_job_parallel(ag_name: str, candidate_hosts: list) -> Dict[str, Any]:
+    """
+    Like trigger_ag_status_check_job, but dispatches an SSM status-check job
+    to EVERY resolvable host in candidate_hosts at once instead of one at a
+    time. Returns a single opaque group job_id (stored in DR_RUN_LOG_TABLE)
+    that read_ag_status_job_result() resolves transparently — callers in
+    dynatrace.py and dr_failover.py don't need to know the difference
+    between a plain job_id and a parallel group id. Cuts multi-host
+    discovery from up to N sequential SSM round trips to 1.
+    """
+    if not candidate_hosts:
+        return {"ok": False, "reason": f"No candidate hosts for AG {ag_name}"}
+
+    dispatched = []  # [{"host":..., "job_id":..., "instance_id":...}]
+    for host in candidate_hosts:
+        inst = resolve_instance_for_host(host)
+        if not inst or not inst.get("instance_id") or not inst.get("account_id"):
+            continue
+        job_id = create_ssm_document_job(
+            inst["instance_id"], inst["account_id"], inst.get("region", "us-east-1"),
+            DR_STATUS_CHECK_DOCUMENT_NAME, {"AGName": [ag_name]},
+            f"RunStack DR status: {ag_name} (parallel, host={host})"
+        )
+        if job_id:
+            dispatched.append({"host": host, "job_id": job_id, "instance_id": inst["instance_id"]})
+
+    if not dispatched:
+        return {"ok": False, "reason": f"No instance mapping resolved for any of: {', '.join(candidate_hosts)}"}
+
+    group_id = f"grp-{uuid.uuid4()}"
+    ddb = boto3.resource("dynamodb")
+    table = ddb.Table(DR_RUN_LOG_TABLE)
+    table.put_item(Item={
+        "run_id": group_id,
+        "ag_name": ag_name,
+        "type": "parallel_group",
+        "member_jobs": dispatched,
+        "created_at": datetime.utcnow().isoformat(),
+        "expires_at": int(time.time()) + 600,
+    })
+    return {
+        "ok": True,
+        "job_id": group_id,
+        "resolved_via_host": ",".join(d["host"] for d in dispatched),
+        "instance_id": ",".join(d["instance_id"] for d in dispatched),
+    }
+
+
+def _get_parallel_group(group_id: str) -> Optional[Dict[str, Any]]:
+    ddb = boto3.resource("dynamodb")
+    table = ddb.Table(DR_RUN_LOG_TABLE)
+    item = table.get_item(Key={"run_id": group_id}).get("Item")
+    if not item or item.get("type") != "parallel_group":
+        return None
+    return item
+
+
+def _read_parallel_group_result(group_id: str) -> Dict[str, Any]:
+    """
+    Resolves an opaque parallel-dispatch group id the same way
+    read_ag_status_job_result resolves a plain job_id. Returns as soon as
+    ANY member job reports full AG topology (saw PRIMARY); if all member
+    jobs are terminal and none saw full topology, merges every partial
+    view collected — same "warning" semantics as the old sequential-retry
+    exhaustion path.
+    """
+    group = _get_parallel_group(group_id)
+    if not group:
+        return {"ok": False, "reason": f"No parallel status-check group found for id '{group_id}' (may have expired)"}
+
+    member_jobs = group.get("member_jobs", [])
+    if not member_jobs:
+        return {"ok": False, "reason": f"Parallel status-check group '{group_id}' has no member jobs"}
+
+    any_pending = False
+    merged_roles: Dict[str, Any] = {}
+    merged_db_sync: Dict[tuple, Any] = {}
+
+    for member in member_jobs:
+        info = get_job_raw_output(member["job_id"])
+        if not info["found"]:
+            continue
+        status = info["status"]
+        if status not in _JOB_TERMINAL_STATUSES:
+            any_pending = True
+            continue
+        if status in ("FAILED", "TIMED_OUT", "CANCELLED"):
+            continue
+        roles = parse_runstack_tagged_json(info["raw_output"], "ROLES")
+        db_sync = parse_runstack_tagged_json(info["raw_output"], "DBSYNC")
+        if roles and len(roles) >= 2 and any(r.get("Role") == "PRIMARY" for r in roles):
+            # This host has full topology visibility — done, use it directly.
+            return {"ok": True, "done": True, "roles": roles, "db_sync": db_sync}
+        for r in roles:
+            if r.get("ReplicaName"):
+                merged_roles[r["ReplicaName"]] = r
+        for d in db_sync:
+            merged_db_sync[(d.get("DBName"), d.get("Replica"))] = d
+
+    if any_pending:
+        return {"ok": True, "done": False, "status": "RUNNING"}
+
+    if not merged_roles:
+        return {"ok": False, "reason": "All parallel status-check jobs completed but no host returned role data — check SSM output"}
+
+    return {
+        "ok": True,
+        "done": True,
+        "roles": list(merged_roles.values()),
+        "db_sync": list(merged_db_sync.values()),
+        "warning": (
+            "Could not find a host with full AG visibility (i.e. Primary) among any "
+            "of the hosts checked in parallel. The roles/db_sync below are the combined "
+            "partial views collected from each host - some fields (which replica is "
+            "Primary, another replica's live state) may still be missing or stale."
+        ),
+    }
 
 def read_ag_status_job_result(job_id: str) -> Dict[str, Any]:
+    if job_id.startswith("grp-"):
+        return _read_parallel_group_result(job_id)
+
     info = get_job_raw_output(job_id)
     if not info["found"]:
         return {"ok": False, "reason": f"No job found for job_id '{job_id}'"}
