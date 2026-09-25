@@ -81,8 +81,16 @@ def handle_dr_plan(event, http_method, path, path_parameters, query_params):
         # Locked here — the earliest point a real run begins — not at the
         # SSM document itself, which is too late: by then both jobs would
         # already be created and racing.
+        # lock_resource_id MUST stay defined even while lock acquisition
+        # below is commented out: every early-return path in this handler
+        # (and the PLAN_FAILED path) calls release_action_lock(lock_resource_id).
+        # With the assignment commented out those calls raised NameError,
+        # turning every 400 (missing job id, failed checks, unclassifiable
+        # roles) into a generic 500 "Failed to plan DR failover" and hiding
+        # the failed readiness checks from the UI and the AQS SQL agent.
+        # Releasing a lock that was never acquired is a harmless delete.
+        lock_resource_id = f"dr-failover:{ag_name}"
         #claims, _ = get_claims_and_role(event)
-        #lock_resource_id = f"dr-failover:{ag_name}"
         #existing_lock = acquire_action_lock(
         #    lock_resource_id, claims.get("username", "unknown"), job_id="pending",
         #    ttl_seconds=DR_ACTION_LOCK_TTL_SECONDS
@@ -237,6 +245,46 @@ def handle_dr_execute(event, http_method, path, path_parameters, query_params):
         denied = authorize_action(event, "sql_dr_failover", resource_id=ag_name)
         if denied:
             return denied
+
+        # Optional pre-execution freshness gate (sent by the RunStack UI).
+        # When fresh_role_check_job_id is supplied, the live AG state it
+        # captured must still match what the operator reviewed at /plan
+        # time. Omitted = previous behaviour, so the AQS SQL agent and the
+        # Teams /approve path are unchanged.
+        fresh_job_id = body.get("fresh_role_check_job_id")
+        if fresh_job_id:
+            run_for_check = get_dr_run_record(token_peek.get("run_id")) or {}
+            fresh = _verify_fresh_role_check(ag_name, fresh_job_id, run_for_check)
+            if fresh["status"] == "invalid":
+                # Bad request (wrong AG, not finished, too old) — token is
+                # left intact so the operator can re-run the final check.
+                return {
+                    "statusCode": 400,
+                    "headers": CORS_HEADERS,
+                    "body": json.dumps({"error": fresh["reason"], "code": "FRESH_CHECK_INVALID"})
+                }
+            if fresh["status"] == "changed":
+                # Live state moved since review: burn the token so neither
+                # this UI nor a still-open Teams card can execute the stale
+                # plan, and record why on the run.
+                stale_item = consume_dr_confirmation_token(token, ag_name)
+                if stale_item:
+                    update_dr_run_record(stale_item["run_id"], {
+                        "status": "STALE_PLAN",
+                        "error": "Live AG state changed before execution: " + "; ".join(fresh["differences"]),
+                        "stale_check_job_id": fresh_job_id,
+                    })
+                release_action_lock(f"dr-failover:{ag_name}")
+                return {
+                    "statusCode": 409,
+                    "headers": CORS_HEADERS,
+                    "body": json.dumps({
+                        "error": "Live AG state changed since readiness was reviewed. Review the new results and re-run readiness.",
+                        "code": "STATE_CHANGED",
+                        "differences": fresh["differences"],
+                        "run_id": token_peek.get("run_id"),
+                    })
+                }
 
         token_item = consume_dr_confirmation_token(token, ag_name)
         if not token_item:
@@ -688,3 +736,273 @@ def handle_dr_status(event, http_method, path, path_parameters, query_params):
             "headers": CORS_HEADERS,
             "body": json.dumps({"error": "Failed to fetch run status", "detail": str(e)})
         }
+
+# ════════════════════════════════════════════════════════════════════════
+# Pre-execution freshness check (used by handle_dr_execute)
+# ════════════════════════════════════════════════════════════════════════
+#
+# Why: /plan evaluates readiness against a role-check job the operator ran
+# earlier. By the time they click "Start switchover" the AG may have moved
+# (automatic failover, a replica disconnecting, a log queue building up).
+# The UI runs a NEW role-check job immediately before execution and passes
+# its job_id as fresh_role_check_job_id. This helper checks that job
+# belongs to this AG, finished recently, and still describes the same
+# primary/target with every readiness check passing.
+
+DR_FRESH_CHECK_MAX_AGE_SECONDS = int(os.getenv("DR_FRESH_CHECK_MAX_AGE_SECONDS", "600"))
+
+
+def _parse_utc_iso(value):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00").split("+")[0])
+    except ValueError:
+        return None
+
+
+def _verify_fresh_role_check(ag_name: str, fresh_job_id: str, run_record: dict) -> dict:
+    """Returns {"status": "ok"}, {"status": "invalid", "reason": str} or
+    {"status": "changed", "differences": [str, ...]}.
+
+    "invalid" = the supplied job cannot be used as evidence (caller error).
+    "changed" = the job is valid evidence and shows the reviewed plan no
+    longer holds — execution must be blocked."""
+    job = get_job_by_id(fresh_job_id)
+    if not job:
+        return {"status": "invalid", "reason": f"Final check job '{fresh_job_id}' was not found."}
+
+    automation_data = job.get("automation_data") or {}
+    job_ag = ((automation_data.get("Parameters") or {}).get("AGName") or [None])[0]
+    doc_name = str(automation_data.get("DocumentName", ""))
+    if job_ag != ag_name or not doc_name.endswith(DR_STATUS_CHECK_DOCUMENT_NAME):
+        return {"status": "invalid", "reason": "Final check job is not a role check for this availability group."}
+
+    if fresh_job_id == run_record.get("role_check_job_id"):
+        return {"status": "invalid", "reason": "Final check must be a new role check, not the one readiness was reviewed against."}
+
+    created = _parse_utc_iso(job.get("created_at"))
+    run_created = _parse_utc_iso(run_record.get("created_at"))
+    if not created:
+        return {"status": "invalid", "reason": "Final check job has no creation time."}
+    if run_created and created < run_created:
+        return {"status": "invalid", "reason": "Final check was started before readiness was reviewed — run it again."}
+    age = (datetime.utcnow() - created).total_seconds()
+    if age > DR_FRESH_CHECK_MAX_AGE_SECONDS:
+        return {"status": "invalid", "reason": f"Final check is {int(age)}s old (limit {DR_FRESH_CHECK_MAX_AGE_SECONDS}s) — run it again."}
+
+    result = read_ag_status_job_result(fresh_job_id)
+    if not result["ok"]:
+        return {"status": "invalid", "reason": f"Final check did not complete: {result['reason']}"}
+    if not result["done"]:
+        return {"status": "invalid", "reason": f"Final check is still {result['status']}."}
+
+    reviewed_primary = run_record.get("primary_host")
+    reviewed_target = run_record.get("dr_replica_host")
+    differences = []
+
+    classification = classify_ag_roles(result["roles"], ag_name, reviewed_target)
+    if not classification.get("ok"):
+        return {"status": "changed", "differences": [classification.get("reason", "Could not classify live roles.")]}
+
+    live_primary = classification["primary"].get("ReplicaName")
+    if live_primary != reviewed_primary:
+        differences.append(f"Primary changed from {reviewed_primary} to {live_primary}")
+
+    evaluation = evaluate_dr_preconditions(result, classification)
+    for check in evaluation["checks"]:
+        if check["result"] != "PASS":
+            differences.append(check["detail"])
+
+    if differences:
+        return {"status": "changed", "differences": differences}
+    return {"status": "ok"}
+
+
+# ════════════════════════════════════════════════════════════════════════
+# Saved switchover plans (drafts)
+# ════════════════════════════════════════════════════════════════════════
+#
+#   GET  /dr-failover/{AGName}/plans            → list saved plans for AG
+#   POST /dr-failover/{AGName}/plans            → save a new draft plan
+#   POST /dr-failover/{AGName}/plans/{PlanId}   → update / cancel / mark executed
+#
+# A saved plan is a DRAFT ONLY. Nothing reads proposed_time to trigger an
+# execution — there is no scheduler behind it. Executing still requires the
+# full live flow: live check → readiness (/plan) → final check → /execute.
+#
+# Storage: the existing runstack-dr-run-log table (same pattern as the
+# "roles-retry-{AG}" helper items already stored there). Items use a
+# "plan-" run_id prefix and record_type SWITCHOVER_PLAN, and are listed
+# per-AG through the existing ag_name-created_at-index GSI. No new table,
+# no IAM change (the Lambda already has runstack-* table/index access).
+# Authorization is the same sql_dr_failover action check as /plan.
+
+_PLAN_RECORD_TYPE = "SWITCHOVER_PLAN"
+_PLAN_STATUSES = {"DRAFT", "CANCELLED", "EXECUTED"}
+_PLAN_TEXT_LIMITS = {"intended_target": 200, "change_reference": 100, "notes": 2000}
+
+
+def _plan_ag_name(path: str) -> str:
+    import urllib.parse as _urlparse
+    return _urlparse.unquote(path.split("/dr-failover/")[-1].split("/plans")[0])
+
+
+def _clean_plan_fields(body: dict, require_all: bool) -> tuple:
+    """Validates user-supplied plan fields. Returns (fields, error)."""
+    fields = {}
+    for key, limit in _PLAN_TEXT_LIMITS.items():
+        if key in body:
+            value = str(body.get(key) or "").strip()
+            if len(value) > limit:
+                return None, f"{key} must be {limit} characters or fewer"
+            fields[key] = value
+
+    if "proposed_time" in body:
+        raw = str(body.get("proposed_time") or "").strip()
+        if raw:
+            try:
+                parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                return None, "proposed_time must be an ISO-8601 timestamp"
+            # Store as UTC ISO with explicit Z so every consumer reads the
+            # same instant regardless of the operator's browser timezone.
+            if parsed.tzinfo is not None:
+                from datetime import timezone as _tz
+                parsed = parsed.astimezone(_tz.utc).replace(tzinfo=None)
+            fields["proposed_time"] = parsed.isoformat(timespec="minutes") + "Z"
+        else:
+            fields["proposed_time"] = ""
+
+    if require_all:
+        missing = [k for k in ("intended_target", "proposed_time", "change_reference") if not fields.get(k)]
+        if missing:
+            return None, f"Missing required field(s): {', '.join(missing)}"
+    return fields, None
+
+
+def _public_plan(item: dict) -> dict:
+    keys = ("run_id", "ag_name", "status", "intended_target", "proposed_time",
+            "change_reference", "notes", "created_by", "created_at",
+            "updated_by", "updated_at", "executed_run_id")
+    out = {k: item.get(k) for k in keys if k in item}
+    out["plan_id"] = out.pop("run_id", None)
+    return out
+
+
+def handle_dr_plans_list(event, http_method, path, path_parameters, query_params):
+    try:
+        ag_name = _plan_ag_name(path)
+        denied = authorize_action(event, "sql_dr_failover", resource_id=ag_name)
+        if denied:
+            return denied
+
+        from boto3.dynamodb.conditions import Key, Attr
+        table = boto3.resource("dynamodb").Table(DR_RUN_LOG_TABLE)
+        include_closed = (query_params or {}).get("include_closed") == "true"
+        items, kwargs = [], {
+            "IndexName": "ag_name-created_at-index",
+            "KeyConditionExpression": Key("ag_name").eq(ag_name),
+            "FilterExpression": Attr("record_type").eq(_PLAN_RECORD_TYPE),
+            "ScanIndexForward": False,
+        }
+        while True:
+            resp = table.query(**kwargs)
+            items.extend(resp.get("Items", []))
+            if not resp.get("LastEvaluatedKey") or len(items) >= 200:
+                break
+            kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+
+        plans = [_public_plan(i) for i in items if include_closed or i.get("status") == "DRAFT"]
+        return {"statusCode": 200, "headers": CORS_HEADERS,
+                "body": json.dumps({"ag_name": ag_name, "plans": plans}, default=decimal_default)}
+    except Exception as e:
+        logger.error(f"Error listing switchover plans: {e}")
+        return {"statusCode": 500, "headers": CORS_HEADERS,
+                "body": json.dumps({"error": "Failed to list switchover plans", "detail": str(e)})}
+
+
+def handle_dr_plans_create(event, http_method, path, path_parameters, query_params):
+    try:
+        ag_name = _plan_ag_name(path)
+        denied = authorize_action(event, "sql_dr_failover", resource_id=ag_name)
+        if denied:
+            return denied
+
+        body = json.loads(event.get("body") or "{}")
+        fields, error = _clean_plan_fields(body, require_all=True)
+        if error:
+            return {"statusCode": 400, "headers": CORS_HEADERS, "body": json.dumps({"error": error})}
+
+        claims, _ = get_claims_and_role(event)
+        now = datetime.utcnow().isoformat()
+        item = {
+            "run_id": f"plan-{uuid.uuid4()}",
+            "record_type": _PLAN_RECORD_TYPE,
+            "ag_name": ag_name,
+            "status": "DRAFT",
+            "created_by": claims.get("username", "unknown"),
+            "created_at": now,
+            "updated_by": claims.get("username", "unknown"),
+            "updated_at": now,
+            **fields,
+        }
+        boto3.resource("dynamodb").Table(DR_RUN_LOG_TABLE).put_item(Item=item)
+        return {"statusCode": 201, "headers": CORS_HEADERS,
+                "body": json.dumps({"plan": _public_plan(item)}, default=decimal_default)}
+    except Exception as e:
+        logger.error(f"Error saving switchover plan: {e}")
+        return {"statusCode": 500, "headers": CORS_HEADERS,
+                "body": json.dumps({"error": "Failed to save switchover plan", "detail": str(e)})}
+
+
+def handle_dr_plan_update(event, http_method, path, path_parameters, query_params):
+    try:
+        ag_name = _plan_ag_name(path)
+        plan_id = path.split("/plans/")[-1].strip("/")
+        denied = authorize_action(event, "sql_dr_failover", resource_id=ag_name)
+        if denied:
+            return denied
+
+        existing = get_dr_run_record(plan_id)
+        # The AG in the path must match the stored plan, otherwise a caller
+        # authorized for AG-A could edit a plan for AG-B.
+        if (not existing or existing.get("record_type") != _PLAN_RECORD_TYPE
+                or existing.get("ag_name") != ag_name):
+            return {"statusCode": 404, "headers": CORS_HEADERS,
+                    "body": json.dumps({"error": f"No saved plan '{plan_id}' for {ag_name}"})}
+        if existing.get("status") != "DRAFT":
+            return {"statusCode": 409, "headers": CORS_HEADERS,
+                    "body": json.dumps({"error": f"Plan is {existing.get('status')} and can no longer be changed"})}
+
+        body = json.loads(event.get("body") or "{}")
+        fields, error = _clean_plan_fields(body, require_all=False)
+        if error:
+            return {"statusCode": 400, "headers": CORS_HEADERS, "body": json.dumps({"error": error})}
+
+        new_status = body.get("status")
+        if new_status is not None:
+            if new_status not in _PLAN_STATUSES:
+                return {"statusCode": 400, "headers": CORS_HEADERS,
+                        "body": json.dumps({"error": f"status must be one of {sorted(_PLAN_STATUSES)}"})}
+            fields["status"] = new_status
+        if new_status == "EXECUTED":
+            executed_run_id = str(body.get("executed_run_id") or "")
+            linked = get_dr_run_record(executed_run_id) if executed_run_id.startswith("dr-") else None
+            if not linked or linked.get("ag_name") != ag_name:
+                return {"statusCode": 400, "headers": CORS_HEADERS,
+                        "body": json.dumps({"error": "executed_run_id must be a switchover run for this AG"})}
+            fields["executed_run_id"] = executed_run_id
+
+        if not fields:
+            return {"statusCode": 400, "headers": CORS_HEADERS, "body": json.dumps({"error": "Nothing to update"})}
+
+        claims, _ = get_claims_and_role(event)
+        fields["updated_by"] = claims.get("username", "unknown")
+        update_dr_run_record(plan_id, fields)
+        return {"statusCode": 200, "headers": CORS_HEADERS,
+                "body": json.dumps({"plan": _public_plan(get_dr_run_record(plan_id) or {})}, default=decimal_default)}
+    except Exception as e:
+        logger.error(f"Error updating switchover plan: {e}")
+        return {"statusCode": 500, "headers": CORS_HEADERS,
+                "body": json.dumps({"error": "Failed to update switchover plan", "detail": str(e)})}

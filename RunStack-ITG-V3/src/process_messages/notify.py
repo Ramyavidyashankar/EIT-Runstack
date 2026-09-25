@@ -97,20 +97,17 @@ def handle_notify(event, http_method, path, path_parameters, query_params):
         logger.warning(f"User {claims.get('username', 'unknown')} denied for /notify: {denied.get('body')}")
         return denied
 
-    #if resource_id:
-    #    claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
-    #    username = claims.get("username", "")
-    #    user_email = username.replace("AzureAD_", "") if username.startswith("AzureAD_") else claims.get("email", username)
-    #    lock_conflict = acquire_action_lock(resource_id, user_email or "unknown", job_id)
-    #    if lock_conflict:
-    #        return {
-    #            "statusCode": 423,
-    #            "headers": CORS_HEADERS,
-    #            "body": json.dumps({
-    #                "error": "locked",
-    #                "message": f"Someone is already performing an action on this instance ({lock_conflict['locked_by']}, started {lock_conflict['locked_at']}). Please wait and try again shortly."
-    #            })
-    #        }
+    if resource_id and not is_status_check:
+        lock_conflict = check_and_acquire_lock(event, f"ec2:{resource_id}", job_id=job_id)
+        if lock_conflict:
+            return {
+                "statusCode": 423,
+                "headers": CORS_HEADERS,
+                "body": json.dumps({
+                    "error": "locked",
+                    "message": f"Someone is already performing an action on this instance ({lock_conflict['locked_by']}, started {lock_conflict['locked_at']}). Please wait and try again shortly."
+                })
+            }
 
     logger.info(f"DEBUG about to send to SQS: {json.dumps(body)}")
 

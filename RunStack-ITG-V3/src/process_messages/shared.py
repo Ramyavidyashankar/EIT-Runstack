@@ -968,11 +968,18 @@ def get_instances_for_apps(app_ids: list) -> list:
 
         instances = []
         for app_id in app_ids:
-            response = table.query(
-                IndexName="app_id-index",
-                KeyConditionExpression=boto3.dynamodb.conditions.Key("app_id").eq(app_id)
-            )
-            instances.extend(response.get("Items", []))
+            # Follow LastEvaluatedKey, same as the scan above — one query
+            # page stops at 1 MB.
+            kwargs = {
+                "IndexName": "app_id-index",
+                "KeyConditionExpression": boto3.dynamodb.conditions.Key("app_id").eq(app_id),
+            }
+            while True:
+                response = table.query(**kwargs)
+                instances.extend(response.get("Items", []))
+                if not response.get("LastEvaluatedKey"):
+                    break
+                kwargs["ExclusiveStartKey"] = response["LastEvaluatedKey"]
 
         seen = set()
         unique = []
@@ -2391,7 +2398,7 @@ def create_ssm_runcommand_job(instance_id: str, account_id: str, region: str, co
     return job_id
 
 DR_STATUS_CHECK_DOCUMENT_NAME = os.getenv("DR_STATUS_CHECK_DOCUMENT_NAME", "RunStack-DR-Status-Check")
-DR_DOCUMENT_OWNER_ACCOUNT = os.getenv("DR_DOCUMENT_OWNER_ACCOUNT", "693426599691")
+DR_DOCUMENT_OWNER_ACCOUNT = os.getenv("DR_DOCUMENT_OWNER_ACCOUNT", "246314649749")
 TEAMS_DR_APPROVAL_WEBHOOK_URL_SECRET_ARN = os.getenv("TEAMS_DR_APPROVAL_WEBHOOK_URL_SECRET_ARN", "")
 TEAMS_APPROVE_SHARED_SECRET_SECRET_ARN = os.getenv("TEAMS_APPROVE_SHARED_SECRET_SECRET_ARN", "")
 # Local-testing overrides only — leave unset in deployed environments.

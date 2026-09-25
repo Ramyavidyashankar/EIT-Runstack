@@ -25,13 +25,13 @@ Modular layout (split from a single ~4,300-line file):
 - admin.py         — /admin/users, /admin/users/{username}/role
 - ssm_docs.py      — /ssm/documents(/{name})
 - eventbridge.py   — /eventbridge/schedules(/{name})
-- jobs.py          — /jobs/dlq, /jobs/latest, /jobs/recent, /jobs/{jobId}
+- jobs.py          — /jobs/dlq, /jobs/latest, /jobs/recent, /jobs/query, /jobs/{jobId}
 - auth.py          — /auth/callback, /ui/login
 - instances.py     — /agent/instances, /app-instances
 - tidal.py         — /tidal/apps/{AppId}/agents
 - healthcheck.py   — /batch-healthcheck, /instances/status, /assess/{checkId}
 - dynatrace.py     — /dynatrace/ags(/{AGName}/servers|roles(/{JobId}))
-- dr_failover.py   — /dr-failover/{AGName}/config, plan, execute, approve, status
+- dr_failover.py   — /dr-failover/{AGName}/config, plan, execute, approve, status, plans(/{PlanId})
 This file (app.py) stays the Lambda entry point: SQS message processing
 (process_single_message) and the top-level API Gateway dispatcher
 (handle_api_gateway_request), which now just routes to the modules above.
@@ -160,6 +160,9 @@ def handle_api_gateway_request(event: Dict[str, Any]) -> Dict[str, Any]:
             return jobs.handle_jobs_dlq_clear(event, http_method, path, path_parameters, query_params)
         elif path.endswith("/latest"):
             return jobs.handle_jobs_latest(event, http_method, path, path_parameters, query_params)
+        # Must be before the {jobId} branch, or "query" would be read as a job ID.
+        elif path.endswith("/jobs/query") and http_method == "GET":
+            return jobs.handle_jobs_query(event, http_method, path, path_parameters, query_params)
         elif path.endswith("/recent"):
             return jobs.handle_jobs_recent(event, http_method, path, path_parameters, query_params)
         elif "jobId" in path_parameters:
@@ -188,6 +191,14 @@ def handle_api_gateway_request(event: Dict[str, Any]) -> Dict[str, Any]:
             return dynatrace.handle_dynatrace_ag_roles(event, http_method, path, path_parameters, query_params)
         elif "/dynatrace/ags/" in path and "/roles/" in path and http_method == "GET":
             return dynatrace.handle_dynatrace_ag_role_job(event, http_method, path, path_parameters, query_params)
+        # Saved switchover plans (drafts only — no scheduler). Matched before
+        # the other /dr-failover/ branches; "/plans" never ends with "/plan".
+        elif "/dr-failover/" in path and path.endswith("/plans") and http_method == "GET":
+            return dr_failover.handle_dr_plans_list(event, http_method, path, path_parameters, query_params)
+        elif "/dr-failover/" in path and path.endswith("/plans") and http_method == "POST":
+            return dr_failover.handle_dr_plans_create(event, http_method, path, path_parameters, query_params)
+        elif "/dr-failover/" in path and "/plans/" in path and http_method == "POST":
+            return dr_failover.handle_dr_plan_update(event, http_method, path, path_parameters, query_params)
         elif "/dr-failover/" in path and path.endswith("/config") and http_method == "GET":
             return dr_failover.handle_dr_config(event, http_method, path, path_parameters, query_params)
         elif "/dr-failover/" in path and path.endswith("/plan") and http_method == "POST":

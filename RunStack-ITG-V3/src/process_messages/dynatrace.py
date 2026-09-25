@@ -66,9 +66,9 @@ def handle_dynatrace_ag_roles(event, http_method, path, path_parameters, query_p
                 "body": json.dumps({"error": f"AG '{ag_name}' not found in Dynatrace"})
             }
 
-        # Guard against an accidental re-trigger while a retry chain is
-        # already in progress (e.g. a "retry" action that re-calls this
-        # trigger tool instead of polling the existing job). Without this,
+        # Guard against an accidental re-trigger while a check is already
+        # in progress (e.g. a "retry" action that re-calls this trigger
+        # tool instead of polling the existing job). Without this,
         # clear_tried_hosts() below would silently discard tried_hosts and
         # every retry would restart from candidate_hosts[0].
         active = get_active_retry_state(ag_name)
@@ -89,10 +89,22 @@ def handle_dynatrace_ag_roles(event, http_method, path, path_parameters, query_p
             }
 
         clear_tried_hosts(ag_name)
-        trigger = trigger_ag_status_check_job(ag_name, [s["host"] for s in servers])
+        all_hosts = [s["host"] for s in servers]
+
+        # Dispatch to every AG host in parallel instead of one at a time —
+        # cuts discovery from up to N sequential SSM round trips to 1.
+        trigger = trigger_ag_status_check_job_parallel(ag_name, all_hosts)
         if not trigger["ok"]:
             return {"statusCode": 404, "headers": CORS_HEADERS, "body": json.dumps({"error": trigger["reason"]})}
+
         record_retry_job_id(ag_name, trigger["job_id"])
+        # Mark every host as already tried, so the accidental-re-trigger
+        # guard above correctly recognizes this AG as "in progress" if the
+        # agent or a second user re-calls this endpoint before the
+        # parallel batch finishes.
+        for host in all_hosts:
+            add_tried_host(ag_name, host)
+
         return {
             "statusCode": 202,
             "headers": CORS_HEADERS,
@@ -125,6 +137,22 @@ def handle_dynatrace_ag_role_job(event, http_method, path, path_parameters, quer
             return {"statusCode": 400, "headers": CORS_HEADERS, "body": json.dumps({"error": result["reason"], "ag_name": ag_name})}
         if not result["done"]:
             return {"statusCode": 200, "headers": CORS_HEADERS, "body": json.dumps({"ag_name": ag_name, "status": result["status"]})}
+
+        # A parallel-dispatch group (see trigger_ag_status_check_job_parallel)
+        # already tried every host at once and merged partial views itself —
+        # its "warning" is final. Do NOT run the single-job sequential-retry
+        # escalation below on it: that logic tracks its own tried-hosts
+        # record and would otherwise re-trigger a redundant fresh check.
+        if job_id.startswith("grp-"):
+            body = {
+                "ag_name": ag_name,
+                "status": "COMPLETED",
+                "roles": result["roles"],
+                "db_sync": result["db_sync"],
+            }
+            if result.get("warning"):
+                body["warning"] = result["warning"]
+            return {"statusCode": 200, "headers": CORS_HEADERS, "body": json.dumps(body, default=decimal_default)}
 
         roles = result["roles"]
         primary_seen = any(r.get("Role") == "PRIMARY" for r in roles)
@@ -197,5 +225,3 @@ def handle_dynatrace_ag_role_job(event, http_method, path, path_parameters, quer
             "headers": CORS_HEADERS,
             "body": json.dumps({"error": "Failed to read AG status job result", "detail": str(e)})
         }
-
-# ── GET /dr-failover/{AGName}/config ───────────────────────────

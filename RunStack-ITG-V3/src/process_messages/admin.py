@@ -12,7 +12,11 @@ def handle_admin_users_list(event, http_method, path, path_parameters, query_par
     if denied:
         return denied
     try:
-        result = list_runstack_users()
+        # Superset of list_runstack_users(): same email/role/apps per user,
+        # plus teams and an effective-access explanation (access_review.py)
+        # computed with the same rules authorize_action enforces.
+        from access_review import build_access_overview
+        result = build_access_overview()
         return {
             "statusCode": 200,
             "headers": CORS_HEADERS,
