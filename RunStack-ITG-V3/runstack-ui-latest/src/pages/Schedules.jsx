@@ -599,59 +599,8 @@ export function Settings() {
 }
 
 
-// ─── Accounts Page ────────────────────────────────────────────────────────────
-export function Accounts() {
-  const accounts = [
-    { id:'123456789012', alias:'prod-us',     region:'us-east-1',      role:'runstack-cross-account-role', status:'reachable' },
-    { id:'234567890123', alias:'prod-eu',     region:'eu-west-1',      role:'runstack-cross-account-role', status:'reachable' },
-    { id:'345678901234', alias:'staging-apac',region:'ap-southeast-1', role:'runstack-cross-account-role', status:'reachable' },
-    { id:'456789012345', alias:'dev-us',      region:'us-west-2',      role:'runstack-cross-account-role', status:'unknown' },
-  ];
-  return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
-      <Topbar title="Target Accounts" subtitle="Cross-account SSM automation targets"/>
-      <div style={{ flex:1, overflowY:'auto', padding:24 }}>
-        <Card>
-          <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
-            <thead>
-              <tr>
-                {['Account ID','Alias','Region','Cross-account role','Status'].map(h => (
-                  <th key={h} style={{ textAlign:'left', padding:'9px 16px', fontSize:10, fontWeight:600,
-                    color:'var(--text-tertiary)', textTransform:'uppercase', letterSpacing:0.5,
-                    borderBottom:'1px solid var(--border)' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {accounts.map(a => (
-                <tr key={a.id}
-                  onMouseEnter={e => e.currentTarget.style.background='var(--bg-hover)'}
-                  onMouseLeave={e => e.currentTarget.style.background=''}>
-                  <td style={td}><code style={{ fontFamily:'var(--font-mono)', fontSize:12 }}>{a.id}</code></td>
-                  <td style={td}><span style={{ fontWeight:500 }}>{a.alias}</span></td>
-                  <td style={td}><span style={{ color:'var(--text-secondary)', fontSize:12 }}>{a.region}</span></td>
-                  <td style={td}><code style={{ fontFamily:'var(--font-mono)', fontSize:11, color:'var(--text-mono)' }}>{a.role}</code></td>
-                  <td style={td}>
-                    <span style={{
-                      padding:'3px 9px', borderRadius:10, fontSize:11, fontWeight:600,
-                      background: a.status === 'reachable' ? 'var(--green-bg)' : 'var(--amber-bg)',
-                      color: a.status === 'reachable' ? 'var(--green)' : 'var(--amber)',
-                    }}>{a.status}</span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </Card>
-        <div style={{ marginTop:16, fontSize:12, color:'var(--text-tertiary)', lineHeight:1.8 }}>
-          Add target accounts by running{' '}
-          <code style={{ fontFamily:'var(--font-mono)', fontSize:11 }}>./create-role.sh -a YOUR_RUNSTACK_ACCOUNT_ID</code>{' '}
-          in each target account. The cross-account role must trust your RunStack execution role.
-        </div>
-      </div>
-    </div>
-  );
-}
+// Target Accounts page removed — replaced by pages/RegisteredTargets.jsx,
+// which reads runstack-instance-catalog instead of hardcoded sample accounts.
 
 
 // ─── SSM Documents Page ───────────────────────────────────────────────────────

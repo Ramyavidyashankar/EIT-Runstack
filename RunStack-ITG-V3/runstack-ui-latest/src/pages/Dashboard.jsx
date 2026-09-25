@@ -8,6 +8,8 @@ import { Topbar } from '../components/Layout';
 import { Card, CardHead, StatusBadge, TypeTag, Spinner, ErrorBanner, Btn, Empty } from '../components/ui';
 import { fetchRecentJobs } from '../api/client';
 import { fmtRelative } from '../utils/helpers';
+import { RefreshControl } from '../components/sections';
+import { useAutoRefresh, usePageRefresh } from '../hooks/usePageRefresh';
 import { FixedSizeList as List } from 'react-window';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -81,7 +83,6 @@ const IconAlert  = (p) => <Icon {...p}><path d="M8 1.5L14.5 13.5H1.5L8 1.5z" /><
 const IconBolt   = (p) => <Icon {...p}><path d="M8.5 1.5L3 9h4l-.5 5.5L13 7H9l-0.5-5.5z" /></Icon>;
 const IconPlay   = (p) => <Icon {...p}><path fill={p.color} stroke="none" d="M3.5 2.5l10 5.5-10 5.5z" /></Icon>;
 const IconClock  = (p) => <Icon {...p}><circle cx="8" cy="8" r="6" /><path d="M8 5v3.5l2.5 1.5" /></Icon>;
-const IconRefresh = (p) => <Icon {...p}><path d="M13 8a5 5 0 1 1-1.5-3.6" /><path d="M13 2.5V6h-3.5" /></Icon>;
 const IconDownload = (p) => <Icon {...p}><path d="M8 2v8M5 7l3 3 3-3" /><path d="M3 12.5v1a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-1" /></Icon>;
 
 // ─── Metric card — DXC-toned stat with top accent ─────────────────────────────
@@ -359,27 +360,28 @@ export default function Dashboard() {
 
   useEffect(() => { loadJobs(true); }, [statusFilter]);
 
-  useEffect(() => {
-    const id = setInterval(async () => {
-      try {
-        const data = await fetchRecentJobs({ limit: FETCH_LIMIT, status: statusFilter || undefined });
-        const fresh = data.jobs || [];
-        setAllJobs(prev => {
-          const existingIds = new Set(prev.map(j => j.job_id));
-          const newJobs = fresh.filter(j => !existingIds.has(j.job_id));
-          const updated = prev.map(j => {
-            const f = fresh.find(x => x.job_id === j.job_id);
-            return f ? { ...j, status: f.status, updated_at: f.updated_at } : j;
-          });
-          return newJobs.length > 0 ? [...newJobs, ...updated] : updated;
-        });
-        setLastFetched(new Date());
-      } catch (e) {
-        console.warn('Auto-refresh failed:', e.message);
-      }
-    }, POLL_MS);
-    return () => clearInterval(id);
+  // In-place refresh: re-reads the newest page, updates status/updated_at
+  // of jobs already loaded and prepends new ones. Filters, search, chart
+  // range and scroll position are untouched. Used by the 15s auto-refresh,
+  // the Refresh button and a repeat click on "Dashboard" in the sidebar.
+  const softRefresh = useCallback(async () => {
+    const data = await fetchRecentJobs({ limit: FETCH_LIMIT, status: statusFilter || undefined });
+    const fresh = data.jobs || [];
+    const byId = new Map(fresh.map(j => [j.job_id, j]));
+    setAllJobs(prev => {
+      const existingIds = new Set(prev.map(j => j.job_id));
+      const newJobs = fresh.filter(j => !existingIds.has(j.job_id));
+      const updated = prev.map(j => {
+        const f = byId.get(j.job_id);
+        return f ? { ...j, status: f.status, updated_at: f.updated_at } : j;
+      });
+      return newJobs.length > 0 ? [...newJobs, ...updated] : updated;
+    });
+    setLastFetched(new Date());
   }, [statusFilter]);
+
+  const auto = useAutoRefresh(softRefresh, { intervalMs: POLL_MS, enabled: !loading });
+  usePageRefresh(auto.refresh);
 
   // Stats
   const stats = useMemo(() => {
@@ -450,19 +452,23 @@ export default function Dashboard() {
 
   const timeStr = loading
     ? `Loading job history… ${loadProgress} loaded so far`
-    : lastFetched ? `Last refreshed ${fmtRelative(lastFetched.toISOString())}` : 'Connecting…';
+    : lastFetched ? `Last updated ${lastFetched.toLocaleTimeString('en-GB')}` : 'Connecting…';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: C.canvas }}>
 
       <Topbar
         title="Dashboard"
-        subtitle={timeStr}
+        subtitle={loading ? timeStr : 'Live view of RunStack automation executions'}
         actions={
           <>
-            <Btn variant="default" size="sm" onClick={() => loadJobs(true)} disabled={loading}>
-              {loading ? <Spinner size={13} /> : <IconRefresh size={13} color={C.textSec} />} Refresh
-            </Btn>
+            <RefreshControl
+              onRefresh={auto.refresh}
+              refreshing={loading || auto.refreshing}
+              lastUpdated={lastFetched}
+              autoEverySec={POLL_MS / 1000}
+              error={auto.error}
+            />
             <Btn variant="default" size="sm" onClick={() => exportCSV(filtered)}>
               <IconDownload size={13} color={C.textSec} /> Export CSV
             </Btn>

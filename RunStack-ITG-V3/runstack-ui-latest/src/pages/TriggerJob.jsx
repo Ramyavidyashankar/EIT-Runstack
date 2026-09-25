@@ -147,9 +147,9 @@ function SegButton({ active, onClick, children }) {
       style={{
         padding: '4px 12px', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
         borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-        border: active ? '1px solid #0F766E' : '1px solid #C8C2BB',
+        border: active ? '1px solid #0F766E' : '1px solid #CBD5E1',
         background: active ? '#E6F5F3' : '#FFFFFF',
-        color: active ? '#0F766E' : '#3D4160',
+        color: active ? '#0F766E' : '#334155',
         transition: 'all 0.15s',
       }}
     >
@@ -213,7 +213,7 @@ function TechnicalDetails({ children, label = 'Technical details' }) {
   );
 }
 
-function LockIcon({ size = 12, color = '#7A7D95' }) {
+function LockIcon({ size = 12, color = '#64748B' }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" />
@@ -271,9 +271,9 @@ function SearchablePicker({ value, onChange, options, placeholder, disabled }) {
         ref={btnRef} type="button" disabled={disabled} onClick={openPanel}
         style={{
           width: '100%', display: 'flex', alignItems: 'center', gap: 6,
-          padding: '8px 12px', borderRadius: 'var(--radius-md)', border: '1px solid #C8C2BB',
-          background: disabled ? '#FAFAF9' : '#FFFFFF', fontSize: 13,
-          color: selected ? '#0E1020' : '#7A7D95',
+          padding: '8px 12px', borderRadius: 'var(--radius-md)', border: '1px solid #CBD5E1',
+          background: disabled ? '#F8FAFC' : '#FFFFFF', fontSize: 13,
+          color: selected ? '#0F172A' : '#64748B',
           cursor: disabled ? 'not-allowed' : 'pointer', fontFamily: 'inherit', textAlign: 'left',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}
@@ -281,30 +281,30 @@ function SearchablePicker({ value, onChange, options, placeholder, disabled }) {
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {selected ? selected.label : placeholder}
         </span>
-        <span style={{ marginLeft: 'auto', color: '#7A7D95', fontSize: 10, flexShrink: 0 }}>▾</span>
+        <span style={{ marginLeft: 'auto', color: '#64748B', fontSize: 10, flexShrink: 0 }}>▾</span>
       </button>
       {open && panelPos && ReactDOM.createPortal(
         <div ref={panelRef} style={{
           position: 'absolute', zIndex: 1000, top: panelPos.top, left: panelPos.left,
           width: Math.max(panelPos.width, 260), maxHeight: 300, overflowY: 'auto',
-          background: '#FFFFFF', border: '1px solid #E2DDD8', borderRadius: 'var(--radius-md)',
+          background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: 'var(--radius-md)',
           boxShadow: '0 6px 18px rgba(18,21,28,0.14)', padding: 8,
         }}>
           <input
             autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search…"
-            style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 12, border: '1px solid #C8C2BB', borderRadius: 6, marginBottom: 6, fontFamily: 'inherit' }}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 12, border: '1px solid #CBD5E1', borderRadius: 6, marginBottom: 6, fontFamily: 'inherit' }}
           />
           {filtered.length === 0 ? (
-            <div style={{ fontSize: 11, color: '#7A7D95', padding: '6px 4px' }}>No matches.</div>
+            <div style={{ fontSize: 11, color: '#64748B', padding: '6px 4px' }}>No matches.</div>
           ) : filtered.map(o => (
             <div
               key={o.value} onClick={() => { onChange(o.value); setOpen(false); }}
               style={{ padding: '6px 8px', borderRadius: 6, cursor: 'pointer' }}
-              onMouseEnter={e => e.currentTarget.style.background = '#FAFAF9'}
+              onMouseEnter={e => e.currentTarget.style.background = '#F8FAFC'}
               onMouseLeave={e => e.currentTarget.style.background = ''}
             >
-              <div style={{ fontSize: 12.5, color: '#0E1020', fontWeight: 500 }}>{o.label}</div>
-              {o.sublabel && <div style={{ fontSize: 10.5, color: '#7A7D95', marginTop: 1, fontFamily: 'var(--font-mono)' }}>{o.sublabel}</div>}
+              <div style={{ fontSize: 12.5, color: '#0F172A', fontWeight: 500 }}>{o.label}</div>
+              {o.sublabel && <div style={{ fontSize: 10.5, color: '#64748B', marginTop: 1, fontFamily: 'var(--font-mono)' }}>{o.sublabel}</div>}
             </div>
           ))}
         </div>,
@@ -322,7 +322,7 @@ function ResourceSummary({ form, isProdEnv }) {
   const [showDetails, setShowDetails] = useState(false);
 
   if (!form.resource_id) {
-    return <div style={{ fontSize: 12, color: '#7A7D95' }}>No server selected yet.</div>;
+    return <div style={{ fontSize: 12, color: '#64748B' }}>No server selected yet.</div>;
   }
 
   return (

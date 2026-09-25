@@ -97,20 +97,20 @@ export default function Uploads() {
           onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
           onClick={() => fileInputRef.current?.click()}
           style={{
-            border: `2px dashed ${dragOver ? 'var(--accent, #4995FF)' : '#C8C2BB'}`,
+            border: `2px dashed ${dragOver ? 'var(--accent, #0F766E)' : '#CBD5E1'}`,
             borderRadius: 'var(--radius-lg)',
             padding: '36px 24px',
             textAlign: 'center',
             cursor: 'pointer',
             marginBottom: 20,
-            background: dragOver ? 'rgba(73,149,255,0.06)' : '#FAFAF9',
+            background: dragOver ? 'rgba(73,149,255,0.06)' : '#F8FAFC',
             transition: 'all 0.15s',
           }}
         >
-          <div style={{ fontSize: 13, color: '#0E1020', fontWeight: 600, marginBottom: 4 }}>
+          <div style={{ fontSize: 13, color: '#0F172A', fontWeight: 600, marginBottom: 4 }}>
             Drag &amp; drop files here, or click to browse
           </div>
-          <div style={{ fontSize: 11, color: '#7A7D95' }}>
+          <div style={{ fontSize: 11, color: '#64748B' }}>
             Files upload directly to S3 via a presigned URL — nothing passes through this server.
           </div>
         </div>
@@ -121,20 +121,20 @@ export default function Uploads() {
               <Card key={f.name}>
                 <div style={{ padding: '10px 16px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
-                    <span style={{ color: '#0E1020', fontWeight: 500 }}>{f.name}</span>
-                    <span style={{ color: f.error ? '#D14600' : '#7A7D95' }}>
+                    <span style={{ color: '#0F172A', fontWeight: 500 }}>{f.name}</span>
+                    <span style={{ color: f.error ? '#DC2626' : '#64748B' }}>
                       {f.error ? 'Failed' : `${f.progress}%`}
                     </span>
                   </div>
                   {!f.error ? (
-                    <div style={{ height: 4, background: '#E2DDD8', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ height: 4, background: '#E2E8F0', borderRadius: 2, overflow: 'hidden' }}>
                       <div style={{
                         height: '100%', width: `${f.progress}%`,
-                        background: '#4995FF', transition: 'width 0.15s',
+                        background: '#0F766E', transition: 'width 0.15s',
                       }} />
                     </div>
                   ) : (
-                    <div style={{ fontSize: 11, color: '#D14600' }}>{f.error}</div>
+                    <div style={{ fontSize: 11, color: '#DC2626' }}>{f.error}</div>
                   )}
                 </div>
               </Card>
@@ -144,7 +144,7 @@ export default function Uploads() {
 
         <Card>
           <CardHead>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#0E1020' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#0F172A' }}>
               Files {files.length > 0 && `(${files.length})`}
             </div>
             <Btn variant="default" size="sm" onClick={loadFiles}>Refresh</Btn>
@@ -159,13 +159,13 @@ export default function Uploads() {
               {files.map((f) => (
                 <div key={f.key} style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '12px 18px', borderBottom: '1px solid #E2DDD8', fontSize: 12,
+                  padding: '12px 18px', borderBottom: '1px solid #E2E8F0', fontSize: 12,
                 }}>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ color: '#0E1020', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <div style={{ color: '#0F172A', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {f.filename}
                     </div>
-                    <div style={{ color: '#7A7D95', fontSize: 11, marginTop: 2 }}>
+                    <div style={{ color: '#64748B', fontSize: 11, marginTop: 2 }}>
                       {formatBytes(f.size)} · {formatDate(f.last_modified)}
                     </div>
                   </div>

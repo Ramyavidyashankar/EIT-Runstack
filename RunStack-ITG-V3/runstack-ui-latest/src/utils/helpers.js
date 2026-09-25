@@ -39,20 +39,25 @@ export function shortId(id) {
 }
 
 // ── Status meta — enterprise semantic colors ─────────────────────────────────
+// Green = finished OK, amber = waiting or in progress (pulsing while
+// running), red = did not succeed. Same meaning on every page.
 export const STATUS_META = {
   COMPLETED: { color:'#0F9D6D', bg:'#E4F8F0', label:'Completed' },
   SUCCEEDED: { color:'#0F9D6D', bg:'#E4F8F0', label:'Succeeded' },
-  RUNNING:   { color:'#2554E0', bg:'#EBF1FE', label:'Running', pulse:true },
+  RUNNING:   { color:'#B45309', bg:'#FEF3E2', label:'Running', pulse:true },
   PENDING:   { color:'#B45309', bg:'#FEF3E2', label:'Pending' },
   FAILED:    { color:'#DC2626', bg:'#FDECEC', label:'Failed' },
   TIMED_OUT: { color:'#DC2626', bg:'#FDECEC', label:'Timed Out' },
+  CANCELLED: { color:'#DC2626', bg:'#FDECEC', label:'Cancelled' },
 };
 
 // ── Type meta ─────────────────────────────────────────────────────────────────
+// Type tags are labels, not statuses, so they use the teal accent and
+// slate — never the green/amber/red that mean Completed/Running/Failed.
 export const TYPE_META = {
-  'SSM-Automation': { color:'#2554E0', bg:'#EBF1FE' },
-  'SSM-RunCommand': { color:'#B45309', bg:'#FEF3E2' },
-  'EC2-Action':     { color:'#0F9D6D', bg:'#E4F8F0' },
+  'SSM-Automation': { color:'#0F766E', bg:'#E6F5F3' },
+  'SSM-RunCommand': { color:'#475569', bg:'#F1F5F9' },
+  'EC2-Action':     { color:'#0B5C56', bg:'#E6F5F3' },
 };
 
 export const SSM_DOCS = [

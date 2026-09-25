@@ -62,7 +62,13 @@ async function apiFetch(path, options = {}) {
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`API error ${res.status}: ${text}`);
+    // Message format unchanged for existing callers. `status` and parsed
+    // `body` are attached so pages can react to structured errors (e.g.
+    // DR /plan's failed readiness checks, /execute's STATE_CHANGED 409).
+    const err = new Error(`API error ${res.status}: ${text}`);
+    err.status = res.status;
+    try { err.body = JSON.parse(text); } catch { err.body = null; }
+    throw err;
   }
 
   return res.json();
@@ -83,6 +89,17 @@ export async function fetchLatestJob() {
   return apiFetch('/jobs/latest');
 }
 
+/** GET /jobs/query — dataset-wide filter, counts, sort and paging for the
+ *  Automation Executions page (see jobs.handle_jobs_query). Unlike
+ *  /jobs/recent, totals and status counts cover the whole jobs table. */
+export async function queryJobs(params = {}) {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+  });
+  return apiFetch(`/jobs/query?${qs.toString()}`);
+}
+
 /** GET /jobs/{jobId} */
 export async function fetchJob(jobId) {
   return apiFetch(`/jobs/${jobId}`);
@@ -95,11 +112,13 @@ export async function fetchSSMDocuments({ type = 'Command', owner = 'Self' } = {
   return apiFetch(`/ssm/documents?${params}`);
 }
 
-export async function fetchSchedules({ prefix = '' } = {}) {
+export async function fetchSchedules({ prefix = '', scope, source } = {}) {
   const params = new URLSearchParams();
   if (prefix) params.set('prefix', prefix);
-  const query = params.toString() ? `?${params}` : '?prefix=';
-  return apiFetch(`/eventbridge/schedules${query}`);
+  if (scope) params.set('scope', scope);        // runstack | other | all (default all)
+  if (source) params.set('source', source);     // 'scheduler' → EventBridge Scheduler (read-only)
+  const qs = params.toString();
+  return apiFetch(`/eventbridge/schedules${qs ? `?${qs}` : ''}`);
 }
 
 export async function createSchedule(body) {
@@ -331,10 +350,16 @@ export async function planDrFailover(agName, roleCheckJobId, targetReplica) {
  *  mirrors the original PowerShell script's interactive confirmation
  *  prompt, moved into the API contract so it still happens even though
  *  this is no longer a terminal. */
-export async function executeDrFailover(agName, confirmationToken) {
+export async function executeDrFailover(agName, confirmationToken, freshRoleCheckJobId) {
+  const body = { confirmation_token: confirmationToken, confirm: 'YES' };
+  // Optional: a role-check job run immediately before execution. The
+  // backend re-evaluates readiness against it and returns 409
+  // (code STATE_CHANGED, with `differences`) if primary/target/readiness
+  // moved since review — the UI always sends it.
+  if (freshRoleCheckJobId) body.fresh_role_check_job_id = freshRoleCheckJobId;
   return apiFetch(`/dr-failover/${encodeURIComponent(agName)}/execute`, {
     method: 'POST',
-    body: JSON.stringify({ confirmation_token: confirmationToken, confirm: 'YES' }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -345,6 +370,35 @@ export async function executeDrFailover(agName, confirmationToken) {
  *  is one of: SUCCESS, NEEDS_MANUAL_CHECK, EXECUTE_FAILED, PLAN_FAILED. */
 export async function fetchDrRunStatus(agName, runId) {
   return apiFetch(`/dr-failover/${encodeURIComponent(agName)}/status/${encodeURIComponent(runId)}`);
+}
+
+// ─── Saved DR switchover plans (drafts only) ─────────────────────────────────
+// Saving a plan records intent (target, proposed time, change reference).
+// Nothing executes it automatically — there is no scheduler behind
+// proposed_time. Performing the switchover always goes through the live
+// check → readiness → final check → execute flow above.
+
+/** GET /dr-failover/{AGName}/plans → { plans: [...] } (DRAFT only by default) */
+export async function fetchDrPlans(agName, { includeClosed = false } = {}) {
+  const qs = includeClosed ? '?include_closed=true' : '';
+  return apiFetch(`/dr-failover/${encodeURIComponent(agName)}/plans${qs}`);
+}
+
+/** POST /dr-failover/{AGName}/plans — { intended_target, proposed_time (ISO), change_reference, notes } */
+export async function createDrPlan(agName, plan) {
+  return apiFetch(`/dr-failover/${encodeURIComponent(agName)}/plans`, {
+    method: 'POST',
+    body: JSON.stringify(plan),
+  });
+}
+
+/** POST /dr-failover/{AGName}/plans/{PlanId} — partial update, or
+ *  { status: 'CANCELLED' } / { status: 'EXECUTED', executed_run_id } */
+export async function updateDrPlan(agName, planId, changes) {
+  return apiFetch(`/dr-failover/${encodeURIComponent(agName)}/plans/${encodeURIComponent(planId)}`, {
+    method: 'POST',
+    body: JSON.stringify(changes),
+  });
 }
 
 // ─── Config check ────────────────────────────────────────────────────────────

@@ -1,31 +1,37 @@
 // src/components/Layout.jsx
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { canAccess, DR_SWITCHOVER_ACCESS } from '../auth/access';
+import { requestPageRefresh } from '../hooks/usePageRefresh';
 
+// Sidebar sections. Each item's visibility rule is { minRole, orGroups } —
+// see auth/access.js. Visibility is a convenience, not authorization: the
+// backend authorizes every API call on these pages independently.
 const NAV = [
   { group: 'Monitor', items: [
-    { to: '/',          label: 'Dashboard',        icon: IconGrid  },
-    //{ to: '/jobs',      label: 'Jobs',             icon: IconList  },
+    { to: '/',          label: 'Dashboard',             icon: IconGrid  },
     { to: '/jobs',      label: 'Automation Executions', icon: IconList  },
-    { to: '/dlq',       label: 'Dead Letter Queue', icon: IconAlert, badge: '!', badgeColor: '#DC2626', minRole: 'operator' },
+    { to: '/dlq',       label: 'Dead Letter Queue',     icon: IconAlert, badge: '!', badgeColor: '#DC2626', minRole: 'operator' },
   ]},
   { group: 'Automate', items: [
-    { to: '/trigger',   label: 'Run Automation',      icon: IconPlay  },
-    { to: '/schedules', label: 'Schedules',        icon: IconClock, minRole: 'operator' },
-    { to: '/accounts',  label: 'Target Accounts',  icon: IconCloud },
-    //{ to: '/dr-failover', label: 'DR Failover',    icon: IconShield, minRole: 'operator', orGroup: 'runstack-team-gdba' },*/},
-    { to: '/dr-failover', label: 'DR Failover',    icon: IconShield, minRole: 'operator', orGroup: 'runstack-team-gdba-sql' },
+    { to: '/trigger',   label: 'Run Automation',        icon: IconPlay  },
+    { to: '/schedules', label: 'Triggers & Schedules',  icon: IconClock, minRole: 'operator' },
+    { to: '/accounts',  label: 'Registered Targets',    icon: IconCloud },
+  ]},
+  // Database-level operations. Only features that exist are listed —
+  // e.g. add { to: '/database/health-checks', label: 'Database Health
+  // Checks', ... } here once that page and its backend ship.
+  { group: 'Database Operations', items: [
+    { to: '/database/dr-switchover', label: 'DR Switchover', icon: IconSwitch, ...DR_SWITCHOVER_ACCESS },
   ]},
   { group: 'Config', items: [
-    { to: '/docs',      label: 'SSM Documents',    icon: IconDoc   },
-    { to: '/uploads',   label: 'Uploads',          icon: IconUpload, minRole: 'admin' },
-    { to: '/users',     label: 'Users & Roles',    icon: IconUsers, minRole: 'admin' },
-    { to: '/settings',  label: 'Settings',         icon: IconGear  },
+    { to: '/docs',      label: 'SSM Documents',         icon: IconDoc   },
+    { to: '/uploads',   label: 'Uploads',               icon: IconUpload, minRole: 'admin' },
+    { to: '/users',     label: 'Users & Access',         icon: IconUsers, minRole: 'admin' },
+    { to: '/settings',  label: 'Settings',              icon: IconGear  },
   ]},
 ];
-
-const ROLE_RANK = { admin: 3, operator: 2, viewer: 1, none: 0 };
 
 export default function Layout({ children }) {
   return (
@@ -40,18 +46,25 @@ export default function Layout({ children }) {
 
 function Sidebar() {
   const { role, email, groups, logout } = useAuth();
+  const { pathname } = useLocation();
 
   const visibleNav = NAV
     .map(group => ({
       ...group,
-      items: group.items.filter(item => {
-        if (!item.minRole) return true;
-        if (ROLE_RANK[role] >= ROLE_RANK[item.minRole]) return true;
-        if (item.orGroup && groups?.includes(item.orGroup)) return true;
-        return false;
-      }),
+      items: group.items.filter(item => canAccess({ role, groups }, item)),
     }))
     .filter(group => group.items.length > 0);
+
+  // Clicking the item for the page that's already open refreshes that
+  // page's data in place (no navigation, no remount — filters and
+  // unfinished work are kept). Any other item navigates normally, and the
+  // destination page fetches its current data when it mounts.
+  const onNavClick = (e, to) => {
+    if (pathname === to) {
+      e.preventDefault();
+      requestPageRefresh(to);
+    }
+  };
 
   return (
     <aside style={{
@@ -102,7 +115,10 @@ function Sidebar() {
             </div>
 
             {group.items.map(item => (
-              <NavLink key={item.to} to={item.to} end={item.to === '/'} className="rs-navlink" style={({ isActive }) => ({
+              <NavLink key={item.to} to={item.to} end={item.to === '/'} className="rs-navlink"
+                onClick={(e) => onNavClick(e, item.to)}
+                title={pathname === item.to ? `Refresh ${item.label}` : undefined}
+                style={({ isActive }) => ({
                 display:'flex', alignItems:'center', gap:9,
                 padding:'7px 10px', borderRadius:'var(--radius-md)',
                 fontSize:13, fontWeight: isActive ? 600 : 400,
@@ -262,10 +278,13 @@ function IconClock({ size, color }) {
     <path d="M8 5v3.5l2.5 1.5"/>
   </Icon>;
 }
-function IconShield({ size, color }) {
+// Two opposing arrows — a planned role swap between replicas.
+function IconSwitch({ size, color }) {
   return <Icon size={size} color={color}>
-    <path d="M8 1.5l5.5 2v4.2c0 3.4-2.3 5.9-5.5 6.8-3.2-0.9-5.5-3.4-5.5-6.8V3.5l5.5-2z"/>
-    <path d="M5.5 8l1.8 1.8L10.5 6.2"/>
+    <path d="M2.5 5h10"/>
+    <path d="M10 2.5L12.5 5 10 7.5"/>
+    <path d="M13.5 11h-10"/>
+    <path d="M6 8.5L3.5 11 6 13.5"/>
   </Icon>;
 }
 function IconCloud({ size, color }) {

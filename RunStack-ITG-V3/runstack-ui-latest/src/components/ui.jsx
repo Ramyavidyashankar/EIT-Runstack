@@ -66,6 +66,15 @@ export function Btn({ children, variant='default', size='md', onClick, disabled,
       background:'transparent', color:'var(--text-secondary)',
       border:'1px solid transparent',
     },
+    // Sidebar palette — primary action (navy) and secondary/selected (blue)
+    navy: {
+      background:'var(--nav-navy)', color:'#FFFFFF',
+      border:'1px solid var(--nav-navy)',
+    },
+    accent: {
+      background:'var(--nav-blue-bg)', color:'var(--nav-blue-text)',
+      border:'1px solid var(--nav-blue-border)',
+    },
   };
   return (
     <button type={type} onClick={onClick} disabled={disabled}

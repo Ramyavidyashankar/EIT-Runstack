@@ -39,7 +39,7 @@ export default function AuthCallback() {
     <div style={{
       height: '100vh', display: 'flex', flexDirection: 'column',
       alignItems: 'center', justifyContent: 'center', gap: 16,
-      background: '#F4F0E9', padding: 24,
+      background: '#F1F5F9', padding: 24,
     }}>
       {error ? (
         <>
@@ -51,7 +51,7 @@ export default function AuthCallback() {
       ) : (
         <>
           <Spinner size={28} />
-          <div style={{ fontSize: 13, color: '#7A7D95' }}>Signing you in…</div>
+          <div style={{ fontSize: 13, color: '#64748B' }}>Signing you in…</div>
         </>
       )}
     </div>

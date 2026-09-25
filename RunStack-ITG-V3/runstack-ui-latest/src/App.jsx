@@ -4,15 +4,18 @@ import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Jobs, { JobDetail } from './pages/Jobs';
 import TriggerJob from './pages/TriggerJob';
-import Schedules, { DLQ, Settings, Accounts, SSMDocs } from './pages/Schedules';
+import { DLQ, Settings, SSMDocs } from './pages/Schedules';
+import RegisteredTargets from './pages/RegisteredTargets';
+import TriggersSchedules from './pages/TriggersSchedules';
 import Uploads from './pages/Uploads';
 import UsersRoles from './pages/UsersRoles';
-import DRFailover from './pages/DRFailover';
+import DRSwitchover from './pages/DRSwitchover';
 import { isConfigured } from './api/client';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import Login from './auth/Login';
 import AuthCallback from './auth/AuthCallback';
 import RequireRole from './auth/RequireRole';
+import { DR_SWITCHOVER_ACCESS } from './auth/access';
 import { Spinner } from './components/ui';
 
 function ConfigWarning() {
@@ -57,10 +60,14 @@ function AppRoutes() {
         <Route path="/jobs"        element={<Jobs/>}/>
         <Route path="/jobs/:jobId" element={<JobDetail/>}/>
         <Route path="/trigger"     element={<TriggerJob/>}/>
-        <Route path="/schedules"   element={<RequireRole minRole="operator"><Schedules/></RequireRole>}/>
+        <Route path="/schedules"   element={<RequireRole minRole="operator"><TriggersSchedules/></RequireRole>}/>
         <Route path="/dlq"         element={<RequireRole minRole="operator"><DLQ/></RequireRole>}/>
-        <Route path="/accounts"    element={<Accounts/>}/>
-        <Route path="/dr-failover" element={<RequireRole minRole="operator" orGroup="runstack-team-gdba"><DRFailover/></RequireRole>}/>
+        <Route path="/accounts"    element={<RegisteredTargets/>}/>
+        <Route path="/database/dr-switchover" element={
+          <RequireRole minRole={DR_SWITCHOVER_ACCESS.minRole} orGroup={DR_SWITCHOVER_ACCESS.orGroups}><DRSwitchover/></RequireRole>
+        }/>
+        {/* Old DR Failover URL — keep bookmarks working */}
+        <Route path="/dr-failover" element={<Navigate to="/database/dr-switchover" replace/>}/>
         <Route path="/docs"        element={<SSMDocs/>}/>
         <Route path="/uploads"     element={<RequireRole minRole="admin"><Uploads/></RequireRole>}/>
         <Route path="/users"       element={<RequireRole minRole="admin"><UsersRoles/></RequireRole>}/>

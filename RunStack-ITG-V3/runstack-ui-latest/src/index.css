@@ -48,6 +48,31 @@
 
   --violet:         #6D5EF0;   /* tertiary accent — pipeline/misc dots only */
 
+  /* ── Accent aliases. Every page uses the same teal (--brand); these
+        names are kept so existing components don't need renaming. ────── */
+  --nav-navy:        var(--brand);
+  --nav-navy-hover:  var(--brand-hover);
+  --nav-blue:        var(--brand);
+  --nav-blue-text:   var(--brand-hover);
+  --nav-blue-bg:     var(--brand-bg);
+  --nav-blue-border: var(--brand-border);
+  --accent:          var(--brand);
+  --accent-bg:       var(--brand-bg);
+
+  /* Names some pages already used but that were never defined (so those
+     badges/texts rendered with no colour). */
+  --green:          var(--success);
+  --green-bg:       var(--success-bg);
+  --red:            var(--danger);
+  --red-bg:         var(--danger-bg);
+  --red-border:     var(--danger-border);
+  --amber:          var(--warning);
+  --amber-bg:       var(--warning-bg);
+  --amber-border:   var(--warning-border);
+  --blue:           var(--brand);
+  --blue-bg:        var(--brand-bg);
+  --bg-card:        #FFFFFF;
+
   /* ── Surfaces ───────────────────────────────────────────────────────── */
   --bg-page:    var(--slate-100);
   --bg-surface: #FFFFFF;
@@ -117,19 +142,25 @@ a:focus-visible {
   outline-offset: 3px;
 }
 
-/* ── Buttons — real hover/active states (inline styles can't do :hover) ──── */
-.rs-btn { transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease, border-color 0.12s ease; }
+/* ── Buttons — hover / active / focus ─────────────────────────────────────
+   Btn sets its colours inline, and inline styles beat stylesheet rules, so
+   these need !important — without it no button changed colour on hover. */
+.rs-btn { transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease, border-color 0.12s ease, color 0.12s ease; }
 .rs-btn:hover:not(:disabled)  { transform: translateY(-1px); }
 .rs-btn:active:not(:disabled) { transform: translateY(0); }
-.rs-btn-primary:hover:not(:disabled) { background: var(--brand-hover); border-color: var(--brand-hover); box-shadow: 0 4px 12px rgba(37,84,224,0.28); }
-.rs-btn-default:hover:not(:disabled) { background: var(--bg-tint); border-color: var(--border-hi); }
-.rs-btn-ghost:hover:not(:disabled)   { background: var(--brand-bg); color: var(--brand); }
-.rs-btn-danger:hover:not(:disabled)  { background: #FBDADA; border-color: var(--danger); }
+.rs-btn-primary:hover:not(:disabled),
+.rs-btn-navy:hover:not(:disabled)    { background: var(--brand-hover) !important; border-color: var(--brand-hover) !important; box-shadow: 0 4px 12px rgba(15,118,110,0.28); }
+.rs-btn-primary:active:not(:disabled),
+.rs-btn-navy:active:not(:disabled)   { background: var(--brand-active) !important; border-color: var(--brand-active) !important; }
+.rs-btn-default:hover:not(:disabled) { background: var(--bg-tint) !important; border-color: var(--brand) !important; }
+.rs-btn-accent:hover:not(:disabled)  { background: #D3EEEA !important; border-color: var(--brand) !important; }
+.rs-btn-ghost:hover:not(:disabled)   { background: var(--brand-bg) !important; color: var(--brand) !important; }
+.rs-btn-danger:hover:not(:disabled)  { background: #FBDADA !important; border-color: var(--danger) !important; }
 
 /* ── Inputs — a single accent-colored focus state ─────────────────────────── */
 .rs-input { transition: border-color 0.12s ease, box-shadow 0.12s ease; }
 .rs-input:hover   { border-color: var(--border-hi); }
-.rs-input:focus   { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(37,84,224,0.14); }
+.rs-input:focus   { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(15,118,110,0.16); }
 
 /* ── Cards — a quiet lift only where a card is actually clickable ─────────── */
 .rs-card-interactive { transition: border-color 0.15s ease, box-shadow 0.15s ease; }
