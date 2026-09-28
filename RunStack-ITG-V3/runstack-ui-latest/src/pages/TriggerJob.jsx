@@ -50,6 +50,8 @@ import { triggerJob, fetchSSMDocuments, fetchAppInstances } from '../api/client'
 import { useAuth } from '../auth/AuthContext';
 import { AWS_REGIONS } from '../utils/helpers';
 import { v4 as uuidv4 } from '../utils/uuid';
+import { usePageRefresh } from '../hooks/usePageRefresh';
+import { useUnsavedChanges } from '../hooks/useNavigation';
 
 const AUTOMATION_TYPES = ['SSM-Automation', 'SSM-RunCommand'];
 
@@ -430,6 +432,11 @@ export default function TriggerJob() {
   }
 
   useEffect(() => { loadInstances(); }, []);
+  // Same-page sidebar click: reload the instance list; choices are kept.
+  usePageRefresh(() => loadInstances());
+  // Leaving with a target chosen but nothing dispatched would lose the form.
+  const formStarted = !result && !loading && Boolean(selectedInstanceKey || form.resource_id || form.instances || form.comment);
+  useUnsavedChanges(formStarted, "You've started filling in an automation that hasn't been run. Leaving this page discards it.");
 
   const appOptions = useMemo(() => {
     const ids = new Set(instances.map(i => i.app_id).filter(Boolean));

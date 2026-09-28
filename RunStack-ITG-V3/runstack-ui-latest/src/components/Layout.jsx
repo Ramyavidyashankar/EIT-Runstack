@@ -1,9 +1,13 @@
 // src/components/Layout.jsx
 import React from 'react';
-import { NavLink, useLocation } from 'react-router-dom';
+import ReactDOM from 'react-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { canAccess, DR_SWITCHOVER_ACCESS } from '../auth/access';
 import { requestPageRefresh } from '../hooks/usePageRefresh';
+import { getUnsavedChangesMessage } from '../hooks/useNavigation';
+import { getApiActivity, subscribeApiActivity } from '../api/client';
+import { Btn } from './ui';
 
 // Sidebar sections. Each item's visibility rule is { minRole, orGroups } —
 // see auth/access.js. Visibility is a convenience, not authorization: the
@@ -33,18 +37,143 @@ const NAV = [
   ]},
 ];
 
+// ── Navigation behaviour ─────────────────────────────────────────────────────
+// • Sidebar item for another page: navigate in-app (no browser reload); the
+//   page fetches its latest data when it mounts. The page's last query
+//   string (e.g. Automation Executions filters) is restored.
+// • Sidebar item for the page already open: that page refreshes its data in
+//   place (usePageRefresh) — filters, selections and scroll are kept.
+// • Either way a thin teal bar shows while the resulting API calls run.
+// • If the open page has work that leaving would discard (useUnsavedChanges),
+//   the user is asked first.
+// • Scroll position is remembered per page and restored on return.
+// • Ctrl/Cmd/middle-click keeps the browser's "open in new tab" behaviour.
+
+const lastSearch = new Map();   // pathname → last location.search
+const scrollMemory = new Map(); // pathname → { chain: number[], top }
+
+function elementChain(root, el) {
+  const chain = [];
+  let node = el;
+  while (node && node !== root) {
+    const parent = node.parentElement;
+    if (!parent) return null;
+    chain.unshift(Array.prototype.indexOf.call(parent.children, node));
+    node = parent;
+  }
+  return node === root ? chain : null;
+}
+function elementAt(root, chain) {
+  let node = root;
+  for (const i of chain) { node = node?.children?.[i]; if (!node) return null; }
+  return node;
+}
+
 export default function Layout({ children }) {
+  const { pathname, search } = useLocation();
+  const navigate = useNavigate();
+  const contentRef = React.useRef(null);
+  const [busy, setBusy] = React.useState(false);
+  const busyTimer = React.useRef(null);
+  const [pendingLeave, setPendingLeave] = React.useState(null); // { to, message }
+
+  React.useEffect(() => { lastSearch.set(pathname, search); }, [pathname, search]);
+
+  // Loading bar: shown right after a navigation/refresh until the API calls
+  // it triggered have finished (min 300 ms so it doesn't flicker, max 15 s).
+  const startBusy = React.useCallback(() => {
+    setBusy(true);
+    const started = Date.now();
+    clearTimeout(busyTimer.current);
+    let unsubscribe = () => {};
+    const finish = () => {
+      unsubscribe();
+      busyTimer.current = setTimeout(() => setBusy(false), Math.max(0, 300 - (Date.now() - started)));
+    };
+    busyTimer.current = setTimeout(() => {
+      if (getApiActivity() === 0) { finish(); return; }
+      unsubscribe = subscribeApiActivity((n) => { if (n === 0) finish(); });
+      busyTimer.current = setTimeout(finish, 15_000);
+    }, 150);
+  }, []);
+  React.useEffect(() => () => clearTimeout(busyTimer.current), []);
+
+  // Scroll memory: record the scrolled element inside the content area.
+  React.useEffect(() => {
+    const root = contentRef.current;
+    if (!root) return undefined;
+    const onScroll = (e) => {
+      const el = e.target === document ? null : e.target;
+      if (!el || !root.contains(el)) return;
+      const chain = elementChain(root, el);
+      if (chain) scrollMemory.set(window.location.pathname, { chain, top: el.scrollTop });
+    };
+    root.addEventListener('scroll', onScroll, true);
+    return () => root.removeEventListener('scroll', onScroll, true);
+  }, []);
+
+  // …and restore it once the page has rendered enough content.
+  React.useEffect(() => {
+    const saved = scrollMemory.get(pathname);
+    if (!saved || !saved.top) return undefined;
+    let tries = 0;
+    const id = setInterval(() => {
+      tries += 1;
+      const el = elementAt(contentRef.current, saved.chain);
+      if (el && el.scrollHeight - el.clientHeight >= saved.top) { el.scrollTop = saved.top; clearInterval(id); }
+      else if (tries > 40) clearInterval(id);
+    }, 50);
+    return () => clearInterval(id);
+  }, [pathname]);
+
+  const go = React.useCallback((to) => {
+    if (to === pathname) {
+      startBusy();
+      requestPageRefresh(to);
+      return;
+    }
+    const message = getUnsavedChangesMessage();
+    if (message) { setPendingLeave({ to, message }); return; }
+    startBusy();
+    navigate(`${to}${lastSearch.get(to) || ''}`);
+  }, [pathname, navigate, startBusy]);
+
+  const leaveAnyway = () => {
+    const to = pendingLeave.to;
+    setPendingLeave(null);
+    startBusy();
+    navigate(`${to}${lastSearch.get(to) || ''}`);
+  };
+
   return (
     <div style={{ display:'flex', height:'100vh', overflow:'hidden' }}>
-      <Sidebar />
-      <div style={{ flex:1, display:'flex', flexDirection:'column', overflowY:'auto', overflowX:'hidden' }}>
+      <Sidebar onNavigate={go} />
+      <div ref={contentRef} style={{ flex:1, display:'flex', flexDirection:'column', overflowY:'auto', overflowX:'hidden', position:'relative' }}>
+        <div className={`rs-nav-progress${busy ? ' is-busy' : ''}`} role="progressbar" aria-hidden={!busy} aria-label="Loading" />
         {children}
       </div>
+      {pendingLeave && ReactDOM.createPortal(
+        <>
+          <div onClick={() => setPendingLeave(null)} aria-hidden style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.28)', zIndex:60 }} />
+          <div role="alertdialog" aria-modal="true" aria-labelledby="rs-leave-title" style={{
+            position:'fixed', top:'22vh', left:'50%', transform:'translateX(-50%)', width:'min(440px, 92vw)', zIndex:61,
+            background:'#FFFFFF', borderRadius:12, padding:18, boxShadow:'var(--shadow-lg)', display:'grid', gap:12,
+          }}>
+            <div id="rs-leave-title" style={{ fontSize:15, fontWeight:700, color:'#0F172A' }}>Leave this page?</div>
+            <div style={{ fontSize:13, color:'#334155', lineHeight:1.55 }}>{pendingLeave.message}</div>
+            <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
+              <Btn variant="default" onClick={leaveAnyway}>Leave page</Btn>
+              <Btn variant="primary" onClick={() => setPendingLeave(null)}>Stay on this page</Btn>
+            </div>
+          </div>
+        </>,
+        document.body,
+      )}
     </div>
   );
 }
 
-function Sidebar() {
+function Sidebar({ onNavigate }) {
   const { role, email, groups, logout } = useAuth();
   const { pathname } = useLocation();
 
@@ -55,15 +184,13 @@ function Sidebar() {
     }))
     .filter(group => group.items.length > 0);
 
-  // Clicking the item for the page that's already open refreshes that
-  // page's data in place (no navigation, no remount — filters and
-  // unfinished work are kept). Any other item navigates normally, and the
-  // destination page fetches its current data when it mounts.
+  // Plain left clicks are handled by Layout (refresh / in-app navigation /
+  // unsaved-work prompt). Modified clicks open a new tab as usual — the new
+  // tab picks up the session from this one (auth/tokenStorage.js).
   const onNavClick = (e, to) => {
-    if (pathname === to) {
-      e.preventDefault();
-      requestPageRefresh(to);
-    }
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    onNavigate(to);
   };
 
   return (

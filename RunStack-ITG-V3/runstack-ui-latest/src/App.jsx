@@ -4,7 +4,8 @@ import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
 import Jobs, { JobDetail } from './pages/Jobs';
 import TriggerJob from './pages/TriggerJob';
-import { DLQ, Settings, SSMDocs } from './pages/Schedules';
+import { DLQ, Settings } from './pages/Schedules';
+import SSMDocuments from './pages/SSMDocuments';
 import RegisteredTargets from './pages/RegisteredTargets';
 import TriggersSchedules from './pages/TriggersSchedules';
 import Uploads from './pages/Uploads';
@@ -68,7 +69,7 @@ function AppRoutes() {
         }/>
         {/* Old DR Failover URL — keep bookmarks working */}
         <Route path="/dr-failover" element={<Navigate to="/database/dr-switchover" replace/>}/>
-        <Route path="/docs"        element={<SSMDocs/>}/>
+        <Route path="/docs"        element={<SSMDocuments/>}/>
         <Route path="/uploads"     element={<RequireRole minRole="admin"><Uploads/></RequireRole>}/>
         <Route path="/users"       element={<RequireRole minRole="admin"><UsersRoles/></RequireRole>}/>
         <Route path="/settings"    element={<Settings/>}/>

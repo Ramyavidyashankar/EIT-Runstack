@@ -23,6 +23,7 @@ import { Callout, Chip } from '../components/sections';
 import { useAuth } from '../auth/AuthContext';
 import { createSchedule, deleteSchedule, fetchSchedules, updateSchedule } from '../api/client';
 import { usePageRefresh } from '../hooks/usePageRefresh';
+import { usePersistentState, useUnsavedChanges } from '../hooks/useNavigation';
 import {
   allTimeZones, DAY_LABELS, DEFAULT_TZ, describeExpression, describeRate, describeSpec, describeUtc, fmtInZone,
   fromCronUtc, nextRuns, normalizeCron, observesDst, parseExpression, prettyJson, summarizeEventPattern, toCronUtc, tzAbbrev,
@@ -476,6 +477,10 @@ function RuleEditor({ rule, tz: pageTz, knownTargets, onClose, onSaved }) {
     targetUpdates.forEach((u) => changes.push({ label: `What it invokes — input for ${targets.find((t) => t.id === u.id).name}`, before: u.before ? prettyJson(u.before) : '(matched event)', after: u.input ? prettyJson(u.input) : '{}', pre: true }));
   }
 
+  const dirty = !saving && (isCreate ? Boolean(name || description || st.touched || ev.touched || newTarget.arn) : changes.length > 0);
+  useUnsavedChanges(dirty, isCreate ? 'The new rule hasn\'t been created yet. Leaving this page discards it.'
+    : 'Your changes to this rule haven\'t been saved. Leaving this page discards them.');
+
   const save = async () => {
     setSaving(true); setError(null);
     try {
@@ -595,9 +600,9 @@ function RuleEditor({ rule, tz: pageTz, knownTargets, onClose, onSaved }) {
 export default function TriggersSchedules() {
   const { role } = useAuth();
   const isAdmin = role === 'admin';
-  const [source, setSource] = React.useState('runstack');
-  const [kindFilter, setKindFilter] = React.useState('all');
-  const [search, setSearch] = React.useState('');
+  const [source, setSource] = usePersistentState('triggers.source', 'runstack');
+  const [kindFilter, setKindFilter] = usePersistentState('triggers.kind', 'all');
+  const [search, setSearch] = usePersistentState('triggers.search', '');
   const [tz, setTzState] = React.useState(loadTz);
   const [data, setData] = React.useState({});
   const [loading, setLoading] = React.useState(true);

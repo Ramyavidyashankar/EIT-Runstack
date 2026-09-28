@@ -3,6 +3,9 @@ import React from 'react';
 import { Topbar } from '../components/Layout';
 import { Card, CardHead, Btn, Spinner, Empty, ErrorBanner } from '../components/ui';
 import { getUploadUrl, uploadFileToS3, fetchUploads, deleteUpload } from '../api/client';
+import { RefreshControl } from '../components/sections';
+import { usePageRefresh } from '../hooks/usePageRefresh';
+import { useUnsavedChanges } from '../hooks/useNavigation';
 
 function formatBytes(n) {
   if (n < 1024) return `${n} B`;
@@ -26,6 +29,7 @@ export default function Uploads() {
   const [dragOver, setDragOver] = React.useState(false);
   const [inFlight, setInFlight] = React.useState([]); // [{name, progress, error}]
   const fileInputRef = React.useRef(null);
+  const [lastUpdated, setLastUpdated] = React.useState(null);
 
   const loadFiles = React.useCallback(async () => {
     setLoading(true);
@@ -33,6 +37,7 @@ export default function Uploads() {
     try {
       const res = await fetchUploads();
       setFiles(res.files || []);
+      setLastUpdated(new Date());
     } catch (e) {
       setError(e.message);
     } finally {
@@ -41,6 +46,9 @@ export default function Uploads() {
   }, []);
 
   React.useEffect(() => { loadFiles(); }, [loadFiles]);
+  usePageRefresh(loadFiles);
+  const uploading = inFlight.some((f) => !f.error && f.progress < 100);
+  useUnsavedChanges(uploading, 'A file is still uploading. Leaving now cancels the upload.');
 
   async function handleFiles(fileList) {
     const list = Array.from(fileList || []);
@@ -78,7 +86,10 @@ export default function Uploads() {
       <Topbar
         title="Uploads"
         subtitle="Upload files directly to S3 — stored in the job-scheduler bucket"
-        actions={<Btn variant="primary" size="sm" onClick={() => fileInputRef.current?.click()}>Upload file</Btn>}
+        actions={<>
+          <RefreshControl onRefresh={loadFiles} refreshing={loading} lastUpdated={lastUpdated} />
+          <Btn variant="primary" size="sm" onClick={() => fileInputRef.current?.click()}>Upload file</Btn>
+        </>}
       />
       <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
         {error && <ErrorBanner message={error} />}

@@ -15,6 +15,14 @@ export async function fetchAppInstances(appId) {
 const API_BASE = process.env.REACT_APP_API_BASE_URL || '';
 
 let _tokenProvider = null;
+let _authFailureHandler = null;
+
+/** Called once by AuthProvider. Invoked when the API rejects the token (401)
+ *  or the refresh token is no longer valid, so the app can show the login
+ *  page and come back to the same page afterwards. */
+export function setAuthFailureHandler(fn) {
+  _authFailureHandler = fn;
+}
 
 /** Called once by AuthProvider on mount. Registers a function that returns
  *  a Promise<string> resolving to a valid (non-expired, refreshed-if-needed)
@@ -40,11 +48,35 @@ async function getAccessToken() {
   try {
     return await _tokenProvider();
   } catch (e) {
+    if (e.permanent || e.message === 'Session expired' || e.message === 'Not signed in') _authFailureHandler?.();
     throw new AuthRequiredError(e.message || 'Could not obtain a valid access token.');
   }
 }
 
+// Number of API requests in flight — the sidebar's loading bar watches this
+// right after navigation or a refresh click.
+let _activeRequests = 0;
+const _activityListeners = new Set();
+function bumpActivity(delta) {
+  _activeRequests = Math.max(0, _activeRequests + delta);
+  _activityListeners.forEach((fn) => { try { fn(_activeRequests); } catch { /* ignore */ } });
+}
+export function getApiActivity() { return _activeRequests; }
+export function subscribeApiActivity(fn) {
+  _activityListeners.add(fn);
+  return () => _activityListeners.delete(fn);
+}
+
 async function apiFetch(path, options = {}) {
+  bumpActivity(1);
+  try {
+    return await apiFetchInner(path, options);
+  } finally {
+    bumpActivity(-1);
+  }
+}
+
+async function apiFetchInner(path, options = {}) {
   const token = await getAccessToken();
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -57,6 +89,7 @@ async function apiFetch(path, options = {}) {
 
   if (res.status === 401) {
     const text = await res.text();
+    _authFailureHandler?.();
     throw new AuthRequiredError(`Session expired or invalid (401): ${text}`);
   }
 
@@ -98,6 +131,17 @@ export async function queryJobs(params = {}) {
     if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
   });
   return apiFetch(`/jobs/query?${qs.toString()}`);
+}
+
+/** GET /jobs/query?view=summary — counts and chart buckets for a labelled
+ *  range (24h | 3d | 7d | 30d), from the job counters (no table scan). */
+export async function fetchJobsSummary(range = '24h') {
+  return apiFetch(`/jobs/query?view=summary&range=${encodeURIComponent(range)}`);
+}
+
+/** GET /jobs/query?view=recent — the newest few executions. */
+export async function fetchRecentExecutions(limit = 10) {
+  return apiFetch(`/jobs/query?view=recent&limit=${limit}`);
 }
 
 /** GET /jobs/{jobId} */
@@ -143,6 +187,24 @@ export async function deleteSchedule(name) {
 
 export async function fetchSSMDocumentContent(name) {
   return apiFetch(`/ssm/documents/${encodeURIComponent(name)}`);
+}
+
+/** SSM Documents page: documents in every configured region (us-east-1,
+ *  us-west-2) with default/latest version, status and description.
+ *  type may be 'All'. */
+export async function fetchSSMDocumentCatalog({ type = 'All', owner = 'Self' } = {}) {
+  const params = new URLSearchParams({ type, owner, regions: 'all' });
+  return apiFetch(`/ssm/documents?${params}`);
+}
+
+/** Overview + YAML source for one document version in one region.
+ *  version omitted → the default version. */
+export async function fetchSSMDocumentDetail(name, { region, version } = {}) {
+  const params = new URLSearchParams();
+  if (region) params.set('region', region);
+  if (version) params.set('version', version);
+  const qs = params.toString();
+  return apiFetch(`/ssm/documents/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`);
 }
 
 // ─── Trigger ─────────────────────────────────────────────────────────────────
@@ -368,8 +430,18 @@ export async function executeDrFailover(agName, confirmationToken, freshRoleChec
  *  underlying job has completed (EXECUTING -> CONFIRMING ->
  *  SUCCESS/NEEDS_MANUAL_CHECK), so just keep polling this until `status`
  *  is one of: SUCCESS, NEEDS_MANUAL_CHECK, EXECUTE_FAILED, PLAN_FAILED. */
-export async function fetchDrRunStatus(agName, runId) {
-  return apiFetch(`/dr-failover/${encodeURIComponent(agName)}/status/${encodeURIComponent(runId)}`);
+export async function fetchDrRunStatus(agName, runId, { checkNow = false } = {}) {
+  // check_now=true asks the backend to start a post-switchover role/sync
+  // check immediately instead of waiting for the next scheduled one. It
+  // never re-runs the switchover itself.
+  const qs = checkNow ? '?check_now=true' : '';
+  return apiFetch(`/dr-failover/${encodeURIComponent(agName)}/status/${encodeURIComponent(runId)}${qs}`);
+}
+
+/** GET /dr-failover/{AGName}/runs → { runs: [...] } newest first — summary
+ *  only (no execution output). is_active marks a run still in progress. */
+export async function fetchDrRuns(agName, { limit = 20 } = {}) {
+  return apiFetch(`/dr-failover/${encodeURIComponent(agName)}/runs?limit=${limit}`);
 }
 
 // ─── Saved DR switchover plans (drafts only) ─────────────────────────────────

@@ -178,3 +178,24 @@ a:focus-visible {
     transition-duration: 0.001ms !important;
   }
 }
+
+/* Sidebar navigation / refresh loading bar (components/Layout.jsx) */
+.rs-nav-progress {
+  position: sticky; top: 0; height: 0; z-index: 20; flex: none; overflow: visible;
+}
+.rs-nav-progress::before {
+  content: ''; position: absolute; left: 0; top: 0; height: 3px; width: 0; opacity: 0;
+  background: #0F766E; box-shadow: 0 0 6px rgba(15,118,110,0.45);
+  transition: width 0.25s ease, opacity 0.3s ease;
+}
+.rs-nav-progress.is-busy::before {
+  opacity: 1; animation: rs-nav-progress 1.4s ease-in-out infinite;
+}
+@keyframes rs-nav-progress {
+  0% { left: 0; width: 0; }
+  50% { left: 15%; width: 55%; }
+  100% { left: 100%; width: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rs-nav-progress.is-busy::before { animation: none; width: 100%; }
+}

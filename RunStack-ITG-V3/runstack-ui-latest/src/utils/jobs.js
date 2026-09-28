@@ -83,9 +83,18 @@ export const DATE_PRESETS = [
   { value: 'custom', label: 'Custom range…', hours: null },
 ];
 
-export function rangeToQuery(range, fromLocal, toLocal) {
+/** Start of a preset window, aligned to the UTC hour: "Last 24 hours" is the
+ *  current hour plus the 23 before it. Hour alignment lets the backend answer
+ *  the total from its hourly counters instead of reading the index. */
+export function presetStart(hours, now = Date.now()) {
+  const d = new Date(now);
+  d.setUTCMinutes(0, 0, 0);
+  return new Date(d.getTime() - (hours - 1) * 3600_000);
+}
+
+export function rangeToQuery(range, fromLocal, toLocal, now = Date.now()) {
   const preset = DATE_PRESETS.find((p) => p.value === range);
-  if (preset?.hours) return { from: toUtcIso(new Date(Date.now() - preset.hours * 3600_000)) };
+  if (preset?.hours) return { from: toUtcIso(presetStart(preset.hours, now)) };
   if (range === 'custom') {
     const out = {};
     if (fromLocal) out.from = toUtcIso(new Date(fromLocal));
@@ -147,4 +156,14 @@ export async function copyText(text) {
     ta.remove();
     return ok;
   }
+}
+
+/** "Showing 51–100 of 15,246 executions" — rows on this page vs the exact
+ *  total matching the filters (from the backend, not the loaded rows). */
+export function pageRangeLabel({ pageIndex, pageSize, returned, total, complete = true }) {
+  const fmt = (v) => Number(v).toLocaleString('en-GB');
+  const of = total == null ? '' : ` of ${complete ? '' : 'at least '}${fmt(total)}`;
+  if (!returned) return `No executions on this page${of ? ` (${of.trim()} matching)` : ''}`;
+  const first = pageIndex * pageSize + 1;
+  return `Showing ${fmt(first)}–${fmt(first + returned - 1)}${of} execution${total === 1 ? '' : 's'}`;
 }

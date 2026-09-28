@@ -24,6 +24,7 @@ import { Callout, Chip, RefreshControl, SummaryTile } from '../components/sectio
 import { useAuth } from '../auth/AuthContext';
 import { fetchAppInstances } from '../api/client';
 import { usePageRefresh } from '../hooks/usePageRefresh';
+import { usePersistentState } from '../hooks/useNavigation';
 import { applyFilters, filterOptions, groupByApplication, isAccountId, normalizeRecords, totals } from '../utils/targets';
 
 const TEAL = '#0F766E';
@@ -60,7 +61,7 @@ export default function RegisteredTargets() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
   const [lastUpdated, setLastUpdated] = React.useState(null);
-  const [filters, setFilters] = React.useState(EMPTY_FILTERS);
+  const [filters, setFilters] = usePersistentState('registeredTargets.filters', EMPTY_FILTERS);
   const [open, setOpen] = React.useState(() => new Set());
 
   const load = React.useCallback(async () => {

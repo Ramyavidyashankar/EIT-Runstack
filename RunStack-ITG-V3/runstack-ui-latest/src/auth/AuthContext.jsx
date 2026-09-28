@@ -1,17 +1,38 @@
 // src/auth/AuthContext.jsx
-import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
+//
+// Startup order (AuthGate shows a spinner until `loading` is false):
+//   1. Session in this tab's sessionStorage (normal refresh, or a duplicated
+//      tab — browsers copy sessionStorage when duplicating).
+//   2. Otherwise ask other open RunStack tabs for theirs (new tab / pasted
+//      URL). See tokenStorage.js.
+//   3. If the access token has expired, refresh it with the refresh token.
+//   4. Only if all of that fails is the login page shown. The page the user
+//      asked for (path + query) is remembered and restored after sign-in.
+//
+// While signed in, tokens are refreshed shortly before they expire, and an
+// expired access token alone no longer counts as "signed out" as long as a
+// refresh token exists — previously an idle tab dropped to the login page
+// on its next render after the 1-hour access token lapsed.
+import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { generateRandomString, generateCodeChallenge } from './pkce';
 import {
   saveSession,
+  storeSession,
   getSession,
   clearSession,
   isSessionExpired,
+  isSessionUsable,
+  requestSessionFromOtherTabs,
+  broadcastSessionUpdate,
+  broadcastLogout,
+  listenForOtherTabs,
+  safeReturnPath,
   getRoleFromIdToken,
   getEmailFromIdToken,
   getGroupsFromIdToken,
 } from './tokenStorage';
 
-import { setAccessTokenProvider } from '../api/client';
+import { setAccessTokenProvider, setAuthFailureHandler } from '../api/client';
 
 const COGNITO_DOMAIN = process.env.REACT_APP_COGNITO_HOSTED_UI_DOMAIN || '';
 const USER_CLIENT_ID = process.env.REACT_APP_COGNITO_USER_CLIENT_ID || '';
@@ -20,38 +41,91 @@ const LOGOUT_REDIRECT_URI = process.env.REACT_APP_COGNITO_LOGOUT_REDIRECT_URI ||
 
 const PKCE_VERIFIER_KEY = 'runstack_pkce_verifier';
 const POST_LOGIN_REDIRECT_KEY = 'runstack_post_login_redirect';
+const REFRESH_AHEAD_MS = 2 * 60_000;
 
 const AuthContext = createContext(null);
+
+const currentPath = () => `${window.location.pathname}${window.location.search}${window.location.hash}`;
 
 export function AuthProvider({ children }) {
   const [session, setSession] = useState(() => getSession());
   const [loading, setLoading] = useState(true);
+  const [signedOutReason, setSignedOutReason] = useState(null); // 'expired' | null
+  const refreshing = useRef(null);
 
-  // On mount: validate any existing session, attempt a silent refresh if expired.
+  // One refresh at a time per tab: several API calls hitting an expired
+  // token together share the same refresh request.
+  const refreshNow = useCallback(async () => {
+    const current = getSession();
+    if (!current?.refreshToken) throw new Error('Session expired');
+    if (!refreshing.current) {
+      refreshing.current = refreshAccessToken(current.refreshToken)
+        .then((next) => { setSession(next); broadcastSessionUpdate(next); return next; })
+        .finally(() => { refreshing.current = null; });
+    }
+    return refreshing.current;
+  }, []);
+
+  const endSession = useCallback((reason) => {
+    clearSession();
+    setSession(null);
+    setSignedOutReason(reason || null);
+  }, []);
+
+  // Startup: this tab → other tabs → refresh → login.
   useEffect(() => {
+    let cancelled = false;
     (async () => {
-      const existing = getSession();
+      let existing = getSession();
+      // The sign-in callback page completes login itself — don't race it.
+      const onCallback = window.location.pathname.startsWith('/auth/callback');
+      if (!isSessionUsable(existing) && !onCallback) {
+        const fromTab = await requestSessionFromOtherTabs();
+        if (fromTab) existing = storeSession(fromTab);
+      }
       if (existing && isSessionExpired(existing) && existing.refreshToken) {
         try {
-          const refreshed = await refreshAccessToken(existing.refreshToken);
-          setSession(refreshed);
+          existing = await refreshNow();
         } catch {
+          existing = null;
           clearSession();
-          setSession(null);
+          if (!cancelled) setSignedOutReason('expired');
         }
       } else if (existing && isSessionExpired(existing)) {
+        existing = null;
         clearSession();
-        setSession(null);
+        if (!cancelled) setSignedOutReason('expired');
       }
-      setLoading(false);
+      // A sign-in that finished while this ran wins over "no session".
+      const latest = getSession();
+      if (!existing && isSessionUsable(latest)) existing = latest;
+      if (!cancelled) { setSession(existing); setLoading(false); }
     })();
-  }, []);
+    return () => { cancelled = true; };
+  }, [refreshNow]);
+
+  // Answer other tabs, adopt their newer tokens, follow their sign-out.
+  useEffect(() => listenForOtherTabs({
+    onUpdated: (incoming) => {
+      const mine = getSession();
+      if (!mine || incoming.expiresAt > mine.expiresAt) { storeSession(incoming); setSession(incoming); }
+    },
+    onLogout: () => endSession(null),
+  }), [endSession]);
+
+  // Refresh ahead of expiry while the tab is open.
+  useEffect(() => {
+    if (!session?.refreshToken) return undefined;
+    const wait = Math.max(5_000, session.expiresAt - Date.now() - REFRESH_AHEAD_MS);
+    const id = setTimeout(() => { refreshNow().catch(() => { /* next API call retries or signs out */ }); }, wait);
+    return () => clearTimeout(id);
+  }, [session, refreshNow]);
 
   const login = useCallback(async () => {
     const verifier = generateRandomString(64);
     const challenge = await generateCodeChallenge(verifier);
     sessionStorage.setItem(PKCE_VERIFIER_KEY, verifier);
-    sessionStorage.setItem(POST_LOGIN_REDIRECT_KEY, window.location.pathname);
+    sessionStorage.setItem(POST_LOGIN_REDIRECT_KEY, safeReturnPath(currentPath()));
 
     const params = new URLSearchParams({
       response_type: 'code',
@@ -68,6 +142,7 @@ export function AuthProvider({ children }) {
   const logout = useCallback(() => {
     clearSession();
     setSession(null);
+    broadcastLogout();
     const params = new URLSearchParams({
       client_id: USER_CLIENT_ID,
       logout_uri: LOGOUT_REDIRECT_URI,
@@ -79,7 +154,9 @@ export function AuthProvider({ children }) {
   const completeLogin = useCallback((tokens) => {
     const saved = saveSession(tokens);
     setSession(saved);
-    const redirectTo = sessionStorage.getItem(POST_LOGIN_REDIRECT_KEY) || '/';
+    setSignedOutReason(null);
+    broadcastSessionUpdate(saved);
+    const redirectTo = safeReturnPath(sessionStorage.getItem(POST_LOGIN_REDIRECT_KEY) || '/');
     sessionStorage.removeItem(POST_LOGIN_REDIRECT_KEY);
     sessionStorage.removeItem(PKCE_VERIFIER_KEY);
     return redirectTo;
@@ -94,26 +171,28 @@ export function AuthProvider({ children }) {
     if (!current) throw new Error('Not signed in');
     if (isSessionExpired(current)) {
       if (!current.refreshToken) throw new Error('Session expired');
-      current = await refreshAccessToken(current.refreshToken);
-      setSession(current);
+      current = await refreshNow();
     }
     return current.accessToken;
-  }, []);
+  }, [refreshNow]);
 
   // Register this context's token getter with client.js, so apiFetch can
   // always pull a fresh, valid token without client.js needing React hooks.
+  // A 401, or a refresh that fails, ends the session: the login page is
+  // shown and returns the user to this page after signing in.
   useEffect(() => {
     setAccessTokenProvider(getValidAccessToken);
-  }, [getValidAccessToken]);
+    setAuthFailureHandler(() => endSession('expired'));
+  }, [getValidAccessToken, endSession]);
 
   const role = session ? getRoleFromIdToken(session.idToken) : 'none';
   const email = session ? getEmailFromIdToken(session.idToken) : '';
   const groups = session ? getGroupsFromIdToken(session.idToken) : [];
-  const isAuthenticated = Boolean(session) && !isSessionExpired(session);
+  const isAuthenticated = isSessionUsable(session);
 
   return (
     <AuthContext.Provider
-      value={{ session, role, email, groups, isAuthenticated, loading, login, logout, completeLogin, getValidAccessToken }}
+      value={{ session, role, email, groups, isAuthenticated, loading, signedOutReason, login, logout, completeLogin, getValidAccessToken }}
     >
       {children}
     </AuthContext.Provider>
@@ -167,21 +246,32 @@ async function refreshAccessToken(refreshToken) {
     refresh_token: refreshToken,
   });
 
-  const res = await fetch(`https://${COGNITO_DOMAIN}/oauth2/token`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body,
-  });
+  let res;
+  try {
+    res = await fetch(`https://${COGNITO_DOMAIN}/oauth2/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body,
+    });
+  } catch (e) {
+    // Network problem — the session may still be fine; don't sign out.
+    throw new Error(`Could not reach the sign-in service: ${e.message}`);
+  }
 
-  if (!res.ok) throw new Error('Token refresh failed');
+  if (!res.ok) {
+    // 400 invalid_grant etc.: the refresh token is expired or revoked.
+    const err = new Error('Your session has expired. Sign in again.');
+    err.permanent = res.status >= 400 && res.status < 500;
+    throw err;
+  }
 
   const data = await res.json();
-  // Cognito's refresh response doesn't return a new refresh_token by default —
-  // keep using the one we already have.
+  // Cognito returns a new refresh_token only when refresh-token rotation is
+  // enabled; otherwise keep using the one we already have.
   return saveSession({
     accessToken: data.access_token,
     idToken: data.id_token,
-    refreshToken,
+    refreshToken: data.refresh_token || refreshToken,
     expiresIn: data.expires_in,
   });
 }

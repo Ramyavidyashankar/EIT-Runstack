@@ -59,7 +59,7 @@ const STACK = [
 ];
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, signedOutReason } = useAuth();
 
   return (
     <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#F1F5F9', fontFamily: 'var(--font-sans)', position: 'relative', overflow: 'hidden' }}>
@@ -151,12 +151,18 @@ export default function Login() {
                 Welcome to<br />EIT RunStack
               </h2>
 
-              <p style={{ fontSize: 13.5, color: '#64748B', marginTop: 12, marginBottom: 28, lineHeight: 1.6 }}>
+              <p style={{ fontSize: 13.5, color: '#64748B', marginTop: 12, marginBottom: signedOutReason ? 14 : 28, lineHeight: 1.6 }}>
                 Sign in with your corporate account to continue.
               </p>
+              {signedOutReason === 'expired' && (
+                <div role="status" style={{ marginBottom: 18, padding: '9px 12px', borderRadius: 8, background: '#FDF3E4', border: '1px solid #F3D9AE', color: '#92400E', fontSize: 12.5, lineHeight: 1.5 }}>
+                  Your session expired. Sign in again to return to the page you were on.
+                </div>
+              )}
 
               <Btn
                 onClick={login}
+                variant="primary"
                 style={{ width: '100%', justifyContent: 'center', gap: 10, padding: '13px 20px', fontSize: 14.5, fontWeight: 600, borderRadius: 8, border: 'none', color: '#fff', background: TEAL }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = TEAL_DARK; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = TEAL; }}

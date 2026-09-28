@@ -25,6 +25,7 @@ import {
   setTeamMeta, fetchCognitoGroups,
 } from '../api/client';
 import { usePageRefresh } from '../hooks/usePageRefresh';
+import { usePersistentState } from '../hooks/useNavigation';
 import { copyText } from '../utils/jobs';
 
 // ─── Status vocabulary ───────────────────────────────────────────────────────
@@ -628,8 +629,8 @@ export default function UsersRoles() {
   const [caps, setCaps] = React.useState({ capabilities: [], teams_meta: [] });
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
-  const [tab, setTab] = React.useState('users');
-  const [search, setSearch] = React.useState('');
+  const [tab, setTab] = usePersistentState('users.tab', 'users');
+  const [search, setSearch] = usePersistentState('users.search', '');
   const [reviewEmail, setReviewEmail] = React.useState(null);
   const [assignOpen, setAssignOpen] = React.useState(false);
   const [focusTeam, setFocusTeam] = React.useState(null);

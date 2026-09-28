@@ -36,22 +36,36 @@
 // the page and coming back resumes where you were. The one-time
 // confirmation token is deliberately NOT stored — readiness is re-run.
 //
+// After the switchover command succeeds the run shows two separate
+// statuses: Failover execution, and Post-failover synchronization (the
+// backend keeps re-checking role + replica health until complete, or until
+// a specific Attention-required reason). Everything shown comes from the
+// persisted run record (GET /status, GET /runs), so a page refresh, a
+// duplicated tab or a link to ?ag=…&run=… shows the same state — and
+// nothing on page load can start a switchover.
+//
+// Only the run started in this workflow (or an in-progress run for the AG,
+// or one opened by link) is shown as "Your switchover progress". Finished
+// runs from earlier visits are listed under Previous runs.
+//
 // Authorization is entirely server-side (authorize_action
 // "sql_dr_failover", scoped per AG). Nothing on this page grants access.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Topbar } from '../components/Layout';
 import {
   Btn, Card, CardHead, ErrorBanner, FormRow, Input, MonoField, Select, Spinner, StatusBadge, Textarea,
 } from '../components/ui';
 import {
-  Callout, Chip, Eyebrow, ReviewRow, SectionCard, SummaryTile, fmtClock,
+  Callout, Chip, Eyebrow, RefreshControl, ReviewRow, SectionCard, SummaryTile, fmtClock,
 } from '../components/sections';
 import {
   createDrPlan, executeDrFailover, fetchDrAgNames, fetchDrAgServers, fetchDrConfig, fetchDrPlans,
-  fetchDrRunStatus, planDrFailover, pollDrRolesJob, triggerDrAgRoles, updateDrPlan,
+  fetchDrRunStatus, fetchDrRuns, planDrFailover, pollDrRolesJob, triggerDrAgRoles, updateDrPlan,
 } from '../api/client';
 import { usePageRefresh } from '../hooks/usePageRefresh';
+import { useUnsavedChanges } from '../hooks/useNavigation';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 const POLL_INTERVAL_MS = 3000;
@@ -62,14 +76,25 @@ const RUN_TERMINAL_STATUSES = new Set(['SUCCESS', 'NEEDS_MANUAL_CHECK', 'EXECUTE
 const RUN_STATUS_LABEL = {
   PLANNED: 'Waiting for approval',
   PLAN_FAILED: 'Readiness failed',
-  EXECUTING: 'Switching over…',
-  CONFIRMING: 'Confirming the new primary…',
-  SUCCESS: 'Switchover complete',
-  NEEDS_MANUAL_CHECK: 'Needs manual check',
-  EXECUTE_FAILED: 'Switchover failed',
+  EXECUTING: 'Switching over',
+  CONFIRMING: 'Failover completed · verifying',
+  SUCCESS: 'Completed',
+  NEEDS_MANUAL_CHECK: 'Attention required',
+  EXECUTE_FAILED: 'Failed',
   REJECTED: 'Rejected in Teams',
   STALE_PLAN: 'Blocked — live state changed',
 };
+const RUN_STATUS_TONE = {
+  PLANNED: 'gray', PLAN_FAILED: 'gray', EXECUTING: 'default', CONFIRMING: 'default', SUCCESS: 'green',
+  NEEDS_MANUAL_CHECK: 'amber', EXECUTE_FAILED: 'red', REJECTED: 'gray', STALE_PLAN: 'gray',
+};
+const ATTENTION_TITLE = {
+  ROLE_NOT_CONFIRMED: 'The target has not become the primary',
+  SYNC_TIMEOUT: 'Synchronization is taking longer than allowed',
+  DATA_MOVEMENT_SUSPENDED: 'Data movement is suspended',
+  CHECK_UNAVAILABLE: 'RunStack could not read the availability group',
+};
+const RUN_POLL_MS = { PLANNED: 5000, EXECUTING: 5000, CONFIRMING: 10000 };
 const LOCAL_TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const EMPTY_PLAN_FORM = { planId: null, intended_target: '', proposed_local: '', change_reference: '', notes: '' };
 
@@ -92,6 +117,47 @@ function saveState(state) {
 function errorText(e) {
   if (e?.body?.error) return e.body.error;
   return e?.message || String(e);
+}
+
+/** Backend run timestamps are UTC ISO without a zone suffix. */
+function parseUtc(iso) {
+  if (!iso) return null;
+  const d = new Date(/[zZ]|[+-]\d\d:?\d\d$/.test(iso) ? iso : `${iso}Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+function fmtRunTime(iso) {
+  const d = parseUtc(iso);
+  return d ? d.toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short' }) : '—';
+}
+function fmtDuration(sec) {
+  if (sec === null || sec === undefined || Number.isNaN(sec)) return '—';
+  const t = Math.max(0, Math.round(sec));
+  const h = Math.floor(t / 3600); const m = Math.floor((t % 3600) / 60); const x = t % 60;
+  if (h) return `${h}h ${String(m).padStart(2, '0')}m`;
+  if (m) return `${m}m ${String(x).padStart(2, '0')}s`;
+  return `${x}s`;
+}
+/** Execution state for runs recorded before failover_execution existed. */
+function executionState(run) {
+  if (run.failover_execution) return run.failover_execution;
+  if (run.status === 'EXECUTING') return 'RUNNING';
+  if (run.status === 'EXECUTE_FAILED') return 'FAILED';
+  if (['CONFIRMING', 'SUCCESS', 'NEEDS_MANUAL_CHECK'].includes(run.status)) return 'COMPLETED';
+  return null;
+}
+const APPROVAL_WINDOW_MS = 10 * 60_000;
+/** Still worth polling: in progress, a Check now running, or awaiting a
+ *  Teams approval that can still be used. */
+function isRunLive(r) {
+  if (!r) return false;
+  if (r.status === 'PLANNED') {
+    const created = parseUtc(r.created_at);
+    return !!created && Date.now() - created.getTime() < APPROVAL_WINDOW_MS;
+  }
+  if (!RUN_TERMINAL_STATUSES.has(r.status)) return true;
+  // A Check now running on an attention run. Older runs can carry a stale
+  // confirm_job_id from earlier code, so the job id alone isn't enough.
+  return r.status === 'NEEDS_MANUAL_CHECK' && r.post_check_state === 'RUNNING' && !!r.confirm_job_id;
 }
 
 function fmtWhen(iso) {
@@ -329,11 +395,19 @@ function ProgressItem({ done, active, label, value }) {
 
 // ─── Page ────────────────────────────────────────────────────────────────────
 export default function DRSwitchover() {
-  const saved = useMemo(loadSaved, []);
+  // ?ag=…&run=… opens a specific run (refresh, duplicated tab, shared link).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlAg = searchParams.get('ag') || '';
+  const urlRun = searchParams.get('run') || '';
+  const saved = useMemo(() => {
+    const s = loadSaved();
+    // A link to another AG must not inherit this tab's in-progress work.
+    return urlAg && s.selectedAg && s.selectedAg !== urlAg ? {} : s;
+  }, []); // eslint-disable-line
 
   // Where the user is
-  const [mode, setMode] = useState(saved.mode || null);           // null | 'plan' | 'perform'
-  const [selectedAg, setSelectedAg] = useState(saved.selectedAg || '');
+  const [mode, setMode] = useState(urlRun ? 'perform' : (saved.mode || (urlAg ? 'perform' : null))); // null | 'plan' | 'perform'
+  const [selectedAg, setSelectedAg] = useState(urlAg || saved.selectedAg || '');
   const [activePlan, setActivePlan] = useState(saved.activePlan || null); // saved plan being performed
 
   // AG list + AG details
@@ -352,6 +426,16 @@ export default function DRSwitchover() {
   const [planSaving, setPlanSaving] = useState(false);
   const [planSaveError, setPlanSaveError] = useState(null);
   const [planSaved, setPlanSaved] = useState(null);
+  const [cancelConfirmId, setCancelConfirmId] = useState(null);
+  const [cancellingId, setCancellingId] = useState(null);
+  const [planNotice, setPlanNotice] = useState(null);             // { tone, text, planId? }
+
+  // Previous switchover runs for the selected AG (from the backend)
+  const [runs, setRuns] = useState([]);
+  const [runsLoading, setRunsLoading] = useState(false);
+  const [runsError, setRunsError] = useState(null);
+  const [lastFinished, setLastFinished] = useState(null);         // a finished run found on page entry
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   // Live status (what the user is reviewing)
   const [live, setLive] = useState(saved.live || null);            // { jobId, roles, dbSync, warning, checkedAt }
@@ -378,10 +462,16 @@ export default function DRSwitchover() {
   const [executeError, setExecuteError] = useState(null);
   const [blockedDiffs, setBlockedDiffs] = useState(null);         // server-side STATE_CHANGED details
 
-  // Run being watched (Teams approval, or execution in progress)
-  const [watchRunId, setWatchRunId] = useState(saved.watchRunId || null);
+  // The current workflow's run (Teams approval, execution, verification)
+  const [watchRunId, setWatchRunId] = useState(urlRun || saved.watchRunId || null);
   const [runStatus, setRunStatus] = useState(null);
   const [awaitingApproval, setAwaitingApproval] = useState(false);
+  const [pollKey, setPollKey] = useState(0);
+  const [checkingNow, setCheckingNow] = useState(false);
+  const [checkNowError, setCheckNowError] = useState(null);
+  // Whether the watched run belongs on the progress panel even if it has
+  // already finished: started in this workflow, or opened explicitly.
+  const runIsCurrent = useRef(!!urlRun);
 
   const [now, setNow] = useState(Date.now());
   const unmounted = useRef(false);
@@ -400,6 +490,16 @@ export default function DRSwitchover() {
       pendingLiveJobId: liveLoading ? pendingLiveJobRef.current : null,
     });
   }, [mode, selectedAg, activePlan, planForm, live, targetReplica, watchRunId, liveLoading]);
+
+  // Keep ?ag=…&run=… in the address bar so refresh / duplicate / copy link
+  // shows the same availability group and run.
+  useEffect(() => {
+    const next = {};
+    if (selectedAg) next.ag = selectedAg;
+    if (watchRunId) next.run = watchRunId;
+    const current = Object.fromEntries(searchParams.entries());
+    if (JSON.stringify(current) !== JSON.stringify(next)) setSearchParams(next, { replace: true });
+  }, [selectedAg, watchRunId]); // eslint-disable-line
 
   // ── AG list ─────────────────────────────────────────────────────────────
   const loadAgNames = useCallback(async () => {
@@ -441,18 +541,45 @@ export default function DRSwitchover() {
     }
   }, []);
 
+  const loadRuns = useCallback(async (ag) => {
+    if (!ag) return;
+    setRunsLoading(true);
+    setRunsError(null);
+    try {
+      const res = await fetchDrRuns(ag);
+      if (!unmounted.current) { setRuns(res.runs || []); setLastUpdated(new Date()); }
+    } catch (e) {
+      if (!unmounted.current) setRunsError(errorText(e));
+    } finally {
+      if (!unmounted.current) setRunsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!selectedAg) return;
     loadAgDetails(selectedAg);
     loadPlans(selectedAg);
-  }, [selectedAg, loadAgDetails, loadPlans]);
+    loadRuns(selectedAg);
+  }, [selectedAg, loadAgDetails, loadPlans, loadRuns]);
 
-  // Sidebar click on this page: refresh reference data only. Live role /
-  // sync results are left alone — they change only via "Check live status".
-  usePageRefresh(() => {
+  // Sidebar click on this page (or Refresh): reload saved plans, runs,
+  // Dynatrace details and the current run's status. Live role / sync
+  // results are left alone — they change only via "Check live status".
+  const refreshAll = () => {
     loadAgNames();
-    if (selectedAg) { loadAgDetails(selectedAg); loadPlans(selectedAg); }
-  });
+    if (selectedAg) { loadAgDetails(selectedAg); loadPlans(selectedAg); loadRuns(selectedAg); }
+    if (watchRunId) setPollKey((k) => k + 1);
+  };
+  usePageRefresh(refreshAll);
+
+  // A switchover already running for this AG (started in another tab, by
+  // someone else, or approved in Teams) becomes the current run in Perform.
+  const activeRun = runs.find((r) => r.is_active && ['EXECUTING', 'CONFIRMING', 'NEEDS_MANUAL_CHECK'].includes(r.status));
+  useEffect(() => {
+    if (!activeRun || watchRunId || mode !== 'perform') return;
+    runIsCurrent.current = true;
+    setWatchRunId(activeRun.run_id);
+  }, [activeRun, watchRunId, mode]);
 
   const analysis = useMemo(
     () => (live ? analyseLiveStatus(live.roles, live.dbSync, config?.max_log_queue_kb) : null),
@@ -466,15 +593,33 @@ export default function DRSwitchover() {
     setConfirmText(''); setExecuteError(null); setBlockedDiffs(null);
   }, []);
 
+  // Current-run state only — previous runs stay in the list for audit.
+  const clearCurrentRun = useCallback(() => {
+    runIsCurrent.current = false;
+    setWatchRunId(null); setRunStatus(null); setAwaitingApproval(false);
+    setCheckNowError(null); setLastFinished(null);
+  }, []);
+
   const resetForAg = useCallback(() => {
     liveGen.current++; finalGen.current++;
     pendingLiveJobRef.current = null;
     setLive(null); setLiveError(null); setLiveLoading(false); setLiveJobStatus(null); setConfirmRecheck(false);
-    setServers(null); setConfig(null); setPlans([]); setPlanSaved(null);
+    setServers(null); setConfig(null); setPlans([]); setPlanSaved(null); setPlanNotice(null); setCancelConfirmId(null);
+    setRuns([]); setRunsError(null);
     setTargetReplica('');
-    setWatchRunId(null); setRunStatus(null); setAwaitingApproval(false);
+    clearCurrentRun();
     clearReadiness();
-  }, [clearReadiness]);
+  }, [clearReadiness, clearCurrentRun]);
+
+  // After a finished switchover: start the next one from a clean slate
+  // (fresh live status — the topology has changed).
+  const startNewSwitchover = () => {
+    liveGen.current++; finalGen.current++;
+    clearCurrentRun();
+    clearReadiness();
+    setLive(null); setLiveError(null); setTargetReplica(''); setActivePlan(null);
+    if (selectedAg) { loadRuns(selectedAg); loadPlans(selectedAg); }
+  };
 
   const startOver = () => {
     resetForAg();
@@ -543,6 +688,7 @@ export default function DRSwitchover() {
   const runReadiness = async () => {
     if (!live?.jobId || !targetReplica) return;
     clearReadiness();
+    clearCurrentRun();
     setReadinessLoading(true);
     try {
       const res = await planDrFailover(selectedAg, live.jobId, targetReplica);
@@ -552,7 +698,8 @@ export default function DRSwitchover() {
       } else {
         setReadiness(res);
         setReadinessAt(Date.now());
-        if (res.all_pass && res.run_id) setWatchRunId(res.run_id);
+        if (res.all_pass && res.run_id) { runIsCurrent.current = true; setWatchRunId(res.run_id); }
+        loadRuns(selectedAg);
       }
     } catch (e) {
       // Failed checks come back as HTTP 400 with the full check list.
@@ -568,29 +715,56 @@ export default function DRSwitchover() {
   const tokenSecondsLeft = tokenExpiresAt ? Math.max(0, Math.round((tokenExpiresAt - now) / 1000)) : null;
   const tokenExpired = tokenSecondsLeft === 0;
 
-  // ── Watch the run (Teams approval, then execution progress) ─────────────
+  // ── Watch the current run (approval → execution → verification) ─────────
+  // Reads the persisted run record; GET /status also advances the backend's
+  // verification (it never re-runs the switchover). Polls while the run is
+  // live, then refreshes the Previous runs list.
   useEffect(() => {
     if (!watchRunId || !selectedAg) return undefined;
     let cancelled = false;
     (async () => {
-      let interval = 5000;
-      for (let i = 0; i < 1000 && !cancelled && !unmounted.current; i++) {
+      let first = true;
+      for (let i = 0; i < 3000 && !cancelled && !unmounted.current; i++) {
+        let interval = 10000;
         try {
           const r = await fetchDrRunStatus(selectedAg, watchRunId);
           if (cancelled || unmounted.current) return;
+          if (first && !runIsCurrent.current && !isRunLive(r)) {
+            // Finished during an earlier visit: it's history, not this workflow.
+            if (RUN_TERMINAL_STATUSES.has(r.status)) setLastFinished(r);
+            setWatchRunId(null); setRunStatus(null);
+            return;
+          }
+          first = false;
+          runIsCurrent.current = true;
           setAwaitingApproval(r.status === 'PLANNED');
           if (r.status !== 'PLANNED') setRunStatus(r);
-          if (RUN_TERMINAL_STATUSES.has(r.status)) return;
-          interval = r.status === 'PLANNED' ? 5000 : POLL_INTERVAL_MS;
+          if (!isRunLive(r)) { loadRuns(selectedAg); return; }
+          interval = RUN_POLL_MS[r.status] || 10000;
         } catch (e) {
           // Transient errors: keep watching; a 404/403 means stop.
-          if (e.status === 404 || e.status === 403) { if (!cancelled) setWatchRunId(null); return; }
+          if (e.status === 404 || e.status === 403) { if (!cancelled) { setWatchRunId(null); setRunStatus(null); } return; }
         }
         await sleep(interval);
       }
     })();
     return () => { cancelled = true; };
-  }, [watchRunId, selectedAg]);
+  }, [watchRunId, selectedAg, pollKey, loadRuns]);
+
+  const checkNow = async (runId = watchRunId) => {
+    if (!runId || !selectedAg) return null;
+    setCheckingNow(true); setCheckNowError(null);
+    try {
+      const r = await fetchDrRunStatus(selectedAg, runId, { checkNow: true });
+      if (runId === watchRunId) { setRunStatus(r); setPollKey((k) => k + 1); }
+      return r;
+    } catch (e) {
+      setCheckNowError(errorText(e));
+      return null;
+    } finally {
+      if (!unmounted.current) setCheckingNow(false);
+    }
+  };
 
   // ── Final live check before execution ───────────────────────────────────
   const reviewed = readiness?.all_pass ? { primary: readiness.primary_host, target: readiness.dr_replica_host } : null;
@@ -645,7 +819,9 @@ export default function DRSwitchover() {
     setExecuteLoading(true); setExecuteError(null); setBlockedDiffs(null);
     try {
       const res = await executeDrFailover(selectedAg, readiness.confirmation_token, finalCheck.jobId);
+      runIsCurrent.current = true;
       setAwaitingApproval(false);
+      loadRuns(selectedAg);
       setRunStatus(res);
       setWatchRunId(res.run_id);
       if (activePlan?.plan_id) {
@@ -691,6 +867,8 @@ export default function DRSwitchover() {
         : await createDrPlan(selectedAg, payload);
       setPlanSaved(res.plan);
       setPlanForm(EMPTY_PLAN_FORM);
+      // A new plan is a new workflow: a finished run moves to Previous runs.
+      if (!isRunLive(runStatus)) clearCurrentRun();
       loadPlans(selectedAg);
     } catch (e) {
       setPlanSaveError(errorText(e));
@@ -703,11 +881,33 @@ export default function DRSwitchover() {
     setPlanSaved(null);
     setPlanForm({ planId: p.plan_id, intended_target: p.intended_target || '', proposed_local: isoToLocalInput(p.proposed_time), change_reference: p.change_reference || '', notes: p.notes || '' });
   };
+  // Cancel is confirmed inline first. The plan stays listed until the
+  // backend confirms; then the list is re-fetched.
   const cancelPlan = async (p) => {
-    try { await updateDrPlan(selectedAg, p.plan_id, { status: 'CANCELLED' }); loadPlans(selectedAg); }
-    catch (e) { setPlansError(errorText(e)); }
+    const label = `${fmtWhen(p.proposed_time)} · ${p.change_reference || 'no reference'}`;
+    setCancellingId(p.plan_id); setPlanNotice(null);
+    try {
+      await updateDrPlan(selectedAg, p.plan_id, { status: 'CANCELLED' });
+      if (activePlan?.plan_id === p.plan_id) setActivePlan(null);
+      if (planForm.planId === p.plan_id) setPlanForm(EMPTY_PLAN_FORM);
+      if (planSaved?.plan_id === p.plan_id) setPlanSaved(null);
+      setPlanNotice({ tone: 'success', text: `Plan cancelled: ${label}.` });
+      await loadPlans(selectedAg);
+    } catch (e) {
+      const why = e.status === 409 ? `${errorText(e)} (it may have been performed or cancelled in another tab)`
+        : e.status === 404 ? 'It no longer exists — the list has been refreshed.'
+        : e.status === 403 ? `You don't have permission to change plans for ${selectedAg}.`
+        : errorText(e);
+      setPlanNotice({ tone: 'danger', planId: p.plan_id, text: `Couldn't cancel the plan (${label}): ${why}` });
+      if (e.status === 404 || e.status === 409) loadPlans(selectedAg);
+    } finally {
+      if (!unmounted.current) { setCancellingId(null); setCancelConfirmId(null); }
+    }
   };
   const performPlan = (p) => {
+    // A new plan starts a new workflow: previous run results move to history.
+    clearCurrentRun();
+    clearReadiness();
     setActivePlan(p);
     setPlanSaved(null);
     setMode('perform');
@@ -720,6 +920,13 @@ export default function DRSwitchover() {
   // STALE_PLAN (blocked by the final check) is handled inside Confirm
   // switchover, so it doesn't count as an active/finished run here.
   const runActive = runStatus && !['PLANNED', 'STALE_PLAN'].includes(runStatus.status);
+  const runInProgress = runActive && isRunLive(runStatus);
+
+  // The readiness approval (one-time token) lives only in this page's memory.
+  useUnsavedChanges(
+    mode === 'perform' && !!readiness?.all_pass && !runActive && !tokenExpired && !executeLoading,
+    "Readiness passed for this switchover, but the approval is kept only on this page. If you leave, you'll need to run readiness again before switching over. Your saved plans and live status are kept.",
+  );
   const plannedTargetIneligible = activePlan && analysis && !analysis.eligibleTargets.some((t) => t.name === activePlan.intended_target);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -728,11 +935,14 @@ export default function DRSwitchover() {
       <Topbar
         title="DR Switchover"
         subtitle="Planned switchover of a SQL Server Always On availability group to another replica."
-        actions={mode && (
-          <Btn variant="ghost" size="sm" onClick={startOver} disabled={executeLoading || (runActive && !RUN_TERMINAL_STATUSES.has(runStatus.status))}>
-            ↺ Start over
-          </Btn>
-        )}
+        actions={<>
+          {selectedAg && <RefreshControl onRefresh={refreshAll} refreshing={plansLoading || runsLoading} lastUpdated={lastUpdated} />}
+          {mode && (
+            <Btn variant="ghost" size="sm" onClick={startOver} disabled={executeLoading || runInProgress}>
+              Start over
+            </Btn>
+          )}
+        </>}
       />
 
       <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
@@ -781,7 +991,7 @@ export default function DRSwitchover() {
                   tone={1}
                   title="Choose availability group"
                   helper={mode === 'plan' ? 'Pick the availability group you are planning a switchover for.' : 'Pick the availability group you want to switch over.'}
-                  right={<ModeSwitch mode={mode} setMode={setMode} disabled={executeLoading || (runActive && !RUN_TERMINAL_STATUSES.has(runStatus?.status))} />}
+                  right={<ModeSwitch mode={mode} setMode={setMode} disabled={executeLoading || runInProgress} />}
                 >
                   {agLoading ? (
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#64748B' }}><Spinner size={14} /> Loading availability groups…</div>
@@ -789,7 +999,7 @@ export default function DRSwitchover() {
                     <ErrorBanner message={`Could not load availability groups from Dynatrace: ${agError}`} />
                   ) : (
                     <FormRow label="Availability group" hint="Discovered from Dynatrace SQL Server availability group entities.">
-                      <Select value={selectedAg} onChange={(e) => handleSelectAg(e.target.value)} disabled={executeLoading || liveLoading}>
+                      <Select value={selectedAg} onChange={(e) => handleSelectAg(e.target.value)} disabled={executeLoading || liveLoading || runInProgress}>
                         <option value="">Select an availability group</option>
                         {agNames.map((ag) => <option key={ag} value={ag}>{ag}</option>)}
                       </Select>
@@ -804,10 +1014,20 @@ export default function DRSwitchover() {
                     </Callout>
                   )}
 
+                  {mode === 'plan' && activeRun && (
+                    <Callout tone="info" title="A switchover is in progress for this availability group"
+                      action={<Btn variant="primary" size="sm" onClick={() => setMode('perform')}>View progress</Btn>}>
+                      Run <MonoField value={activeRun.run_id} dim /> · {RUN_STATUS_LABEL[activeRun.status] || activeRun.status} · started {fmtRunTime(activeRun.created_at)}
+                    </Callout>
+                  )}
+
                   {selectedAg && (
                     <SavedPlans
                       plans={plans} loading={plansLoading} error={plansError} mode={mode} activePlanId={activePlan?.plan_id}
-                      onPerform={performPlan} onEdit={(p) => { setMode('plan'); editPlan(p); }} onCancel={cancelPlan}
+                      onPerform={performPlan} onEdit={(p) => { setMode('plan'); editPlan(p); }}
+                      cancelConfirmId={cancelConfirmId} setCancelConfirmId={setCancelConfirmId}
+                      cancellingId={cancellingId} onCancel={cancelPlan} notice={planNotice} onDismissNotice={() => setPlanNotice(null)}
+                      disabled={runInProgress}
                     />
                   )}
 
@@ -1128,9 +1348,30 @@ export default function DRSwitchover() {
                   </SectionCard>
                 )}
 
-                {/* ── Result / progress ─────────────────────────────── */}
-                {runActive && (
-                  <RunResult runStatus={runStatus} agName={selectedAg} />
+                {/* ── Your switchover progress (current run only) ────── */}
+                {mode === 'perform' && runActive && (
+                  <RunProgress
+                    run={runStatus} agName={selectedAg} now={now} maxQueueKb={config?.max_log_queue_kb}
+                    onCheckNow={() => checkNow()} checkingNow={checkingNow} checkNowError={checkNowError}
+                    onStartNew={startNewSwitchover}
+                  />
+                )}
+
+                {mode === 'perform' && !runActive && lastFinished && (
+                  <Callout tone="info" title="Your last switchover has finished"
+                    action={<Btn variant="ghost" size="sm" onClick={() => setLastFinished(null)}>Dismiss</Btn>}>
+                    Run <MonoField value={lastFinished.run_id} dim /> ({lastFinished.dr_replica_host || 'target'}) ended as
+                    {' '}<strong>{RUN_STATUS_LABEL[lastFinished.status] || lastFinished.status}</strong> at {fmtRunTime(lastFinished.updated_at)}.
+                    It's listed under Previous runs. The steps above are for a new switchover.
+                  </Callout>
+                )}
+
+                {/* ── Previous runs (audit) ─────────────────────────── */}
+                {selectedAg && (
+                  <PreviousRuns
+                    agName={selectedAg} runs={runs} currentRunId={runActive ? runStatus.run_id : watchRunId}
+                    loading={runsLoading} error={runsError} now={now} maxQueueKb={config?.max_log_queue_kb}
+                  />
                 )}
               </div>
 
@@ -1154,11 +1395,18 @@ export default function DRSwitchover() {
                         <ProgressItem done={!!selectedAg} active={!selectedAg} label="Availability group" value={selectedAg} />
                         <ProgressItem done={!!live} active={!!selectedAg && !live} label="Live status reviewed" value={live ? `at ${fmtClock(live.checkedAt)}` : ''} />
                         <ProgressItem done={!!targetInfo?.eligible} active={!!live && !targetReplica} label="Target chosen" value={targetReplica} />
-                        <ProgressItem done={!!readiness?.all_pass} active={!!targetInfo?.eligible && !readiness?.all_pass} label="Readiness passed" value={readiness ? (readiness.all_pass ? 'All checks passed' : 'Checks failed') : ''} />
-                        <ProgressItem done={!!finalValid} active={!!readiness?.all_pass && !finalValid} label="Final live check" value={finalCheck ? (finalCheck.changed ? 'Changed — review needed' : finalValid ? `at ${fmtClock(finalCheck.checkedAt)}` : 'Expired') : ''} />
-                        <ProgressItem done={runStatus?.status === 'SUCCESS'} active={!!runActive} label="Switchover" value={runStatus ? RUN_STATUS_LABEL[runStatus.status] || runStatus.status : ''} />
+                        <ProgressItem done={!!readiness?.all_pass || !!runActive} active={!runActive && !!targetInfo?.eligible && !readiness?.all_pass} label="Readiness passed" value={runActive ? 'Passed for this run' : readiness ? (readiness.all_pass ? 'All checks passed' : 'Checks failed') : ''} />
+                        <ProgressItem done={!!finalValid || (!!runActive && executionState(runStatus) !== null)} active={!runActive && !!readiness?.all_pass && !finalValid} label="Final live check"
+                          value={runActive && executionState(runStatus) !== null ? 'Passed before execution' : finalCheck ? (finalCheck.changed ? 'Changed — review needed' : finalValid ? `at ${fmtClock(finalCheck.checkedAt)}` : 'Expired') : ''} />
+                        <ProgressItem done={!!runActive && executionState(runStatus) === 'COMPLETED'} active={!!runActive && executionState(runStatus) === 'RUNNING'}
+                          label="Failover execution" value={runActive ? ({ RUNNING: 'Running', COMPLETED: 'Completed', FAILED: 'Failed' }[executionState(runStatus)] || '') : ''} />
+                        <ProgressItem done={runStatus?.status === 'SUCCESS'} active={!!runActive && runStatus.status === 'CONFIRMING'}
+                          label="Post-failover synchronization"
+                          value={!runActive ? '' : runStatus.status === 'SUCCESS' ? 'Completed'
+                            : runStatus.status === 'NEEDS_MANUAL_CHECK' ? 'Attention required'
+                            : runStatus.status === 'CONFIRMING' ? 'In progress' : ''} />
                         <div style={{ fontSize: 11, color: '#64748B', marginTop: 10, lineHeight: 1.5 }}>
-                          Leaving this page keeps your progress; a running check or switchover is picked up again when you return. Readiness must be re-run after leaving.
+                          Leaving this page keeps your progress; a running check or switchover is picked up again when you return, including in another tab. Readiness must be re-run after leaving.
                         </div>
                       </>
                     )}
@@ -1190,70 +1438,315 @@ function ModeSwitch({ mode, setMode, disabled }) {
 }
 
 // ─── Saved plans list ────────────────────────────────────────────────────────
-function SavedPlans({ plans, loading, error, mode, activePlanId, onPerform, onEdit, onCancel }) {
+function SavedPlans({
+  plans, loading, error, mode, activePlanId, onPerform, onEdit, onCancel,
+  cancelConfirmId, setCancelConfirmId, cancellingId, notice, onDismissNotice, disabled,
+}) {
+  const noticeBox = notice && (
+    <Callout tone={notice.tone} action={<Btn variant="ghost" size="sm" onClick={onDismissNotice}>Dismiss</Btn>}>{notice.text}</Callout>
+  );
   if (loading && plans.length === 0) {
     return <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#64748B' }}><Spinner size={13} /> Loading saved plans…</div>;
   }
-  if (error) return <Callout tone="warning">Saved plans could not be loaded: {error}</Callout>;
   if (plans.length === 0) {
-    return mode === 'perform' ? null : <div style={{ fontSize: 12, color: '#64748B' }}>No saved plans for this availability group yet.</div>;
+    return (
+      <>
+        {noticeBox}
+        {error ? <Callout tone="warning">Saved plans could not be loaded: {error}</Callout>
+          : mode === 'perform' ? null : <div style={{ fontSize: 12, color: '#64748B' }}>No saved plans for this availability group.</div>}
+      </>
+    );
   }
   return (
-    <div>
-      <Eyebrow>Saved plans ({plans.length})</Eyebrow>
+    <div style={{ display: 'grid', gap: 8 }}>
+      <Eyebrow>Saved plans ({plans.length}){loading ? ' · refreshing…' : ''}</Eyebrow>
+      {error && <Callout tone="warning">Couldn't refresh saved plans: {error}. Showing the last list loaded.</Callout>}
+      {noticeBox}
       <div style={{ display: 'grid', gap: 8 }}>
-        {plans.map((p) => (
-          <div key={p.plan_id} style={{
-            display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', padding: '10px 12px', borderRadius: 8,
-            border: `1px solid ${p.plan_id === activePlanId ? '#0F766E' : '#E2E8F0'}`, background: '#FFFFFF',
-          }}>
-            <div style={{ flex: 1, minWidth: 220 }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: '#0F172A' }}>
-                {fmtWhen(p.proposed_time)} <span style={{ fontWeight: 400, color: '#64748B' }}>· {p.change_reference}</span>
+        {plans.map((p) => {
+          const confirming = cancelConfirmId === p.plan_id;
+          const cancelling = cancellingId === p.plan_id;
+          return (
+            <div key={p.plan_id} style={{
+              display: 'grid', gap: 8, padding: '10px 12px', borderRadius: 8,
+              border: `1px solid ${p.plan_id === activePlanId ? '#0F766E' : confirming ? '#F3D9AE' : '#E2E8F0'}`,
+              background: confirming ? '#FFFBF4' : '#FFFFFF', opacity: cancelling ? 0.7 : 1,
+            }}>
+              <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
+                <div style={{ flex: 1, minWidth: 220 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 600, color: '#0F172A' }}>
+                    {fmtWhen(p.proposed_time)} <span style={{ fontWeight: 400, color: '#64748B' }}>· {p.change_reference}</span>
+                  </div>
+                  <div style={{ fontSize: 11.5, color: '#64748B', marginTop: 2 }}>
+                    Target <span style={{ fontFamily: 'var(--font-mono)' }}>{p.intended_target}</span> · saved by {p.created_by}
+                    {p.proposed_time && new Date(p.proposed_time).getTime() < Date.now() && <span style={{ marginLeft: 6 }}><Chip tone="amber">Time passed</Chip></span>}
+                    {p.plan_id === activePlanId && <span style={{ marginLeft: 6 }}><Chip>Being performed</Chip></span>}
+                  </div>
+                </div>
+                {!confirming && (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <Btn variant="ghost" size="sm" onClick={() => onEdit(p)} disabled={disabled || cancelling}>Edit</Btn>
+                    <Btn variant="ghost" size="sm" onClick={() => setCancelConfirmId(p.plan_id)} disabled={disabled || !!cancellingId}>Cancel plan</Btn>
+                    <Btn variant="primary" size="sm" onClick={() => onPerform(p)} disabled={disabled || cancelling || (p.plan_id === activePlanId && mode === 'perform')}>Perform this plan</Btn>
+                  </div>
+                )}
               </div>
-              <div style={{ fontSize: 11.5, color: '#64748B', marginTop: 2 }}>
-                Target <span style={{ fontFamily: 'var(--font-mono)' }}>{p.intended_target}</span> · saved by {p.created_by}
-                {p.proposed_time && new Date(p.proposed_time).getTime() < Date.now() && <span style={{ marginLeft: 6 }}><Chip tone="amber">Time passed</Chip></span>}
-              </div>
+              {confirming && (
+                <div role="alertdialog" aria-label="Confirm cancelling this plan" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid #F3D9AE', paddingTop: 8 }}>
+                  <span style={{ flex: 1, minWidth: 220, fontSize: 12.5, color: '#92400E' }}>
+                    Cancel this plan? It is removed from the saved plans list for everyone. Nothing is changed on the availability group.
+                  </span>
+                  <Btn variant="default" size="sm" onClick={() => setCancelConfirmId(null)} disabled={cancelling}>Keep plan</Btn>
+                  <Btn variant="danger" size="sm" onClick={() => onCancel(p)} disabled={cancelling}>
+                    {cancelling ? <Spinner size={12} /> : null} {cancelling ? 'Cancelling…' : 'Yes, cancel plan'}
+                  </Btn>
+                </div>
+              )}
             </div>
-            <div style={{ display: 'flex', gap: 6 }}>
-              <Btn variant="ghost" size="sm" onClick={() => onEdit(p)}>Edit</Btn>
-              <Btn variant="ghost" size="sm" onClick={() => onCancel(p)}>Cancel plan</Btn>
-              <Btn variant="primary" size="sm" onClick={() => onPerform(p)} disabled={p.plan_id === activePlanId && mode === 'perform'}>Perform this plan</Btn>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
 }
 
-// ─── Result card ─────────────────────────────────────────────────────────────
-function RunResult({ runStatus, agName }) {
-  const s = runStatus.status;
-  const terminal = RUN_TERMINAL_STATUSES.has(s);
-  const badge = s === 'SUCCESS' ? 'SUCCEEDED' : terminal ? 'FAILED' : 'RUNNING';
+// ─── Your switchover progress ────────────────────────────────────────────────
+function StatusRow({ title, state, tone, detail, busy }) {
+  const colors = {
+    green: { dot: '#0F9D6D', bg: '#F1FBF6', border: '#BFE9D6' },
+    teal: { dot: '#0F766E', bg: '#F4FAF9', border: '#BFE0DB' },
+    amber: { dot: '#D97706', bg: '#FFFBF4', border: '#F3D9AE' },
+    red: { dot: '#DC2626', bg: '#FEF6F6', border: '#F7C4C4' },
+    gray: { dot: '#94A3B8', bg: '#F8FAFC', border: '#E2E8F0' },
+  }[tone] || { dot: '#94A3B8', bg: '#F8FAFC', border: '#E2E8F0' };
+  return (
+    <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '12px 14px', borderRadius: 10, background: colors.bg, border: `1px solid ${colors.border}` }}>
+      <span aria-hidden style={{ marginTop: 3, flexShrink: 0 }}>
+        {busy ? <Spinner size={14} /> : <span style={{ display: 'block', width: 12, height: 12, borderRadius: '50%', background: colors.dot }} />}
+      </span>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.5 }}>{title}</div>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: '#0F172A', marginTop: 2 }}>{state}</div>
+        {detail && <div style={{ fontSize: 12, color: '#475569', marginTop: 3, lineHeight: 1.5 }}>{detail}</div>}
+      </div>
+    </div>
+  );
+}
+
+function syncView(run, now) {
+  const exec = executionState(run);
+  const s = run.status;
+  const checking = run.post_check_state === 'RUNNING' || !!run.confirm_job_id;
+  const target = run.dr_replica_host || 'the target';
+  const nextAt = parseUtc(run.post_check_next_at);
+  const nextIn = nextAt ? Math.max(0, Math.round((nextAt.getTime() - now) / 1000)) : null;
+  const errors = Number(run.post_check_errors || 0);
+  const retryNote = errors > 0 && run.post_check_last_error ? ` Last check failed (${run.post_check_last_error}); retrying — ${errors} of 3.` : '';
+
+  if (exec === 'FAILED') return { state: 'Not started — the failover did not complete', tone: 'gray' };
+  if (exec !== 'COMPLETED') return { state: 'Starts when the failover finishes', tone: 'gray' };
+  if (s === 'SUCCESS') {
+    return { state: 'Synchronization complete', tone: 'green',
+      detail: `${target} is the primary and every replica reports HEALTHY${run.verified_at ? ` (verified ${fmtRunTime(run.verified_at)})` : ''}.${run.resolved_after_attention ? ' Confirmed by a later check after attention was required.' : ''}` };
+  }
+  if (s === 'NEEDS_MANUAL_CHECK') {
+    return checking
+      ? { state: 'Re-checking now…', tone: 'amber', busy: true, detail: 'Running a fresh role and synchronization check.' }
+      : { state: `Attention required${run.attention_code ? ` — ${ATTENTION_TITLE[run.attention_code] || run.attention_code}` : ''}`, tone: 'amber' };
+  }
+  if (s !== 'CONFIRMING') return { state: '—', tone: 'gray' };
+  if (checking) return { state: 'Checking role and synchronization now…', tone: 'teal', busy: true, detail: retryNote.trim() || null };
+  const when = nextIn === null ? 'shortly' : nextIn === 0 ? 'now' : `in ${fmtDuration(nextIn)}`;
+  if (run.post_check_phase === 'ROLE') {
+    return { state: `Waiting for ${target} to become the primary — checking again automatically`, tone: 'teal',
+      detail: `Next check ${when}.${retryNote}` };
+  }
+  return { state: 'Synchronization in progress — checking again automatically', tone: 'teal',
+    detail: `Replicas are catching up after the switchover; this can take a while. Next check ${when}.${retryNote}` };
+}
+
+function RunProgress({ run, agName, now, maxQueueKb, onCheckNow, checkingNow, checkNowError, onStartNew, compact = false }) {
+  const s = run.status;
+  const exec = executionState(run);
+  const started = parseUtc(run.execution_started_at);
+  const completed = parseUtc(run.failover_completed_at);
+  const sync = syncView(run, now);
+  const roles = run.post_check_roles?.length ? run.post_check_roles : run.final_roles;
+  const dbSync = run.post_check_db_sync || [];
+  const primary = run.post_check_primary || (roles || []).find((r) => r.Role === 'PRIMARY')?.ReplicaName;
+  const canCheckNow = !!onCheckNow && exec === 'COMPLETED' && (s === 'CONFIRMING' || s === 'NEEDS_MANUAL_CHECK');
+  const live = isRunLive(run);
+  const overallTone = { SUCCESS: 4, EXECUTE_FAILED: 'caution', NEEDS_MANUAL_CHECK: 'caution' }[s] || 3;
   const pre = (text) => (
     <pre style={{
       fontFamily: 'var(--font-mono)', fontSize: 11.5, background: '#FDF3E4', border: '1px solid #F3D9AE', borderRadius: 8,
       padding: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#0F172A', maxHeight: 260, overflowY: 'auto', margin: 0,
     }}>{text}</pre>
   );
-  return (
-    <SectionCard tone={s === 'SUCCESS' ? 4 : terminal ? 'caution' : 3} title="Switchover progress"
-      helper="Updates automatically until the switchover finishes." right={<StatusBadge status={badge} />}>
-      <div style={{ fontSize: 13, color: '#0F172A' }} aria-live="polite">
-        {!terminal && <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Spinner size={13} /> {RUN_STATUS_LABEL[s] || s}</span>}
-        {s === 'SUCCESS' && <Callout tone="success" title="Switchover complete">The new primary for {agName} has been confirmed.</Callout>}
-        {s === 'NEEDS_MANUAL_CHECK' && <Callout tone="warning" title="Needs a manual check">The switchover command finished but RunStack could not confirm the target is now primary. Check the availability group directly — do not assume it succeeded.{runStatus.error ? ` (${runStatus.error})` : ''}</Callout>}
-        {s === 'EXECUTE_FAILED' && <Callout tone="danger" title="Switchover did not complete">{runStatus.error || (runStatus.ssm_output || runStatus.stderr_output ? 'See the output below.' : 'No further detail was returned.')}</Callout>}
-        {s === 'REJECTED' && <Callout tone="info" title="Rejected in Teams">No changes were made to {agName}.</Callout>}
-        {s === 'STALE_PLAN' && <Callout tone="warning" title="Blocked before execution">{runStatus.error || 'The live state changed after readiness was reviewed.'} No changes were made.</Callout>}
+
+  const execRow = exec === 'RUNNING'
+    ? { state: 'Switching over…', tone: 'teal', busy: true, detail: `Running the switchover to ${run.dr_replica_host || 'the target'}${started ? ` · started ${fmtRunTime(run.execution_started_at)} (${fmtDuration((now - started.getTime()) / 1000)} ago)` : ''}.` }
+    : exec === 'COMPLETED'
+      ? { state: 'Failover completed', tone: 'green', detail: `${completed ? `Completed ${fmtRunTime(run.failover_completed_at)}` : 'Completed'}${run.duration_seconds ? ` · the command took ${fmtDuration(Number(run.duration_seconds))}` : ''}.` }
+      : exec === 'FAILED'
+        ? { state: 'Failover failed', tone: 'red', detail: run.error || run.script_reason || 'The switchover command did not complete.' }
+        : { state: RUN_STATUS_LABEL[s] || s, tone: 'gray' };
+
+  const body = (
+    <>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 10 }}>
+        <StatusRow title="Failover execution" {...execRow} />
+        <StatusRow title="Post-failover synchronization" {...sync} />
       </div>
-      {s === 'EXECUTE_FAILED' && runStatus.stderr_output && <Collapsible label="Error output" defaultOpen>{pre(runStatus.stderr_output)}</Collapsible>}
-      {s === 'EXECUTE_FAILED' && runStatus.ssm_output && <Collapsible label="Command output">{pre(runStatus.ssm_output)}</Collapsible>}
-      {runStatus.final_roles && <Collapsible label="Replica roles after switchover" defaultOpen><RoleTable roles={runStatus.final_roles} highlight={runStatus.dr_replica_host} /></Collapsible>}
-      <div style={{ fontSize: 11, color: '#94A3B8' }}>Run ID <MonoField value={runStatus.run_id} dim /></div>
+
+      {exec === 'COMPLETED' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+          <SummaryTile label="Current primary" value={primary || 'Not confirmed yet'} mono={!!primary} tone={primary && run.dr_replica_host && primary.toLowerCase().includes(String(run.dr_replica_host).split('\\')[0].toLowerCase()) ? 'green' : 'amber'} />
+          <SummaryTile label="Since failover" value={completed ? fmtDuration((now - completed.getTime()) / 1000) : '—'} sub={completed ? `failover at ${fmtClock(completed)}` : null} />
+          <SummaryTile label="Last checked" value={run.post_check_last_checked_at ? fmtClock(parseUtc(run.post_check_last_checked_at)) : 'Not yet'}
+            sub={run.post_check_last_checked_at
+              ? `${fmtDuration((now - parseUtc(run.post_check_last_checked_at).getTime()) / 1000)} ago · ${run.confirm_attempts || 0} check${Number(run.confirm_attempts) === 1 ? '' : 's'} so far`
+              : null} />
+        </div>
+      )}
+
+      {s === 'NEEDS_MANUAL_CHECK' && (
+        <Callout tone="warning" title={run.attention_code ? (ATTENTION_TITLE[run.attention_code] || 'Attention required') : 'Attention required'}>
+          <div>{run.attention_reason || run.error || 'RunStack could not confirm the result of this switchover.'}</div>
+          {run.attention_next_action && <div style={{ marginTop: 6 }}><strong>What to do next:</strong> {run.attention_next_action}</div>}
+          {!run.attention_code && <div style={{ marginTop: 6 }}>Check the availability group directly before assuming the switchover succeeded.</div>}
+        </Callout>
+      )}
+      {s === 'SUCCESS' && !compact && (
+        <Callout tone="success" title="Switchover completed">{run.dr_replica_host || 'The target'} is the primary for {agName} and every replica is healthy.</Callout>
+      )}
+      {s === 'EXECUTE_FAILED' && <Callout tone="danger" title="The switchover did not complete">{run.error || run.script_reason || (run.ssm_output || run.stderr_output ? 'See the output below.' : 'No further detail was returned.')} The availability group was not confirmed as changed — check it before retrying.</Callout>}
+      {s === 'REJECTED' && <Callout tone="info" title="Rejected in Teams">No changes were made to {agName}.</Callout>}
+      {s === 'STALE_PLAN' && <Callout tone="warning" title="Blocked before execution">{run.error || 'The live state changed after readiness was reviewed.'} No changes were made.</Callout>}
+
+      {run.post_check_pending?.length > 0 && s === 'CONFIRMING' && (
+        <div style={{ fontSize: 12, color: '#475569' }}>
+          <strong>Still waiting for:</strong>
+          <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{run.post_check_pending.map((m) => <li key={m}>{m}</li>)}</ul>
+        </div>
+      )}
+      {checkNowError && <ErrorBanner message={`Check now failed: ${checkNowError}`} />}
+
+      {roles?.length > 0 && (
+        <Collapsible label={`Replicas (${roles.length})${run.post_check_last_checked_at ? ` · as of ${fmtRunTime(run.post_check_last_checked_at)}` : ''}`} defaultOpen={!compact}>
+          <RoleTable roles={roles} highlight={run.dr_replica_host} />
+        </Collapsible>
+      )}
+      {dbSync.length > 0 && (
+        <Collapsible label={`Databases (${dbSync.length})`}>
+          <div style={{ fontSize: 11, color: '#64748B', marginBottom: 8 }}>
+            From the replica RunStack queried. Asynchronous-commit replicas normally stay SYNCHRONIZING; replica sync health is what decides completion.
+          </div>
+          <DbTable dbSync={dbSync} maxQueueKb={maxQueueKb} />
+        </Collapsible>
+      )}
+      {s === 'EXECUTE_FAILED' && run.stderr_output && <Collapsible label="Error output" defaultOpen>{pre(run.stderr_output)}</Collapsible>}
+      {s === 'EXECUTE_FAILED' && run.ssm_output && <Collapsible label="Command output">{pre(run.ssm_output)}</Collapsible>}
+
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 11, color: '#94A3B8', flex: 1 }}>
+          Run ID <MonoField value={run.run_id} dim /> · requested by {run.requested_by || '—'} · created {fmtRunTime(run.created_at)}
+        </span>
+        {canCheckNow && (
+          <Btn variant={s === 'NEEDS_MANUAL_CHECK' ? 'primary' : 'default'} size="sm" onClick={onCheckNow}
+            disabled={checkingNow || run.post_check_state === 'RUNNING' || !!run.confirm_job_id}>
+            {checkingNow ? <Spinner size={12} /> : null} Check now
+          </Btn>
+        )}
+        {!compact && onStartNew && !live && (
+          <Btn variant="primary" size="sm" onClick={onStartNew}>Start a new switchover</Btn>
+        )}
+      </div>
+    </>
+  );
+
+  if (compact) return <div style={{ display: 'grid', gap: 12 }}>{body}</div>;
+  return (
+    <SectionCard tone={overallTone} title="Your switchover progress"
+      helper={live ? 'Updates automatically. You can leave this page or open it in another tab — progress is read from the saved run.' : `Run for ${agName}.`}
+      right={<Chip tone={RUN_STATUS_TONE[s] || 'gray'}>{RUN_STATUS_LABEL[s] || s}</Chip>}>
+      <div aria-live="polite" style={{ display: 'grid', gap: 12 }}>{body}</div>
+    </SectionCard>
+  );
+}
+
+// ─── Previous runs (audit) ───────────────────────────────────────────────────
+function PreviousRuns({ agName, runs, loading, error, now, maxQueueKb, currentRunId }) {
+  const [openId, setOpenId] = useState(null);
+  const [detail, setDetail] = useState({});      // run_id → full record
+  const [detailError, setDetailError] = useState(null);
+  const [checking, setChecking] = useState(false);
+
+  const open = async (runId, checkNow = false) => {
+    if (!checkNow && openId === runId) { setOpenId(null); return; }
+    setOpenId(runId); setDetailError(null);
+    if (checkNow) setChecking(true);
+    try {
+      const r = await fetchDrRunStatus(agName, runId, { checkNow });
+      setDetail((d) => ({ ...d, [runId]: r }));
+    } catch (e) {
+      setDetailError(errorText(e));
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  return (
+    <SectionCard tone="neutral" title="Previous runs"
+      helper={`All switchover runs for ${agName}, newest first, including the one shown above. Kept for audit — they don't affect a new switchover.`}>
+      {error && <Callout tone="warning">Previous runs could not be loaded: {error}</Callout>}
+      {loading && runs.length === 0 && <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#64748B' }}><Spinner size={13} /> Loading previous runs…</div>}
+      {!loading && !error && runs.length === 0 && <div style={{ fontSize: 12.5, color: '#64748B' }}>No previous runs for this availability group.</div>}
+      {runs.length > 0 && (
+        <div style={{ border: '1px solid #E2E8F0', borderRadius: 8, overflow: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
+            <thead><tr>{['Started', 'Run ID', 'Switchover', 'Result', 'Requested by', ''].map((h) => <th key={h || 'x'} style={th}>{h}</th>)}</tr></thead>
+            {runs.map((r) => {
+              const isOpen = openId === r.run_id;
+              const full = detail[r.run_id];
+              return (
+                <tbody key={r.run_id}>
+                  <tr>
+                    <td style={{ ...td, whiteSpace: 'nowrap' }}>{fmtRunTime(r.created_at)}</td>
+                    <td style={td}>
+                      <MonoField value={r.run_id} dim />
+                      {r.run_id === currentRunId && <div style={{ marginTop: 3 }}><Chip>Current · shown above</Chip></div>}
+                    </td>
+                    <td style={{ ...td, fontSize: 12 }}>
+                      <span style={{ fontFamily: 'var(--font-mono)' }}>{r.primary_host || '—'}</span> → <span style={{ fontFamily: 'var(--font-mono)' }}>{r.dr_replica_host || '—'}</span>
+                      {r.failover_scope && <span style={{ marginLeft: 6 }}><Chip tone={r.failover_scope === 'DR' ? 'amber' : 'gray'}>{r.failover_scope}</Chip></span>}
+                    </td>
+                    <td style={td}>
+                      <Chip tone={RUN_STATUS_TONE[r.status] || 'gray'}>{RUN_STATUS_LABEL[r.status] || r.status}</Chip>
+                      {r.attention_code && <div style={{ fontSize: 11, color: '#92400E', marginTop: 3 }}>{ATTENTION_TITLE[r.attention_code] || r.attention_code}</div>}
+                      {r.is_active && r.run_id !== currentRunId && <div style={{ fontSize: 11, color: '#0F766E', marginTop: 3 }}>In progress</div>}
+                    </td>
+                    <td style={{ ...td, fontSize: 12 }}>{r.requested_by || '—'}</td>
+                    <td style={{ ...td, textAlign: 'right' }}>
+                      {r.run_id !== currentRunId && <Btn variant="ghost" size="sm" onClick={() => open(r.run_id)} aria-expanded={isOpen}>{isOpen ? 'Hide' : 'Details'}</Btn>}
+                    </td>
+                  </tr>
+                  {isOpen && (
+                    <tr><td colSpan={6} style={{ padding: 14, background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                      {detailError && <ErrorBanner message={detailError} />}
+                      {!full && !detailError && <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#64748B' }}><Spinner size={13} /> Loading run…</div>}
+                      {full && (
+                        <RunProgress run={full} agName={agName} now={now} maxQueueKb={maxQueueKb} compact
+                          onCheckNow={() => open(r.run_id, true)} checkingNow={checking} />
+                      )}
+                    </td></tr>
+                  )}
+                </tbody>
+              );
+            })}
+          </table>
+        </div>
+      )}
     </SectionCard>
   );
 }
