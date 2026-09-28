@@ -5,6 +5,7 @@ de-indented) from the original code. No logic changes.
 """
 
 from shared import *
+from datetime import timedelta
 
 
 def handle_jobs_dlq_list(event, http_method, path, path_parameters, query_params):
@@ -107,7 +108,17 @@ def handle_jobs_latest(event, http_method, path, path_parameters, query_params):
     filter_account      = query_params.get("account_id")
     filter_region       = query_params.get("region")
 
-    jobs = get_latest_jobs(limit=50)
+    jobs = None
+    try:
+        import jobs_list
+        if jobs_list.index_ready():
+            # Truly newest 50 (the scan below only sorts the first 1 MB page).
+            jobs = jobs_list.latest_full_items(50)
+    except Exception as e:
+        logger.error(f"latest via index failed, using scan: {e}")
+        jobs = None
+    if jobs is None:
+        jobs = get_latest_jobs(limit=50)
 
     if filter_id:
         jobs = [j for j in jobs if j.get("job_id") == filter_id or j.get("notification_id") == filter_id]
@@ -439,8 +450,182 @@ def _bad(msg):
 #            in new_since_as_of instead.
 #   refresh  "true" to bypass the short cache (manual Refresh button)
 def handle_jobs_query(event, http_method, path, path_parameters, query_params):
+    qp = query_params or {}
+    view = qp.get("view") or "rows"
+    if view not in ("rows", "summary", "recent"):
+        return _bad("view must be rows, summary or recent")
     try:
-        qp = query_params or {}
+        import jobs_list
+        if jobs_list.index_ready():
+            return _indexed_query(jobs_list, view, qp)
+    except Exception as e:
+        logger.error(f"Indexed jobs query failed, falling back to scan: {e}")
+    if view == "summary":
+        return _scan_summary(qp)
+    if view == "recent":
+        return _scan_recent(qp)
+    return _scan_rows(qp)
+
+
+def _ok(body):
+    return {"statusCode": 200, "headers": CORS_HEADERS, "body": json.dumps(body, default=decimal_default)}
+
+
+def _list_row(j):
+    j = dict(j)
+    j.setdefault("automation_label", automation_label(j))
+    j.setdefault("document_name", document_short_name(j))
+    j["status_group"] = status_group(j.get("status"))
+    j.pop("search_text", None)
+    j.pop("automation_data", None)
+    return j
+
+
+def _filters(qp):
+    """Validated filters shared by the index and scan paths, or an error."""
+    status = (qp.get("status") or "ALL").upper()
+    if status not in _QUERY_STATUS:
+        return None, f"status must be one of {sorted(_QUERY_STATUS)}"
+    date_from = _iso_to_naive_utc(qp.get("from"))
+    date_to = _iso_to_naive_utc(qp.get("to"))
+    if any(qp.get(k) and v is None for k, v in (("from", date_from), ("to", date_to))):
+        return None, "from and to must be ISO-8601 timestamps"
+    return {"status": status, "from": date_from, "to": date_to, "sort": qp.get("sort") or "started_desc",
+            "automation": qp.get("automation") or None, "account": qp.get("account") or None,
+            "environment": qp.get("environment") or None, "region": qp.get("region") or None,
+            "q": (qp.get("q") or "").strip().lower() or None}, None
+
+
+def _indexed_query(jl, view, qp):
+    if view == "summary":
+        rng = qp.get("range") or "24h"
+        if rng not in jl.RANGES:
+            return _bad(f"range must be one of {list(jl.RANGES)}")
+        return _ok(jl.summary(rng))
+    if view == "recent":
+        try:
+            limit = int(qp.get("limit", 10))
+        except ValueError:
+            return _bad("limit must be an integer")
+        if not 1 <= limit <= 25:
+            return _bad("limit must be 1–25 for view=recent")
+        rows = [_list_row(j) for j in jl.recent(limit)]
+        return _ok({"view": "recent", "jobs": rows, "returned": len(rows),
+                    "total_in_table": jl.total_in_table(), "generated_at": datetime.utcnow().isoformat() + "Z"})
+    f, err = _filters(qp)
+    if err:
+        return _bad(err)
+    if f["sort"] not in ("started_desc", "started_asc"):
+        return _bad("sort must be started_desc or started_asc")
+    try:
+        limit = int(qp.get("limit", 50))
+    except ValueError:
+        return _bad("limit must be an integer")
+    if not 1 <= limit <= 100:
+        return _bad("limit must be 1–100")
+    cursor = qp.get("cursor") or None
+    try:
+        rows, next_cursor = jl.page(f, limit, cursor)
+    except (ValueError, KeyError) as e:
+        return _bad(f"invalid cursor: {e}")
+    body = {"view": "rows", "jobs": [_list_row(j) for j in rows], "limit": limit, "returned": len(rows),
+            "has_more": bool(next_cursor), "next_cursor": next_cursor, "sort": f["sort"],
+            "generated_at": datetime.utcnow().isoformat() + "Z"}
+    if qp.get("include_counts", "true") != "false":
+        c, source, complete = jl.counts(f, force=qp.get("refresh") == "true")
+        body.update(status_counts=c, total_matching=c.get(f["status"], 0), count_source=source,
+                    counts_complete=complete, total_in_table=jl.total_in_table())
+    if qp.get("include_facets") == "true":
+        body["facets"] = jl.facets()
+    return _ok(body)
+
+
+# ── Scan fallback (before the job_stats backfill has run) ─────────────────────
+
+def _scan_summary(qp):
+    import jobs_list as jl
+    rng = qp.get("range") or "24h"
+    if rng not in jl.RANGES:
+        return _bad(f"range must be one of {list(jl.RANGES)}")
+    spec = jl.RANGES[rng]
+    items, truncated, fetched = _scan_all_jobs(force=qp.get("refresh") == "true")
+    now = datetime.utcnow()
+    if spec["bucket"] == "D":
+        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        start, step, n = today - timedelta(days=spec["days"] - 1), timedelta(days=1), spec["days"]
+    else:
+        hour_end = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        start, step, n = hour_end - timedelta(hours=spec["hours"]), timedelta(hours=spec["bucket"]), spec["hours"] // spec["bucket"]
+    buckets = [{"start": start + i * step, "end": start + (i + 1) * step, **{g: 0 for g in jl.GROUPS}} for i in range(n)]
+    all_time = {g: 0 for g in jl.GROUPS}
+    durs = []
+    lo, hi = start.isoformat(), (start + n * step).isoformat()
+    for j in items:
+        all_time[j["status_group"]] += 1
+        created = _iso_to_naive_utc(j.get("created_at"))
+        if not created or not lo <= created < hi:
+            continue
+        idx = int((datetime.fromisoformat(created) - start) / step)
+        buckets[idx][j["status_group"]] += 1
+        if j["status_group"] == "COMPLETED":
+            d = _duration_seconds(j)
+            if d is not None:
+                durs.append(d)
+    totals = {g: sum(b[g] for b in buckets) for g in jl.GROUPS}
+    finished = totals["COMPLETED"] + totals["FAILED"]
+    return _ok({
+        "view": "summary", "range": rng, "range_label": spec["label"], "from": lo + "Z", "to": hi + "Z",
+        "bucket": "day" if spec["bucket"] == "D" else f"{spec['bucket']}h",
+        "totals": {**totals, "ALL": sum(totals.values())},
+        "success_rate": round(100.0 * totals["COMPLETED"] / finished, 1) if finished else None,
+        "avg_duration_seconds": round(sum(durs) / len(durs), 1) if durs else None, "avg_duration_sample": len(durs),
+        "active_now": {"RUNNING": all_time["RUNNING"], "PENDING": all_time["PENDING"]},
+        "all_time": {**all_time, "ALL": len(items), "ACTIVE": all_time["RUNNING"] + all_time["PENDING"]},
+        "buckets": [{**b, "start": b["start"].isoformat() + "Z", "end": b["end"].isoformat() + "Z",
+                     "total": sum(b[g] for g in jl.GROUPS)} for b in buckets],
+        "count_source": "scan", "complete": not truncated,
+        "generated_at": datetime.utcfromtimestamp(fetched).isoformat() + "Z",
+    })
+
+
+def _scan_recent(qp):
+    try:
+        limit = int(qp.get("limit", 10))
+    except ValueError:
+        return _bad("limit must be an integer")
+    if not 1 <= limit <= 25:
+        return _bad("limit must be 1–25 for view=recent")
+    items, truncated, fetched = _scan_all_jobs(force=qp.get("refresh") == "true")
+    rows = sorted(items, key=lambda j: str(j.get("created_at", "")), reverse=True)[:limit]
+    return _ok({"view": "recent", "jobs": [_list_row(j) for j in rows], "returned": len(rows),
+                "total_in_table": len(items), "count_source": "scan", "complete": not truncated,
+                "generated_at": datetime.utcfromtimestamp(fetched).isoformat() + "Z"})
+
+
+def _scan_rows(qp):
+    """Original scan implementation. Accepts the new `cursor` (an encoded
+    offset) as well as `offset`, so the new UI works before the backfill."""
+    qp = dict(qp)
+    if qp.get("cursor"):
+        try:
+            import jobs_list as jl
+            qp["offset"] = str(int(jl.decode_cursor(qp["cursor"]).get("o", 0)))
+        except Exception:
+            return _bad("invalid cursor")
+    res = _legacy_query(qp)
+    if res.get("statusCode") == 200:
+        import jobs_list as jl
+        body = json.loads(res["body"])
+        nxt = body["offset"] + body["returned"]
+        body.update(view="rows", next_cursor=jl.encode_cursor({"o": nxt}) if body["has_more"] else None,
+                    count_source="scan", counts_complete=not body.get("scan_truncated"))
+        body["jobs"] = [_list_row(j) for j in body["jobs"]]
+        res["body"] = json.dumps(body, default=decimal_default)
+    return res
+
+
+def _legacy_query(qp):
+    try:
         status = (qp.get("status") or "ALL").upper()
         sort = qp.get("sort") or "started_desc"
         if status not in _QUERY_STATUS:

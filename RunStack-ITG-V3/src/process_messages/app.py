@@ -31,7 +31,7 @@ Modular layout (split from a single ~4,300-line file):
 - tidal.py         — /tidal/apps/{AppId}/agents
 - healthcheck.py   — /batch-healthcheck, /instances/status, /assess/{checkId}
 - dynatrace.py     — /dynatrace/ags(/{AGName}/servers|roles(/{JobId}))
-- dr_failover.py   — /dr-failover/{AGName}/config, plan, execute, approve, status, plans(/{PlanId})
+- dr_failover.py   — /dr-failover/{AGName}/config, plan, execute, approve, status, plans(/{PlanId}), runs
 This file (app.py) stays the Lambda entry point: SQS message processing
 (process_single_message) and the top-level API Gateway dispatcher
 (handle_api_gateway_request), which now just routes to the modules above.
@@ -193,6 +193,8 @@ def handle_api_gateway_request(event: Dict[str, Any]) -> Dict[str, Any]:
             return dynatrace.handle_dynatrace_ag_role_job(event, http_method, path, path_parameters, query_params)
         # Saved switchover plans (drafts only — no scheduler). Matched before
         # the other /dr-failover/ branches; "/plans" never ends with "/plan".
+        elif "/dr-failover/" in path and path.endswith("/runs") and http_method == "GET":
+            return dr_failover.handle_dr_runs_list(event, http_method, path, path_parameters, query_params)
         elif "/dr-failover/" in path and path.endswith("/plans") and http_method == "GET":
             return dr_failover.handle_dr_plans_list(event, http_method, path, path_parameters, query_params)
         elif "/dr-failover/" in path and path.endswith("/plans") and http_method == "POST":

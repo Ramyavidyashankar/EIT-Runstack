@@ -24,13 +24,54 @@ CHANGES IN THIS VERSION:
 """
 
 from shared import *
-from shared import _JOB_TERMINAL_STATUSES, _short_hostname
+from shared import _JOB_TERMINAL_STATUSES, _short_hostname, _floats_to_decimal
+from datetime import timedelta
 
-# Cap on automatic re-checks of post-failover role confirmation before
-# giving up and reporting NEEDS_MANUAL_CHECK. Topology can lag behind the
-# EXECUTING->CONFIRMING status flip, so a single incomplete read should not
-# be treated as final.
-_MAX_CONFIRM_ATTEMPTS = 3
+# ── Post-switchover verification ─────────────────────────────────────────
+# After the switchover script succeeds the run moves to CONFIRMING and
+# RunStack keeps re-running the live role/sync check (the same
+# RunStack-DR-Status-Check SSM document used before the switchover) until:
+#   • the target is the only PRIMARY and every secondary is CONNECTED with
+#     SyncHealth = HEALTHY                                  → SUCCESS
+#   • the target isn't primary after DR_ROLE_CONFIRM_TIMEOUT_SEC
+#                                           → NEEDS_MANUAL_CHECK (ROLE_NOT_CONFIRMED)
+#   • replicas still aren't healthy after DR_SYNC_TIMEOUT_SEC
+#                                           → NEEDS_MANUAL_CHECK (SYNC_TIMEOUT)
+#   • a database reports data movement suspended   → NEEDS_MANUAL_CHECK (DATA_MOVEMENT_SUSPENDED)
+#   • DR_CHECK_MAX_ERRORS checks in a row fail or return no usable data
+#                                           → NEEDS_MANUAL_CHECK (CHECK_UNAVAILABLE)
+# Replica SyncHealth = HEALTHY is SQL Server's own summary: every database
+# on a synchronous-commit replica is SYNCHRONIZED, and on an
+# asynchronous-commit replica SYNCHRONIZING (async never reports
+# SYNCHRONIZED), so it is the right completion signal for both HA and DR.
+#
+# Previously any incomplete read — including a replica still catching up
+# seconds after the switchover — was retried only 3 times back-to-back and
+# then reported as a generic "Needs manual check".
+#
+# The status values (CONFIRMING, SUCCESS, NEEDS_MANUAL_CHECK) are unchanged
+# because the AQS SQL agent's terminal-status allowlist depends on them;
+# the detail is in the new post_check_* / attention_* fields.
+#
+# Advancing is lazy (on GET /status polls) like the rest of this flow, and
+# each transition is a conditional write on post_check_seq so two browser
+# tabs polling at once can't both start a check or both record a result.
+DR_POST_CHECK_INTERVAL_SEC = int(os.getenv("DR_POST_CHECK_INTERVAL_SEC", "30"))
+DR_ROLE_CONFIRM_TIMEOUT_SEC = int(os.getenv("DR_ROLE_CONFIRM_TIMEOUT_SEC", "300"))
+DR_SYNC_TIMEOUT_SEC = int(os.getenv("DR_SYNC_TIMEOUT_SEC", "1800"))
+DR_CHECK_JOB_TIMEOUT_SEC = int(os.getenv("DR_CHECK_JOB_TIMEOUT_SEC", "300"))
+DR_CHECK_MAX_ERRORS = int(os.getenv("DR_CHECK_MAX_ERRORS", "3"))
+
+_ATTENTION_NEXT_ACTION = {
+    "ROLE_NOT_CONFIRMED": "Check the availability group directly (SSMS or Check now). If the previous primary is still primary, "
+                          "the switchover did not take effect — review the SQL Server error log and the execution output before trying again.",
+    "SYNC_TIMEOUT": "The new primary is serving, but the replicas listed have not caught up. Check their network link and SQL "
+                    "Server error log, then use Check now. Don't start another switchover until they are healthy.",
+    "DATA_MOVEMENT_SUSPENDED": "Resume data movement for the listed databases on the affected secondary "
+                               "(ALTER DATABASE … SET HADR RESUME) after confirming that is safe, then use Check now.",
+    "CHECK_UNAVAILABLE": "RunStack couldn't read the availability group state. Check that the SSM agent and the cross-account role "
+                         "are working for these hosts, then use Check now or verify in SSMS.",
+}
 
 
 def handle_dr_config(event, http_method, path, path_parameters, query_params):
@@ -385,6 +426,8 @@ def handle_dr_execute(event, http_method, path, path_parameters, query_params):
 
         update_dr_run_record(run_id, {
             "status": "EXECUTING",
+            "failover_execution": "RUNNING",
+            "execution_started_at": datetime.utcnow().isoformat(),
             "dr_replica_host": dr_replica_host,
             "failover_scope": failover_scope,
             "dispatched_via_host": primary_host,
@@ -554,6 +597,8 @@ def handle_dr_approve(event, http_method, path, path_parameters, query_params):
 
         update_dr_run_record(run_id, {
             "status": "EXECUTING",
+            "failover_execution": "RUNNING",
+            "execution_started_at": datetime.utcnow().isoformat(),
             "dr_replica_host": dr_replica_host,
             "failover_scope": failover_scope,
             "failover_job_id": failover_job_id,
@@ -604,6 +649,8 @@ def handle_dr_status(event, http_method, path, path_parameters, query_params):
         ag_name = record.get("ag_name")
         dr_replica_host = record.get("dr_replica_host")
 
+        check_now = str((query_params or {}).get("check_now", "")).lower() == "true"
+
         if status == "EXECUTING" and record.get("failover_job_id"):
             job_info = get_job_raw_output(record["failover_job_id"])
             if not job_info["found"]:
@@ -644,89 +691,45 @@ def handle_dr_status(event, http_method, path, path_parameters, query_params):
                 script_fields["execution_log"] = job_info["raw_output"]
 
                 if job_failed or (script_result and script_result.get("Outcome") in ("ABORTED", "CRITICAL")):
-                    update_dr_run_record(run_id, {
+                    if _transition(run_id, record, {
                         "status": "EXECUTE_FAILED",
+                        "failover_execution": "FAILED",
                         "ssm_output": job_info["raw_output"],
                         "stderr_output": job_info.get("stderr_output", ""),
                         **script_fields,
-                    })
-                    release_action_lock(f"dr-failover:{ag_name}")
+                    }):
+                        release_action_lock(f"dr-failover:{ag_name}")
                     record = get_dr_run_record(run_id)
                 else:
-                    groups = get_all_ag_groups()
-                    servers = groups.get(ag_name, [])
-                    trigger = trigger_ag_status_check_job(ag_name, [s["host"] for s in servers]) if servers else {"ok": False, "reason": "AG not found in Dynatrace"}
-                    if not trigger["ok"]:
-                        update_dr_run_record(run_id, {
-                            "status": "NEEDS_MANUAL_CHECK",
-                            "error": f"Failover ran but could not start confirmation check: {trigger['reason']}",
-                            **script_fields,
-                        })
-                        release_action_lock(f"dr-failover:{ag_name}")
+                    # Failover itself is done. Verification is a separate
+                    # phase with its own timing — start the first check now.
+                    now_iso = datetime.utcnow().isoformat()
+                    if _transition(run_id, record, {
+                        "status": "CONFIRMING",
+                        "failover_execution": "COMPLETED",
+                        "failover_completed_at": now_iso,
+                        "post_check_state": "WAITING",
+                        "post_check_phase": "ROLE",
+                        "post_check_next_at": now_iso,
+                        "post_check_errors": 0,
+                        "confirm_attempts": 0,
+                        "confirm_job_id": None,
+                        **script_fields,
+                    }):
+                        record = get_dr_run_record(run_id)
+                        record = _advance_post_check(run_id, record)
                     else:
-                        update_dr_run_record(run_id, {
-                            "status": "CONFIRMING",
-                            "confirm_job_id": trigger["job_id"],
-                            "confirm_attempts": 0,
-                            **script_fields,
-                        })
-                        # still in progress — lock stays held
-                    record = get_dr_run_record(run_id)
+                        record = get_dr_run_record(run_id)
 
-        elif status == "CONFIRMING" and record.get("confirm_job_id"):
-            result = read_ag_status_job_result(record["confirm_job_id"])
-            if not result["ok"]:
-                update_dr_run_record(run_id, {"status": "NEEDS_MANUAL_CHECK", "error": f"Could not confirm post-failover state: {result['reason']}"})
-                release_action_lock(f"dr-failover:{ag_name}")
-                record = get_dr_run_record(run_id)
-            elif result["done"]:
-                target_needle = _short_hostname(dr_replica_host)
-                target_row = next(
-                    (r for r in result["roles"] if target_needle in (r.get("ReplicaName") or "").lower()), None
-                )
-                confirmed = bool(target_row and target_row.get("Role") == "PRIMARY")
-                if confirmed:
-                    update_dr_run_record(run_id, {
-                        "status": "SUCCESS",
-                        "final_roles": result["roles"],
-                    })
-                    release_action_lock(f"dr-failover:{ag_name}")
-                else:
-                    # Don't lock in NEEDS_MANUAL_CHECK on the first incomplete
-                    # read — status can flip to CONFIRMING before the AG's
-                    # topology has fully settled on every host. Re-trigger a
-                    # fresh confirm job up to MAX_CONFIRM_ATTEMPTS times before
-                    # giving up and asking for a manual check.
-                    attempts = int(record.get("confirm_attempts", 0)) + 1
-                    if attempts < _MAX_CONFIRM_ATTEMPTS:
-                        groups = get_all_ag_groups()
-                        servers = groups.get(ag_name, [])
-                        retrigger = trigger_ag_status_check_job(ag_name, [s["host"] for s in servers]) if servers else {"ok": False, "reason": "AG not found in Dynatrace"}
-                        if retrigger["ok"]:
-                            update_dr_run_record(run_id, {
-                                "status": "CONFIRMING",
-                                "confirm_job_id": retrigger["job_id"],
-                                "confirm_attempts": attempts,
-                                "last_partial_roles": result["roles"],
-                            })
-                            # still in progress — lock stays held
-                        else:
-                            update_dr_run_record(run_id, {
-                                "status": "NEEDS_MANUAL_CHECK",
-                                "error": f"Could not re-trigger confirmation check: {retrigger['reason']}",
-                                "final_roles": result["roles"],
-                                "confirm_attempts": attempts,
-                            })
-                            release_action_lock(f"dr-failover:{ag_name}")
-                    else:
-                        update_dr_run_record(run_id, {
-                            "status": "NEEDS_MANUAL_CHECK",
-                            "final_roles": result["roles"],
-                            "confirm_attempts": attempts,
-                            "error": f"Target replica role not confirmed as PRIMARY after {attempts} confirmation attempts.",
-                        })
-                        release_action_lock(f"dr-failover:{ag_name}")
-                record = get_dr_run_record(run_id)
+        elif status == "CONFIRMING":
+            record = _advance_post_check(run_id, record, check_now=check_now)
+
+        elif status == "NEEDS_MANUAL_CHECK" and record.get("failover_execution") == "COMPLETED" \
+                and (check_now or record.get("confirm_job_id")):
+            # "Check now" after Attention required: re-verify on request.
+            # Passing checks resolve the run to SUCCESS; anything else keeps
+            # it in NEEDS_MANUAL_CHECK with the latest findings.
+            record = _advance_post_check(run_id, record, check_now=check_now, recheck=True)
 
         return {"statusCode": 200, "headers": CORS_HEADERS, "body": json.dumps(record, default=decimal_default)}
     except Exception as e:
@@ -736,6 +739,201 @@ def handle_dr_status(event, http_method, path, path_parameters, query_params):
             "headers": CORS_HEADERS,
             "body": json.dumps({"error": "Failed to fetch run status", "detail": str(e)})
         }
+
+# ════════════════════════════════════════════════════════════════════════
+# Post-switchover verification helpers (used by handle_dr_status)
+# ════════════════════════════════════════════════════════════════════════
+
+def _rn(row: dict) -> str:
+    return row.get("ReplicaName") or row.get("Replica") or ""
+
+
+def _truthy(value) -> bool:
+    return str(value).strip().lower() in ("true", "1", "yes")
+
+
+def evaluate_post_failover(result: dict, target_host: str) -> dict:
+    """Pure evaluation of one completed role/sync check after a switchover."""
+    roles = result.get("roles") or []
+    db_sync = result.get("db_sync") or []
+    primaries = [r for r in roles if r.get("Role") == "PRIMARY"]
+    primary_name = _rn(primaries[0]) if len(primaries) == 1 else None
+    needle = _short_hostname(target_host)
+    role_ok = bool(primary_name and needle and needle in primary_name.lower())
+
+    pending = []
+    if len(primaries) > 1:
+        pending.append(f"{len(primaries)} replicas report PRIMARY")
+    elif not primaries:
+        pending.append("No replica reports PRIMARY yet")
+    elif not role_ok:
+        pending.append(f"{primary_name} is still the primary (waiting for {target_host})")
+
+    replicas = []
+    for r in roles:
+        replicas.append({
+            "name": _rn(r), "role": r.get("Role"), "connected_state": r.get("ConnState"),
+            "sync_health": r.get("SyncHealth"), "commit_mode": r.get("CommitMode"),
+        })
+        if r.get("Role") == "PRIMARY":
+            continue
+        if r.get("ConnState") and r.get("ConnState") != "CONNECTED":
+            pending.append(f"{_rn(r)} is {str(r.get('ConnState')).lower()}")
+        elif r.get("SyncHealth") != "HEALTHY":
+            pending.append(f"{_rn(r)} is still synchronizing (health {r.get('SyncHealth') or 'unknown'})")
+
+    suspended = sorted({d.get("DBName") for d in db_sync if _truthy(d.get("Suspended")) and d.get("DBName")})
+    partial = bool(result.get("warning")) and not primaries
+    sync_ok = role_ok and not suspended and len(pending) == 0 and not partial
+    return {
+        "role_ok": role_ok, "sync_ok": sync_ok, "primary": primary_name, "pending": pending,
+        "suspended": suspended, "partial": partial, "replicas": replicas,
+    }
+
+
+def _transition(run_id: str, record: dict, updates: dict) -> bool:
+    """update_dr_run_record, but only if nobody else advanced this run since
+    `record` was read (post_check_seq). Returns False when another poll won
+    the race — the caller should just re-read the record."""
+    seq = int(record.get("post_check_seq") or 0)
+    updates = {**updates, "post_check_seq": seq + 1}
+    table = boto3.resource("dynamodb").Table(DR_RUN_LOG_TABLE)
+    names, values, sets = {"#seq": "post_check_seq"}, {":seq": seq}, []
+    for i, (k, v) in enumerate(updates.items()):
+        names[f"#u{i}"] = k
+        values[f":u{i}"] = _floats_to_decimal(v)
+        sets.append(f"#u{i} = :u{i}")
+    values[":ua"] = datetime.utcnow().isoformat()
+    sets.append("updated_at = :ua")
+    try:
+        table.update_item(
+            Key={"run_id": run_id},
+            UpdateExpression="SET " + ", ".join(sets),
+            ConditionExpression="attribute_not_exists(#seq) OR #seq = :seq",
+            ExpressionAttributeNames=names,
+            ExpressionAttributeValues=values,
+        )
+        return True
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") == "ConditionalCheckFailedException":
+            return False
+        raise
+
+
+def _attention(code: str, reason: str) -> dict:
+    return {
+        "status": "NEEDS_MANUAL_CHECK",
+        "post_check_state": "ATTENTION",
+        "attention_code": code,
+        "attention_reason": reason,
+        "attention_next_action": _ATTENTION_NEXT_ACTION.get(code, ""),
+        "error": reason,   # kept for existing readers (AQS SQL agent, older UI)
+        "post_check_next_at": None,
+    }
+
+
+def _advance_post_check(run_id: str, record: dict, check_now: bool = False, recheck: bool = False) -> dict:
+    """One step of post-switchover verification. Reads a finished check and
+    records the outcome, or starts the next check when it's due. Never runs
+    the switchover itself."""
+    now = datetime.utcnow()
+    ag_name = record.get("ag_name")
+    target = record.get("dr_replica_host")
+    completed_at = _parse_utc_iso(record.get("failover_completed_at")) or _parse_utc_iso(record.get("updated_at")) or now
+    elapsed = (now - completed_at).total_seconds()
+    job_id = record.get("confirm_job_id")
+
+    if job_id:
+        result = read_ag_status_job_result(job_id)
+        if result.get("ok") and not result.get("done"):
+            started = _parse_utc_iso(record.get("post_check_started_at"))
+            if not started or (now - started).total_seconds() <= DR_CHECK_JOB_TIMEOUT_SEC:
+                return record  # check still running
+            result = {"ok": False, "reason": f"The status check did not finish within {DR_CHECK_JOB_TIMEOUT_SEC} seconds"}
+
+        updates = {
+            "confirm_job_id": None,
+            "confirm_attempts": int(record.get("confirm_attempts") or 0) + 1,
+            "post_check_last_checked_at": now.isoformat(),
+        }
+        ev = evaluate_post_failover(result, target) if result.get("ok") else None
+        if ev is None or ev["partial"]:
+            errors = int(record.get("post_check_errors") or 0) + 1
+            reason = (result.get("reason") if ev is None else
+                      "The check reached only secondary replicas, so the primary's view wasn't available")
+            updates.update({"post_check_errors": errors, "post_check_last_error": reason})
+            if recheck:
+                updates.update({"post_check_state": "ATTENTION", "attention_reason": f"Check now failed: {reason}", "error": f"Check now failed: {reason}"})
+            elif errors >= DR_CHECK_MAX_ERRORS:
+                updates.update(_attention("CHECK_UNAVAILABLE", f"{errors} status checks in a row failed. Last error: {reason}"))
+            else:
+                updates.update({"post_check_state": "WAITING",
+                                "post_check_next_at": (now + timedelta(seconds=DR_POST_CHECK_INTERVAL_SEC)).isoformat()})
+        else:
+            updates.update({
+                "post_check_errors": 0,
+                "post_check_last_error": None,
+                "post_check_roles": result.get("roles") or [],
+                "post_check_db_sync": result.get("db_sync") or [],
+                "post_check_primary": ev["primary"],
+                "post_check_pending": ev["pending"],
+                "post_check_phase": "SYNC" if ev["role_ok"] else "ROLE",
+            })
+            if ev["sync_ok"]:
+                updates.update({
+                    "status": "SUCCESS", "post_check_state": "PASSED", "verified_at": now.isoformat(),
+                    "final_roles": result.get("roles") or [], "post_check_next_at": None,
+                    "attention_code": None, "attention_reason": None, "attention_next_action": None, "error": None,
+                })
+                if recheck:
+                    updates["resolved_after_attention"] = True
+            elif ev["suspended"]:
+                updates.update(_attention("DATA_MOVEMENT_SUSPENDED",
+                                          f"Data movement is suspended for: {', '.join(ev['suspended'])}"))
+            elif recheck:
+                code = "SYNC_TIMEOUT" if ev["role_ok"] else "ROLE_NOT_CONFIRMED"
+                updates.update(_attention(record.get("attention_code") or code, "Still not complete: " + "; ".join(ev["pending"])))
+            elif not ev["role_ok"] and elapsed >= DR_ROLE_CONFIRM_TIMEOUT_SEC:
+                updates.update(_attention("ROLE_NOT_CONFIRMED",
+                                          f"{target} is not the primary {int(elapsed // 60)} min after the switchover. " + "; ".join(ev["pending"])))
+            elif ev["role_ok"] and elapsed >= DR_SYNC_TIMEOUT_SEC:
+                updates.update(_attention("SYNC_TIMEOUT",
+                                          f"Replicas not healthy {int(elapsed // 60)} min after the switchover: " + "; ".join(ev["pending"])))
+            else:
+                updates.update({"post_check_state": "WAITING",
+                                "post_check_next_at": (now + timedelta(seconds=DR_POST_CHECK_INTERVAL_SEC)).isoformat()})
+
+        if _transition(run_id, record, updates) and updates.get("status") in ("SUCCESS", "NEEDS_MANUAL_CHECK") and not recheck:
+            release_action_lock(f"dr-failover:{ag_name}")
+        return get_dr_run_record(run_id) or record
+
+    # No check running — start one if it's due (or the user asked).
+    if recheck and not check_now:
+        return record
+    next_at = _parse_utc_iso(record.get("post_check_next_at"))
+    if not (check_now or next_at is None or now >= next_at):
+        return record
+
+    servers = get_all_ag_groups().get(ag_name, [])
+    trigger = (trigger_ag_status_check_job_parallel(ag_name, [s["host"] for s in servers])
+               if servers else {"ok": False, "reason": "Availability group not found in Dynatrace"})
+    if trigger.get("ok"):
+        updates = {"confirm_job_id": trigger["job_id"], "post_check_started_at": now.isoformat(),
+                   "post_check_state": "RUNNING", "post_check_next_at": None}
+    else:
+        errors = int(record.get("post_check_errors") or 0) + 1
+        updates = {"post_check_errors": errors, "post_check_last_error": trigger.get("reason")}
+        if recheck:
+            updates.update({"attention_reason": f"Check now could not start: {trigger.get('reason')}"})
+        elif errors >= DR_CHECK_MAX_ERRORS:
+            updates.update(_attention("CHECK_UNAVAILABLE", f"Could not start a status check: {trigger.get('reason')}"))
+        else:
+            updates.update({"post_check_state": "WAITING",
+                            "post_check_next_at": (now + timedelta(seconds=DR_POST_CHECK_INTERVAL_SEC)).isoformat()})
+    if _transition(run_id, record, updates) and updates.get("status") == "NEEDS_MANUAL_CHECK":
+        release_action_lock(f"dr-failover:{ag_name}")
+    return get_dr_run_record(run_id) or record
+
 
 # ════════════════════════════════════════════════════════════════════════
 # Pre-execution freshness check (used by handle_dr_execute)
@@ -1006,3 +1204,75 @@ def handle_dr_plan_update(event, http_method, path, path_parameters, query_param
         logger.error(f"Error updating switchover plan: {e}")
         return {"statusCode": 500, "headers": CORS_HEADERS,
                 "body": json.dumps({"error": "Failed to update switchover plan", "detail": str(e)})}
+
+
+# ════════════════════════════════════════════════════════════════════════
+# GET /dr-failover/{AGName}/runs — recent switchover runs for one AG
+# ════════════════════════════════════════════════════════════════════════
+#
+# Lets the DR Switchover page find the current run after a page refresh or
+# in a new tab (browser storage is per-tab), and list previous runs for
+# audit. Read-only summary: no execution logs, SSM output or credentials.
+
+_RUN_SUMMARY_KEYS = (
+    "run_id", "ag_name", "status", "created_at", "updated_at", "requested_by",
+    "primary_host", "dr_replica_host", "failover_scope",
+    "failover_execution", "execution_started_at", "failover_completed_at", "verified_at",
+    "post_check_state", "post_check_phase", "post_check_last_checked_at", "post_check_primary",
+    "attention_code", "attention_reason", "script_outcome", "resolved_after_attention",
+)
+_RUN_ACTIVE_STATUSES = {"EXECUTING", "CONFIRMING"}
+
+
+def _run_summary(item: dict) -> dict:
+    out = {k: item.get(k) for k in _RUN_SUMMARY_KEYS if item.get(k) is not None}
+    status = item.get("status")
+    # A leftover confirm_job_id on an older finished run (earlier code kept
+    # it) doesn't make it active — only a Check now actually running does.
+    active = status in _RUN_ACTIVE_STATUSES or (
+        status == "NEEDS_MANUAL_CHECK" and item.get("failover_execution") == "COMPLETED"
+        and item.get("post_check_state") == "RUNNING" and bool(item.get("confirm_job_id")))
+    if status == "PLANNED":
+        # Awaiting Teams approval only while the one-time token can still be used.
+        created = _parse_utc_iso(item.get("created_at"))
+        active = bool(created and (datetime.utcnow() - created).total_seconds() < DR_TOKEN_TTL_SECONDS)
+    out["is_active"] = active
+    return out
+
+
+def handle_dr_runs_list(event, http_method, path, path_parameters, query_params):
+    try:
+        import urllib.parse as _urlparse
+        ag_name = _urlparse.unquote(path.split("/dr-failover/")[-1].split("/runs")[0])
+        denied = authorize_action(event, "sql_dr_failover", resource_id=ag_name)
+        if denied:
+            return denied
+
+        try:
+            limit = max(1, min(50, int((query_params or {}).get("limit", 20))))
+        except (TypeError, ValueError):
+            limit = 20
+
+        from boto3.dynamodb.conditions import Key
+        table = boto3.resource("dynamodb").Table(DR_RUN_LOG_TABLE)
+        runs, kwargs, pages = [], {
+            "IndexName": "ag_name-created_at-index",
+            "KeyConditionExpression": Key("ag_name").eq(ag_name),
+            "ScanIndexForward": False,
+        }, 0
+        while len(runs) < limit and pages < 10:
+            resp = table.query(**kwargs)
+            pages += 1
+            # The same table holds saved plans ("plan-"), role-check groups
+            # ("grp-") and retry bookkeeping — only "dr-" items are runs.
+            runs.extend(_run_summary(i) for i in resp.get("Items", []) if str(i.get("run_id", "")).startswith("dr-"))
+            if not resp.get("LastEvaluatedKey"):
+                break
+            kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+
+        return {"statusCode": 200, "headers": CORS_HEADERS,
+                "body": json.dumps({"ag_name": ag_name, "runs": runs[:limit]}, default=decimal_default)}
+    except Exception as e:
+        logger.error(f"Error listing switchover runs: {e}")
+        return {"statusCode": 500, "headers": CORS_HEADERS,
+                "body": json.dumps({"error": "Failed to list switchover runs", "detail": str(e)})}
