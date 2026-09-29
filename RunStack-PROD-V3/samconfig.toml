@@ -1,0 +1,55 @@
+version = 0.1
+
+[default]
+
+[default.global.parameters]
+stack_name = "runstack-custom-automation"
+region = "us-east-1"
+
+[default.validate.parameters]
+lint = true
+
+[default.sync.parameters]
+watch = true
+
+[default.deploy]
+
+[default.deploy.parameters]
+# NOTE: s3_bucket below is ITG's own SAM-managed staging bucket — it will
+# NOT be accessible from PROD's separate AWS account. Either remove this
+# line and run `sam deploy --guided` once to let SAM create PROD's own
+# managed bucket automatically, or replace with PROD's actual managed
+# bucket name if one already exists in PROD's account from a prior deploy.
+s3_bucket = "s3-runstack-deployment-prod-us-east-1"
+s3_prefix = "runstack-app"
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+confirm_changeset = false
+disable_rollback = false
+
+[default.deploy.parameters.parameter_overrides]
+# ── Preserved as-is from PROD's existing samconfig.toml ─────────────────────
+pNotificationEmail="dxc-it-ore-automation@dxc.com"
+pVpcId="vpc-0770072bffeaf514f"
+pPrivateSubnetIds="subnet-080968eca37f10526,subnet-0e8e0acc655fb9262"
+pRouteTableIds="rtb-0a54d45b93fa55793,rtb-0911e20930fd688f1"
+pVpcCidr="10.144.192.0/26"
+pExistingLambdaSecurityGroupId="sg-021379698c5cb0d3d"
+pExistingEndpointSecurityGroupId="sg-06e50dc9a137719f4"
+
+# ── New — required by resources ported from ITG this round ─────────────────
+# pUiSessionSecret: PLACEHOLDER — do NOT deploy with this value. Generate a
+# fresh, PROD-specific secret before deploying:  openssl rand -hex 32
+# Do NOT reuse ITG's session secret — sharing it across environments means a
+# compromise of one environment's UI sessions compromises the other's too.
+pUiSessionSecret="8e4f9769f8fb21a8d85aab688b0095d6a67d31d618919b9ecaae0bbc52784155"
+
+# Confirmed shared enterprise Dynatrace tenant, reachable from both ITG and PROD.
+pDynatraceApiUrl="https://gbk74565.live.dynatrace.com"
+
+# No pExisting*SecretArn overrides included — none of these secrets exist in
+# PROD's account yet, so CloudFormation will create all 6 fresh (DR test SQL
+# creds, Teams shared secret, Teams webhook URL, Dynatrace synthetic-fetch
+# token, Dynatrace trigger token, SharePoint app secret) with
+# REPLACE_ME_AFTER_DEPLOY placeholders — same bootstrap pattern used
+# originally for ITG. Populate each with PROD's real values via
+# `aws secretsmanager put-secret-value` right after the first deploy.

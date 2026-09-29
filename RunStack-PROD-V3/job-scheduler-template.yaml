@@ -1,0 +1,146 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: DXCIT RunStack Job Scheduler - EventBridge rules for scheduled automation
+
+Parameters:
+  pScheduleName:
+    Type: String
+    Description: Name for this scheduler instance
+    AllowedPattern: '^[a-zA-Z0-9-]+$'
+    ConstraintDescription: Must contain only letters, numbers, and hyphens
+
+  pScheduleExpression:
+    Type: String
+    Description: EventBridge schedule expression (e.g., 'rate(5 minutes)' or 'cron(0 9 * * ? *)')
+    Default: 'rate(1 hour)'
+
+  pS3File:
+    Type: String
+    Description: S3 URI for the CSV file containing account_id,instance_id pairs (e.g., s3://bucket/path/instances.csv)
+    AllowedPattern: '^s3://[a-zA-Z0-9.-]+/.+$'
+    ConstraintDescription: Must be a valid S3 URI
+
+  pAutomationType:
+    Type: String
+    Description: Type of automation to create resources for
+    AllowedValues:
+      - SSM-Automation
+      - SSM-RunCommand
+    Default: SSM-Automation
+
+Conditions:
+  IsSSMAutomation: !Equals [!Ref pAutomationType, 'SSM-Automation']
+  IsSSMRunCommand: !Equals [!Ref pAutomationType, 'SSM-RunCommand']
+
+Resources:
+  # EventBridge Rule for SSM Automation
+  rSchedulerRuleAutomation:
+    Type: AWS::Events::Rule
+    Condition: IsSSMAutomation
+    Properties:
+      Name: !Sub '${pScheduleName}-automation-rule'
+      Description: !Sub 'Scheduled SSM Automation for ${pScheduleName}'
+      ScheduleExpression: !Ref pScheduleExpression
+      State: ENABLED
+      Targets:
+        - Arn:
+            Fn::ImportValue: JobSchedulerLambdaArn
+          Id: SchedulerLambdaTarget
+          Input: !Sub |
+            {
+              "s3_file": "${pS3File}",
+              "payload": {
+                "id": "sch-${pScheduleName}",
+                "account_id": "{{ACCOUNT_ID}}",
+                "region": "${AWS::Region}",
+                "resource_id": "{{INSTANCE_ID}}",
+                "automation_type": "SSM-Automation",
+                "automation_data": {
+                  "DocumentName": "AWS-RestartEC2Instance",
+                  "Parameters": {
+                    "InstanceId": ["{{INSTANCE_ID}}"]
+                  }
+                }
+              }
+            }
+
+  # EventBridge Rule for SSM Run Command
+  rSchedulerRuleRunCommand:
+    Type: AWS::Events::Rule
+    Condition: IsSSMRunCommand
+    Properties:
+      Name: !Sub '${pScheduleName}-runcommand-rule'
+      Description: !Sub 'Scheduled SSM Run Command for ${pScheduleName}'
+      ScheduleExpression: !Ref pScheduleExpression
+      State: ENABLED
+      Targets:
+        - Arn:
+            Fn::ImportValue: JobSchedulerLambdaArn
+          Id: SchedulerLambdaTarget
+          Input: !Sub |
+            {
+              "s3_file": "${pS3File}",
+              "payload": {
+                "id": "sch-${pScheduleName}",
+                "account_id": "{{ACCOUNT_ID}}",
+                "region": "${AWS::Region}",
+                "resource_id": "{{INSTANCE_ID}}",
+                "automation_type": "SSM-RunCommand",
+                "automation_data": {
+                  "DocumentName": "AWS-RunShellScript",
+                  "InstanceIds": ["{{INSTANCE_ID}}"],
+                  "Comment": "Scheduled execution via RunStack scheduler",
+                  "Parameters": {
+                    "commands": ["echo 'Scheduled execution on {{INSTANCE_ID}}'", "uptime"]
+                  }
+                }
+              }
+            }
+
+  # Permission for EventBridge to invoke Lambda (SSM Automation)
+  rLambdaInvokePermissionAutomation:
+    Type: AWS::Lambda::Permission
+    Condition: IsSSMAutomation
+    Properties:
+      FunctionName:
+        Fn::ImportValue: JobSchedulerLambdaArn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt rSchedulerRuleAutomation.Arn
+
+  # Permission for EventBridge to invoke Lambda (SSM Run Command)
+  rLambdaInvokePermissionRunCommand:
+    Type: AWS::Lambda::Permission
+    Condition: IsSSMRunCommand
+    Properties:
+      FunctionName:
+        Fn::ImportValue: JobSchedulerLambdaArn
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt rSchedulerRuleRunCommand.Arn
+
+Outputs:
+  SchedulerRuleName:
+    Description: Name of the created EventBridge rule
+    Value: !If 
+      - IsSSMAutomation
+      - !Ref rSchedulerRuleAutomation
+      - !Ref rSchedulerRuleRunCommand
+
+  SchedulerRuleArn:
+    Description: ARN of the created EventBridge rule
+    Value: !If 
+      - IsSSMAutomation
+      - !GetAtt rSchedulerRuleAutomation.Arn
+      - !GetAtt rSchedulerRuleRunCommand.Arn
+
+  AutomationType:
+    Description: Type of automation configured
+    Value: !Ref pAutomationType
+
+  ScheduleExpression:
+    Description: Schedule expression used
+    Value: !Ref pScheduleExpression
+
+  S3File:
+    Description: S3 CSV file containing account_id,instance_id pairs
+    Value: !Ref pS3File
