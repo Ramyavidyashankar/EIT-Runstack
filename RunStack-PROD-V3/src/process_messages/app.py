@@ -30,6 +30,7 @@ Modular layout (split from a single ~4,300-line file):
 - instances.py     — /agent/instances, /app-instances
 - tidal.py         — /tidal/apps/{AppId}/agents
 - healthcheck.py   — /batch-healthcheck, /instances/status, /assess/{checkId}
+- sql_healthcheck.py — /batch-healthcheck/options and the typed (check_type) /batch-healthcheck path used by the UI
 - dynatrace.py     — /dynatrace/ags(/{AGName}/servers|roles(/{JobId}))
 - dr_failover.py   — /dr-failover/{AGName}/config, plan, execute, approve, status, plans(/{PlanId}), runs
 This file (app.py) stays the Lambda entry point: SQS message processing
@@ -52,6 +53,7 @@ import auth
 import instances
 import tidal
 import healthcheck
+import sql_healthcheck
 import dynatrace
 import dr_failover
 
@@ -177,6 +179,8 @@ def handle_api_gateway_request(event: Dict[str, Any]) -> Dict[str, Any]:
             return auth.handle_ui_login(event, http_method, path, path_parameters, query_params)
         elif "/tidal/apps/" in path and path.endswith("/agents") and http_method == "GET":
             return tidal.handle_tidal_agents(event, http_method, path, path_parameters, query_params)
+        elif path.endswith("/batch-healthcheck/options") and http_method == "GET":
+            return sql_healthcheck.handle_healthcheck_options(event, http_method, path, path_parameters, query_params)
         elif path.endswith("/batch-healthcheck") and http_method == "POST":
             return healthcheck.handle_batch_healthcheck(event, http_method, path, path_parameters, query_params)
         elif "/instances/status" in path and http_method == "POST":

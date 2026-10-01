@@ -253,6 +253,12 @@ def handle_job_detail(event, http_method, path, path_parameters, query_params):
             "os": job.get("OS"),
             "problem_id": job.get("problem_id"),
             "automation_name": job.get("automation_name"),
+            # Additive, for the SQL Health Check page: who started it, which
+            # check mode, and the command's stderr on failure (written by the
+            # workflow's UpdateStatusFailedDetailed state).
+            "requested_by": job.get("requested_by"),
+            "check_type": job.get("check_type"),
+            "stderr_output": job.get("stderr_output"),
             "result": {
                 "qualys_installed": qualys_installed,
                 "qualys_status": qualys_status

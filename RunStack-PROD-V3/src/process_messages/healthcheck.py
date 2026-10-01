@@ -83,6 +83,19 @@ def _dispatch_one_healthcheck(server, inst):
 
 
 def handle_batch_healthcheck(event, http_method, path, path_parameters, query_params):
+    # Typed single-target path used by the UI's SQL Health Check page
+    # (see sql_healthcheck.py). Requests without "check_type" — the AQS SQL
+    # agent's single-server and SharePoint-sweep calls — continue below
+    # exactly as before. An unparseable body also falls through, so it is
+    # still authorized first and then rejected by the original code.
+    try:
+        peek = json.loads(event.get("body") or "{}")
+    except (ValueError, TypeError):
+        peek = None
+    if isinstance(peek, dict) and "check_type" in peek:
+        import sql_healthcheck  # local: sql_healthcheck imports shared, not this module
+        return sql_healthcheck.handle_typed_healthcheck(event, peek)
+
     denied = authorize_action(event, "sql_healthcheck")
     if denied:
         return denied

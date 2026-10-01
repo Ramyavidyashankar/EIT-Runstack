@@ -258,7 +258,7 @@ def normalize_runcommand_data(
                 "Accounts": [account_id],
                 "Regions": [region],
                 "ExecutionRoleName":
-                    "AWS-SystemsManager-AutomationExecutionRole",
+                    "runstack-cross-account-role",
                 "TargetLocationMaxConcurrency": "1",
                 "TargetLocationMaxErrors": "1"
             }
@@ -371,12 +371,12 @@ def transform_message_data(payload: Dict[str, Any], job_id: str) -> Dict[str, An
         # ------------------------------------------------------
         # Generic normalization for ALL SSM-Automation jobs
         # ------------------------------------------------------
-        #if payload["automation_type"] == "SSM-Automation":
-        #    automation_data = normalize_ssm_automation_data(
-        #        automation_data=automation_data,
-        #        account_id=payload["account_id"],
-        #        region=payload["region"]
-        #    )
+        if payload["automation_type"] == "SSM-Automation":
+            automation_data = normalize_ssm_automation_data(
+                automation_data=automation_data,
+                account_id=payload["account_id"],
+                region=payload["region"]
+            )
 
         transformed_data = {
             "job_id": job_id,
@@ -401,7 +401,11 @@ def transform_message_data(payload: Dict[str, Any], job_id: str) -> Dict[str, An
             "server_name",
             "environment",
             "OS",
-            "app_name"
+            "app_name",
+            # SQL Health Check page (sql_healthcheck.py) — who started the
+            # check and which check mode. Additive; absent on other jobs.
+            "requested_by",
+            "check_type"
         ]
 
         for field in optional_fields:
