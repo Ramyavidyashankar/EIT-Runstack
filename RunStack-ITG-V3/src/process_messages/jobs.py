@@ -379,7 +379,9 @@ JOBS_QUERY_MAX_SCAN_ITEMS = int(os.getenv("JOBS_QUERY_MAX_SCAN_ITEMS", "20000"))
 _LIST_ATTRS = ["job_id", "notification_id", "account_id", "region", "resource_id",
                "automation_type", "status", "execution_id", "created_at", "updated_at",
                "server_name", "app_name", "app_id", "environment", "automation_name",
-               "problem_id", "exit_code", "ec2_state"]
+               "problem_id", "exit_code", "ec2_state",
+               # run grouping (Automation Executions shows one row per run)
+               "execution_group_id", "execution_group_label", "initiated_by"]
 
 
 def _scan_all_jobs(force: bool = False):
@@ -466,9 +468,13 @@ def handle_jobs_query(event, http_method, path, path_parameters, query_params):
     view = qp.get("view") or "rows"
     if view not in ("rows", "summary", "recent"):
         return _bad("view must be rows, summary or recent")
+    # group=runs (Automation Executions): one row per run. Runs are built
+    # from the full matching set, which only the scan path has, so the
+    # counter/index path is not used for grouped row queries.
+    grouped_rows = view == "rows" and qp.get("group") == "runs"
     try:
         import jobs_list
-        if jobs_list.index_ready():
+        if not grouped_rows and jobs_list.index_ready():
             return _indexed_query(jobs_list, view, qp)
     except Exception as e:
         logger.error(f"Indexed jobs query failed, falling back to scan: {e}")
@@ -644,6 +650,74 @@ def _scan_rows(qp):
     return res
 
 
+def _run_status(c):
+    """Run-level status group from its servers' status groups.
+    Still active → RUNNING (or PENDING if nothing has started or finished);
+    finished → COMPLETED only when every server completed, else FAILED."""
+    if c["PENDING"] or c["RUNNING"]:
+        return "RUNNING" if (c["RUNNING"] or c["COMPLETED"] or c["FAILED"]) else "PENDING"
+    return "FAILED" if c["FAILED"] else "COMPLETED"
+
+
+def _only(members, key):
+    """The single value every member shares, else None; and how many distinct."""
+    vals = {str(m.get(key)) for m in members if m.get(key) not in (None, "")}
+    return (next(iter(vals)) if len(vals) == 1 else None), len(vals)
+
+
+def _run_row(group_id, members):
+    members = sorted(members, key=lambda m: (str(m.get("created_at", "")), str(m.get("job_id", ""))))
+    rep = members[0]
+    c = {"PENDING": 0, "RUNNING": 0, "COMPLETED": 0, "FAILED": 0}
+    for m in members:
+        c[m["status_group"]] += 1
+    group = _run_status(c)
+    row = {
+        "is_run": True,
+        "job_id": rep.get("job_id"),          # opening the run opens Execution Details via this job
+        "execution_group_id": group_id,
+        "execution_group_label": rep.get("execution_group_label"),
+        "automation_label": rep.get("automation_label"),
+        "document_name": rep.get("document_name"),
+        "automation_name": rep.get("automation_name") or rep.get("execution_group_label"),
+        "automation_name_key": rep.get("automation_name_key"),
+        "automation_type": rep.get("automation_type"),
+        "initiated_by": rep.get("initiated_by"),
+        "status": group,
+        "status_group": group,
+        "run_outcome": "partial" if group == "FAILED" and c["COMPLETED"] else None,
+        "server_count": len(members),
+        "run_counts": c,
+        "created_at": rep.get("created_at"),
+        "updated_at": max((str(m.get("updated_at") or "") for m in members), default=None) or None,
+    }
+    for key, plural in (("account_id", "account_count"), ("region", "region_count"),
+                        ("environment", "environment_count"), ("app_name", "app_count")):
+        row[key], row[plural] = _only(members, key)
+    if len(members) == 1:
+        row.update(server_name=rep.get("server_name"), resource_id=rep.get("resource_id"))
+    return row
+
+
+def _collapse_runs(matching_jobs, snapshot):
+    """Jobs → list units: each grouped run becomes one row (once, at its
+    first matching job); jobs without a group stay as they are."""
+    by_group = {}
+    for j in snapshot:
+        gid = j.get("execution_group_id")
+        if gid:
+            by_group.setdefault(gid, []).append(j)
+    units, seen = [], set()
+    for j in matching_jobs:
+        gid = j.get("execution_group_id")
+        if not gid:
+            units.append(j)
+        elif gid not in seen:
+            seen.add(gid)
+            units.append(_run_row(gid, by_group.get(gid) or [j]))
+    return units
+
+
 def _legacy_query(qp):
     try:
         status = (qp.get("status") or "ALL").upper()
@@ -697,6 +771,12 @@ def _legacy_query(qp):
             return True
 
         base = [j for j in snapshot if matches_non_status(j)]
+        jobs_matching = len(base)
+        grouped = qp.get("group") == "runs"
+        if grouped:
+            # A run is listed when any of its servers matches the filters;
+            # its row summarises ALL of its servers (from the snapshot).
+            base = _collapse_runs(base, snapshot)
         counts = {"ALL": len(base), "PENDING": 0, "RUNNING": 0, "COMPLETED": 0, "FAILED": 0}
         for j in base:
             counts[j["status_group"]] += 1
@@ -748,6 +828,8 @@ def _legacy_query(qp):
                     "environments": facet("environment"),
                     "regions": facet("region"),
                 },
+                "grouped": grouped,
+                "jobs_matching": jobs_matching,
                 "scan_truncated": truncated,
                 "max_scan_items": JOBS_QUERY_MAX_SCAN_ITEMS,
                 "data_as_of": datetime.utcfromtimestamp(fetched).isoformat() + "Z",

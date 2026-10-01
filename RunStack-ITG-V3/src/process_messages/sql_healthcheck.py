@@ -19,8 +19,9 @@ Two entry points, both behind authorize_action("sql_healthcheck"):
            a reason, so the UI can say why instead of hiding it.
 
   POST /batch-healthcheck   with "check_type" in the body  (typed path)
-       One target, one check. Enforced here, in this order, regardless of
-       what the UI showed:
+       One target (instance_id/server_name), or several (instance_ids) as one
+       run sharing a server-created execution_group_id. For EVERY target the
+       following is enforced, in this order, regardless of what the UI showed:
          1. Azure AD group / team / capability      (authorize_action)
          2. target exists in runstack-instance-catalog
          3. target scope                            (authorize_action with resource_id)
@@ -44,6 +45,8 @@ runstack-action-locks, which process_messages already writes.
 
 import re
 import time as _time
+
+from boto3.dynamodb.conditions import Key
 
 from shared import *
 from shared import _fetch_sharepoint_server_list
@@ -485,55 +488,75 @@ def _release_check_lock(lock_key, job_id):
 
 
 # ── POST /batch-healthcheck (typed path) ──────────────────────────────────
+#
+# Single target  {check_type, parameters, instance_id | server_name}
+#   One job, no execution group — unchanged response shape and status codes.
+#
+# Several targets {check_type, parameters, instance_ids: [...], execution_group_id?}
+#   One run: every job gets the same execution_group_id, created HERE (never
+#   taken from the browser on the first call), so Execution Details shows the
+#   servers together. Each server goes through exactly the same checks as a
+#   single target (catalog, team scope, environment, region/document, lock).
+#   A server that fails a check is reported in its row; the others still
+#   start. Larger selections are sent in chunks of MAX_TARGETS_PER_REQUEST:
+#   later chunks pass back the execution_group_id from the first response,
+#   which is accepted only for a recent health-check group whose jobs were
+#   all started by this same caller.
 
-def handle_typed_healthcheck(event, body):
-    denied, _scope = _authorize_and_scope(event)
-    if denied:
-        return denied
+MAX_TARGETS_PER_REQUEST = int(os.getenv("SQL_HEALTHCHECK_MAX_TARGETS_PER_REQUEST", "100"))
+GROUP_CONTINUE_SECONDS = int(os.getenv("SQL_HEALTHCHECK_GROUP_CONTINUE_SECONDS", "900"))
+EXECUTION_GROUP_INDEX = os.getenv("EXECUTION_GROUP_INDEX", "execution-group-index")
+UI_GROUP_PREFIX = "grp-hcui-"
+_UI_GROUP_RE = re.compile(r"^grp-hcui-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+_INSTANCE_ID_RE = re.compile(r"^(i|mi)-[0-9a-f]{8,17}$")
 
-    check_type = body.get("check_type")
-    if check_type not in CHECK_MODES_BY_ID:
-        return _resp(400, {"error": "invalid_check_type", "message": f"check_type must be one of: {', '.join(CHECK_MODES_BY_ID)}"})
 
-    instance_id = str(body.get("instance_id") or "").strip()
-    server_name = str(body.get("server_name") or "").strip()
-    if not instance_id and not server_name:
-        return _resp(400, {"error": "target_required", "message": "Choose a target (instance_id or server_name)."})
+def _body_of(resp):
+    try:
+        return json.loads(resp.get("body") or "{}")
+    except (TypeError, ValueError):
+        return {}
 
-    # Resolve through the catalog only — never trust account/region from the browser.
+
+def _resolve_and_vet(event, instance_id, server_name):
+    """
+    Per-target checks shared by the single and multi-target paths, in the
+    original order: catalog → team scope → environment → supported region.
+    Returns (inst, None) or (inst_or_None, error_response).
+    """
     if instance_id:
         inst = get_catalog_instance(instance_id)
     else:
         inst = _catalog_by_name().get(server_name.lower())
     if not inst:
-        return _resp(404, {"error": "target_not_found", "reason": "target_not_found",
-                           "message": "That server is not in the RunStack instance catalog."})
-
+        return None, _resp(404, {"error": "target_not_found", "reason": "target_not_found",
+                                 "message": "That server is not in the RunStack instance catalog."})
     denied = _authorize_target(event, inst)
     if denied:
-        return denied
-
+        return inst, denied
     env_block = _environment_block(inst)
     if env_block:
-        return _resp(403, {"error": "forbidden", "reason": "environment_restricted", "message": env_block})
-
+        return inst, _resp(403, {"error": "forbidden", "reason": "environment_restricted", "message": env_block})
     region = inst.get("region") or ""
     if region not in SUPPORTED_REGIONS:
-        return _resp(400, {"error": "unsupported_region", "message": f"Region '{region or 'unknown'}' is not supported."})
+        return inst, _resp(400, {"error": "unsupported_region", "message": f"Region '{region or 'unknown'}' is not supported."})
+    return inst, None
 
-    check = describe_check(check_type)
-    if not check["available"]:
-        return _resp(409, {"error": "check_unavailable", "reason": "check_unavailable", "message": check["reason"]})
+
+def _document_region_error(check, region):
     if region not in check["regions_available"]:
         return _resp(409, {"error": "document_not_in_region", "reason": "document_not_in_region",
                            "message": f"SSM document {check['document']} is not available in {region}, where this server runs."})
+    return None
 
-    definition = _read_document(check["document"], PRIMARY_REGION)
-    ssm_params, errors = validate_parameters(definition.get("parameters"), body.get("parameters", {}))
-    if errors:
-        return _resp(400, {"error": "invalid_parameters", "message": "Some parameters are not valid.", "errors": errors})
 
-    user_email = _caller_email(event)
+def _start_job(event, inst, check_type, check, ssm_params, server_name, user_email, origin):
+    """
+    Take the per-target lock and write the job. Returns (status_code, body)
+    in the single-target response shape; `origin` carries initiated_by and,
+    for a multi-target run, the execution group.
+    """
+    region = inst.get("region") or ""
     job_id = str(uuid.uuid4())
     lock_key = f"sql-healthcheck#{inst['instance_id']}#{check_type}"
     existing = _acquire_check_lock(lock_key, job_id, user_email)
@@ -541,7 +564,7 @@ def handle_typed_healthcheck(event, body):
     if existing:
         # Same check already running on this target — attach to it instead
         # of starting a second one (covers double clicks and a second tab).
-        return _resp(200 if existing.get("locked_by") == user_email else 409, {
+        return (200 if existing.get("locked_by") == user_email else 409), {
             "error": None if existing.get("locked_by") == user_email else "already_running",
             "reason": "already_running",
             "message": "A health check of this type is already running on this server.",
@@ -550,7 +573,7 @@ def handle_typed_healthcheck(event, body):
             "jobs": [{"server_name": listed_name, "instance_id": inst["instance_id"],
                       "job_id": existing.get("job_id"), "status": "PENDING", "check_type": check_type,
                       "document": check["document"]}],
-        })
+        }
 
     payload = {
         "id": job_id,
@@ -570,11 +593,13 @@ def handle_typed_healthcheck(event, body):
     for key in ("app_id", "app_name", "environment"):
         if inst.get(key):
             payload[key] = inst[key]
+    # Server-side origin only (verified token / group created by this handler).
+    payload.update({k: v for k, v in origin.items() if v})
 
     if not validate_message_payload(payload):
         _release_check_lock(lock_key, job_id)
-        return _resp(422, {"error": "dispatch_failed", "message":
-                           "Could not build a valid job for this server (check account_id/region in the instance catalog)."})
+        return 422, {"error": "dispatch_failed", "message":
+                     "Could not build a valid job for this server (check account_id/region in the instance catalog)."}
     try:
         stored = store_message_in_dynamodb(transform_message_data(payload, job_id))
     except Exception as e:
@@ -582,13 +607,164 @@ def handle_typed_healthcheck(event, body):
         stored = False
     if not stored:
         _release_check_lock(lock_key, job_id)
-        return _resp(500, {"error": "dispatch_failed", "message": "Failed to create the health check job."})
+        return 500, {"error": "dispatch_failed", "message": "Failed to create the health check job."}
 
     logger.info(f"sql_healthcheck: job {job_id} ({check_type}, {check['document']}) for {inst['instance_id']} "
-                f"{inst.get('account_id')}/{region} by {user_email}")
-    return _resp(200, {
+                f"{inst.get('account_id')}/{region} by {user_email}"
+                + (f" in group {origin['execution_group_id']}" if origin.get("execution_group_id") else ""))
+    return 200, {
         "deduplicated": False,
         "total_servers": 1,
         "jobs": [{"server_name": listed_name, "instance_id": inst["instance_id"], "job_id": job_id,
                   "status": "PENDING", "check_type": check_type, "document": check["document"]}],
+    }
+
+
+def _check_and_params(check_type, body):
+    """Check availability + parameter validation (target-independent)."""
+    check = describe_check(check_type)
+    if not check["available"]:
+        return None, None, _resp(409, {"error": "check_unavailable", "reason": "check_unavailable", "message": check["reason"]})
+    definition = _read_document(check["document"], PRIMARY_REGION)
+    ssm_params, errors = validate_parameters(definition.get("parameters"), body.get("parameters", {}))
+    if errors:
+        return check, None, _resp(400, {"error": "invalid_parameters", "message": "Some parameters are not valid.", "errors": errors})
+    return check, ssm_params, None
+
+
+def handle_typed_healthcheck(event, body):
+    denied, _scope = _authorize_and_scope(event)
+    if denied:
+        return denied
+
+    check_type = body.get("check_type")
+    if check_type not in CHECK_MODES_BY_ID:
+        return _resp(400, {"error": "invalid_check_type", "message": f"check_type must be one of: {', '.join(CHECK_MODES_BY_ID)}"})
+
+    if "instance_ids" in body:
+        return _handle_multi_target(event, body, check_type)
+
+    instance_id = str(body.get("instance_id") or "").strip()
+    server_name = str(body.get("server_name") or "").strip()
+    if not instance_id and not server_name:
+        return _resp(400, {"error": "target_required", "message": "Choose a target (instance_id or server_name)."})
+
+    # Resolve through the catalog only — never trust account/region from the browser.
+    inst, err = _resolve_and_vet(event, instance_id, server_name)
+    if err:
+        return err
+
+    check, ssm_params, err = _check_and_params(check_type, body)
+    if err and err["statusCode"] == 409:
+        return err
+    region_err = _document_region_error(check, inst.get("region") or "")
+    if region_err:
+        return region_err
+    if err:
+        return err
+
+    code, out = _start_job(event, inst, check_type, check, ssm_params, server_name, _caller_email(event),
+                           {"initiated_by": job_initiator(event)})
+    return _resp(code, out)
+
+
+def _continued_group_ok(group_id, initiator):
+    """
+    A later chunk may join a group only if that group is a recent UI health
+    check group and every job already in it was started by this caller.
+    Uses the existing execution-group-index; any read problem refuses.
+    """
+    if not _UI_GROUP_RE.match(group_id):
+        return False
+    try:
+        table = boto3.resource("dynamodb").Table(DYNAMODB_TABLE_NAME)
+        items, kw = [], {"IndexName": EXECUTION_GROUP_INDEX,
+                         "KeyConditionExpression": Key("execution_group_id").eq(group_id)}
+        while True:
+            page = table.query(**kw)
+            items.extend(page.get("Items", []))
+            if not page.get("LastEvaluatedKey") or len(items) > 5000:
+                break
+            kw["ExclusiveStartKey"] = page["LastEvaluatedKey"]
+    except Exception as e:
+        logger.warning(f"sql_healthcheck: could not verify group {group_id}: {e}")
+        return False
+    if not items or any(str(i.get("initiated_by") or "") != initiator for i in items):
+        return False
+    first = min(str(i.get("created_at") or "") for i in items)
+    try:
+        created = datetime.fromisoformat(first.replace("Z", "")).replace(tzinfo=None)
+    except ValueError:
+        return False
+    return (datetime.utcnow() - created).total_seconds() <= GROUP_CONTINUE_SECONDS
+
+
+def _handle_multi_target(event, body, check_type):
+    raw = body.get("instance_ids")
+    if not isinstance(raw, list) or not raw:
+        return _resp(400, {"error": "target_required", "message": "instance_ids must be a non-empty list."})
+    ids, seen = [], set()
+    for v in raw:
+        iid = str(v or "").strip()
+        if not _INSTANCE_ID_RE.match(iid):
+            return _resp(400, {"error": "invalid_instance_id", "message": f"'{iid[:40]}' is not a valid instance ID."})
+        if iid not in seen:
+            seen.add(iid)
+            ids.append(iid)
+    if len(ids) > MAX_TARGETS_PER_REQUEST:
+        return _resp(400, {"error": "too_many_targets",
+                           "message": f"Send at most {MAX_TARGETS_PER_REQUEST} servers per request.",
+                           "max_targets": MAX_TARGETS_PER_REQUEST})
+
+    check, ssm_params, err = _check_and_params(check_type, body)
+    if err:
+        return err
+
+    initiator = job_initiator(event)
+    user_email = _caller_email(event)
+    requested_group = str(body.get("execution_group_id") or "").strip()
+    if requested_group:
+        if not _continued_group_ok(requested_group, initiator):
+            return _resp(400, {"error": "invalid_execution_group",
+                               "message": "That run can't be continued. Start the health check again."})
+        group_id = requested_group
+    else:
+        group_id = f"{UI_GROUP_PREFIX}{uuid.uuid4()}"
+    origin = {
+        "initiated_by": initiator,
+        "execution_group_id": group_id,
+        "execution_group_label": f"SQL Database Health Check · {check.get('label') or CHECK_MODES_BY_ID[check_type]['label']}",
+    }
+
+    rows, started = [], 0
+    for iid in ids:
+        inst, err = _resolve_and_vet(event, iid, "")
+        if not err:
+            err = _document_region_error(check, inst.get("region") or "")
+        if err:
+            b = _body_of(err)
+            rows.append({"server_name": (inst or {}).get("server_name") or (inst or {}).get("name") or None,
+                         "instance_id": iid, "job_id": None, "status": "NOT_STARTED",
+                         "error": b.get("error") or "forbidden", "reason": b.get("reason") or b.get("error"),
+                         "message": b.get("message") or b.get("error") or "Not allowed for this server."})
+            continue
+        code, out = _start_job(event, inst, check_type, check, ssm_params, "", user_email, origin)
+        job = (out.get("jobs") or [{}])[0]
+        if code == 200 and not out.get("deduplicated"):
+            started += 1
+            rows.append(dict(job, deduplicated=False, error=None))
+        elif out.get("deduplicated"):
+            rows.append(dict(job, deduplicated=True, error=out.get("error"), reason="already_running",
+                             message=out.get("message")))
+        else:
+            rows.append({"server_name": inst.get("server_name") or inst.get("name"), "instance_id": iid, "job_id": None,
+                         "status": "NOT_STARTED", "error": out.get("error"), "reason": out.get("error"),
+                         "message": out.get("message")})
+
+    logger.info(f"sql_healthcheck: group {group_id} — {started} started of {len(ids)} requested by {user_email}")
+    return _resp(200, {
+        "execution_group_id": group_id if started or requested_group else None,
+        "total_servers": len(ids),
+        "started": started,
+        "jobs": rows,
     })
