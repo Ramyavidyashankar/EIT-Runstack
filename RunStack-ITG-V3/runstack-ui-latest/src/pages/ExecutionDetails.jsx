@@ -101,7 +101,17 @@ export default function ExecutionDetails() {
   });
   usePageRefresh(poll.refresh);
 
-  useEffect(() => { if (poll.error?.kind === 'not_found' && !data) setNotFound(true); }, [poll.error, data]);
+  // Right after a run is submitted its first job can take a few seconds to
+  // be created; treat "not found" as "starting" for the first minute.
+  const justSubmitted = !!location.state?.justSubmitted;
+  const openedAt = useRef(Date.now());
+  useEffect(() => { openedAt.current = Date.now(); }, [jobId]);
+  useEffect(() => {
+    if (poll.error?.kind !== 'not_found' || data) return;
+    if (justSubmitted && Date.now() - openedAt.current < 60000) return;
+    setNotFound(true);
+  }, [poll.error, data, justSubmitted]);
+  const starting = justSubmitted && !data && poll.error?.kind === 'not_found' && !notFound;
 
   // Finished executions don't auto-poll, but opening a server (or changing
   // search/filter/page) still needs one fetch.
@@ -154,7 +164,7 @@ export default function ExecutionDetails() {
 
   if (notFound) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="rs-page">
         <Topbar title="Execution details" subtitle={jobId}
           actions={<Btn variant="accent" size="sm" onClick={() => nav('/jobs')}>← Automation Executions</Btn>} />
         <div style={{ padding: 24, maxWidth: 720 }}>
@@ -174,11 +184,11 @@ export default function ExecutionDetails() {
   const filtered = !!(query.q || query.status);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+    <div className="rs-page">
       <ExecutionTopbar title={title} active={active} paused={paused} onTogglePause={() => setPaused((p) => !p)}
         poll={poll} intervalMs={intervalMs} />
 
-      <div style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: '16px 20px 24px', display: 'flex', flexDirection: 'column', gap: 14, background: 'var(--bg-page)' }}>
+      <div className="rs-page-body" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
         {paused && (
           <Callout tone="info" title="Updates paused">
             The page has stopped refreshing. The automation keeps running in AWS — resume to see its latest status and output.
@@ -190,14 +200,16 @@ export default function ExecutionDetails() {
             not a failure of the execution. {poll.error.kind === 'auth' ? '' : 'Retrying automatically.'}
           </Callout>
         )}
-        {!data && poll.error && poll.error.kind !== 'not_found' && (
+        {!data && poll.error && poll.error.kind !== 'not_found' && !starting && (
           <ErrorBanner message={`Could not load this execution: ${poll.error.message}`} />
         )}
 
         {/* ── Header, metadata, progress ── */}
         <Card style={{ padding: '16px 18px', display: 'grid', gap: 16, flexShrink: 0 }}>
           {!exec ? (
-            <div style={{ display: 'flex', gap: 10, alignItems: 'center', color: 'var(--text-tertiary)', fontSize: 12.5 }}><Spinner size={14} /> Loading execution…</div>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', color: 'var(--text-tertiary)', fontSize: 13 }}>
+              <Spinner size={14} /> {starting ? 'Starting the run — waiting for RunStack to create the first job…' : 'Loading execution…'}
+            </div>
           ) : (
             <>
               <ExecutionTitle exec={exec} fallbackTitle={title} />
@@ -222,7 +234,7 @@ export default function ExecutionDetails() {
             {tabs.map((t) => (
               <button key={t.k} type="button" role="tab" aria-selected={tab === t.k} onClick={() => setTab(t.k)}
                 style={{
-                  padding: '11px 12px', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', background: 'none', border: 'none',
+                  padding: '11px 12px', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', background: 'none', border: 'none',
                   color: tab === t.k ? 'var(--brand-hover)' : 'var(--text-tertiary)',
                   borderBottom: `2px solid ${tab === t.k ? 'var(--brand)' : 'transparent'}`, marginBottom: -1,
                 }}>{t.l}</button>
@@ -242,7 +254,7 @@ export default function ExecutionDetails() {
                 />
                 {exportError && <Callout tone="warning">{exportError}</Callout>}
                 {data?.live_status_deferred > 0 && (
-                  <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>
+                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
                     Live status for {data.live_status_deferred} more server{data.live_status_deferred === 1 ? '' : 's'} on this page arrives on the next refresh.
                   </div>
                 )}

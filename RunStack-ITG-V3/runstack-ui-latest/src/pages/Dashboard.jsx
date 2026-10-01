@@ -30,19 +30,19 @@ const RECENT_LIMIT = 10;
 // for SVG fill/stroke props, so the hexes are restated here on purpose).
 const C = {
   midnight: '#0A0F1C',
-  canvas:   '#F1F5F9',
-  orange:   '#0F766E',   // now the single accent — see index.css --brand
-  blue:     '#0F766E',
-  royal:    '#0B5C56',
+  canvas:   '#F5F6F8',
+  orange:   '#365D9D',   // now the single accent — see index.css --brand
+  blue:     '#365D9D',
+  royal:    '#2C4D84',
   gold:     '#B45309',
   green:    '#0F9D6D',
   red:      '#DC2626',
-  ink:      '#0F172A',
-  textSec:  '#334155',
-  textTer:  '#64748B',
-  border:   '#E2E8F0',
+  ink:      '#202938',
+  textSec:  '#3B4658',
+  textTer:  '#657185',
+  border:   '#DCE2EA',
   surface:  '#FFFFFF',
-  tint:     '#F8FAFC',
+  tint:     '#FAFBFC',
 };
 
 const STATUS_COLOR = {
@@ -102,7 +102,7 @@ function MetricCard({ label, value, sub, accent, icon, onClick, title }) {
         boxShadow: '0 1px 2px rgba(15,23,42,0.05)', cursor: onClick ? 'pointer' : 'default', transition: 'border-color 0.15s',
       }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-        <span style={{ fontSize: 10, fontWeight: 700, color: C.textTer, textTransform: 'uppercase', letterSpacing: 0.7 }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)',}}>
           {label}
         </span>
         <span style={{
@@ -112,10 +112,10 @@ function MetricCard({ label, value, sub, accent, icon, onClick, title }) {
           {icon(16, accent)}
         </span>
       </div>
-      <div style={{ fontSize: 30, fontWeight: 700, color: C.ink, lineHeight: 1, letterSpacing: '-0.4px', fontFamily: 'var(--font-mono)' }}>
+      <div style={{ fontSize: 30, fontWeight: 600, color: C.ink, lineHeight: 1, letterSpacing: '-0.4px', fontFamily: 'var(--font-mono)' }}>
         {value}
       </div>
-      <div style={{ fontSize: 11.5, color: C.textTer, marginTop: 2 }}>{sub}</div>
+      <div style={{ fontSize: 12, color: C.textTer, marginTop: 2 }}>{sub}</div>
     </div>
   );
 }
@@ -124,13 +124,13 @@ function MetricCard({ label, value, sub, accent, icon, onClick, title }) {
 function SectionStamp({ section, label = 'Updated' }) {
   const { refreshing, error, updatedAt, data } = section;
   return (
-    <span aria-live="polite" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: error ? '#B91C1C' : C.textTer, whiteSpace: 'nowrap' }}>
+    <span aria-live="polite" style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, color: error ? '#B91C1C' : C.textTer, whiteSpace: 'nowrap' }}>
       {refreshing && <Spinner size={10} />}
       {error
         ? (data ? `Couldn't refresh — showing ${fmtClock(updatedAt)}` : "Couldn't load")
         : updatedAt ? `${label} ${fmtClock(updatedAt)}` : 'Loading…'}
       {error && (
-        <button type="button" onClick={section.refresh} style={{ background: 'none', border: 'none', padding: 0, color: C.orange, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', fontSize: 10.5 }}>
+        <button type="button" onClick={section.refresh} style={{ background: 'none', border: 'none', padding: 0, color: C.orange, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12 }}>
           Retry
         </button>
       )}
@@ -140,7 +140,7 @@ function SectionStamp({ section, label = 'Updated' }) {
 
 function SectionError({ section, what }) {
   return (
-    <div role="alert" style={{ padding: '18px 16px', fontSize: 12.5, color: '#9A1E1E', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+    <div role="alert" style={{ padding: '18px 16px', fontSize: 13, color: '#9A1E1E', display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
       Couldn't load {what}: {section.error}
       <Btn variant="default" size="sm" onClick={section.refresh}>Try again</Btn>
     </div>
@@ -150,7 +150,7 @@ function SectionError({ section, what }) {
 function PartialNote({ data }) {
   if (!data || data.complete !== false) return null;
   return (
-    <div style={{ fontSize: 10.5, color: '#92400E', marginTop: 6 }}>
+    <div style={{ fontSize: 12, color: '#92400E', marginTop: 6 }}>
       Partial: the job counters are not set up yet, so these numbers cover only the jobs RunStack could scan.
     </div>
   );
@@ -179,10 +179,10 @@ function ActionCard({ label, sub, icon, color, onClick }) {
         {icon(15, color)}
       </div>
       <div>
-        <div style={{ fontWeight: 600, fontSize: 12.5, color: C.ink }}>{label}</div>
-        <div style={{ fontSize: 10.5, color: C.textTer, marginTop: 1 }}>{sub}</div>
+        <div style={{ fontWeight: 600, fontSize: 13, color: C.ink }}>{label}</div>
+        <div style={{ fontSize: 12, color: C.textTer, marginTop: 1 }}>{sub}</div>
       </div>
-      <div style={{ marginLeft: 'auto', color: hov ? color : '#CBD5E1', fontSize: 15 }}>→</div>
+      <div style={{ marginLeft: 'auto', color: hov ? color : '#C9D1DC', fontSize: 15 }}>→</div>
     </div>
   );
 }
@@ -193,9 +193,9 @@ function ChartTooltip({ active, payload, label }) {
   return (
     <div style={{
       background: C.surface, border: `1px solid ${C.border}`, borderRadius: 6,
-      padding: '8px 10px', fontSize: 11, boxShadow: '0 4px 12px rgba(18,21,28,0.1)',
+      padding: '8px 10px', fontSize: 12, boxShadow: '0 4px 12px rgba(18,21,28,0.1)',
     }}>
-      <div style={{ fontWeight: 700, color: C.ink, marginBottom: 4, fontFamily: 'var(--font-mono)' }}>{label}</div>
+      <div style={{ fontWeight: 600, color: C.ink, marginBottom: 4, fontFamily: 'var(--font-mono)' }}>{label}</div>
       {payload.filter(p => p.value > 0).map(p => (
         <div key={p.dataKey} style={{ display: 'flex', alignItems: 'center', gap: 6, color: C.textSec }}>
           <span style={{ width: 7, height: 7, borderRadius: 2, background: p.color, display: 'inline-block' }} />
@@ -229,15 +229,15 @@ function RecentRow({ job: j, onClick }) {
         </div>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
           <TypeTag type={j.automation_type} />
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: C.textTer }}>{(j.job_id || '').slice(0, 8)}</span>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: C.textTer }}>{(j.job_id || '').slice(0, 8)}</span>
         </span>
       </div>
       <div style={{ flex: `0 0 ${COLS[1].width}px`, padding: '0 14px', minWidth: 0 }}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: C.textSec }}>{j.account_id || '—'}</div>
-        <div style={{ fontSize: 10, color: C.textTer, marginTop: 2 }}>{j.region}</div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: C.textSec }}>{j.account_id || '—'}</div>
+        <div style={{ fontSize: 12, color: C.textTer, marginTop: 2 }}>{j.region}</div>
       </div>
       <div style={{ flex: `0 0 ${COLS[2].width}px`, padding: '0 14px' }}><StatusBadge status={j.status} /></div>
-      <div style={{ flex: `0 0 ${COLS[3].width}px`, padding: '0 14px', color: C.textTer, fontSize: 12 }} title={fmtFull(j.created_at)}>
+      <div style={{ flex: `0 0 ${COLS[3].width}px`, padding: '0 14px', color: C.textTer, fontSize: 13 }} title={fmtFull(j.created_at)}>
         {fmtRelative(j.created_at)}
       </div>
     </div>
@@ -276,33 +276,33 @@ export default function Dashboard() {
   const pct = (v) => (t.ALL ? `${Math.round((v / t.ALL) * 100)}%` : '0%');
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: C.canvas }}>
+    <div className="rs-page" style={{ background: C.canvas }}>
 
       <Topbar
         title="Dashboard"
         subtitle="Live view of RunStack automation executions"
         actions={
           <>
-            <span style={{ fontSize: 11, color: '#64748B', whiteSpace: 'nowrap' }} aria-live="polite">
+            <span style={{ fontSize: 12, color: '#657185', whiteSpace: 'nowrap' }} aria-live="polite">
               {oldest ? `Updated ${fmtClock(oldest)} · auto every ${POLL_MS / 1000}s` : 'Loading…'}
               {failing > 0 && <span style={{ color: '#B91C1C' }}> · {failing} section{failing > 1 ? 's' : ''} couldn't refresh</span>}
             </span>
             <Btn variant="default" size="sm" onClick={refreshAll} disabled={anyRefreshing}>
               {anyRefreshing ? <Spinner size={13} /> : '↻'} Refresh
             </Btn>
-            <Btn variant="primary" size="sm" onClick={() => nav('/trigger')}>
+            <Btn variant="primary" size="sm" onClick={() => nav('/automations')}>
               <IconPlay size={12} color="#fff" /> Run automation
             </Btn>
           </>
         }
       />
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
-       <div style={{ maxWidth: 1680, margin: '0 auto' }}>
+      <div className="rs-page-body">
+       <div className="rs-page-content rs-page-content--flow">
 
         {/* ── Section 1: health + summary cards (last 24 hours) ── */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, gap: 10 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: C.textTer, textTransform: 'uppercase', letterSpacing: 0.7 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)',}}>
             Last 24 hours{s ? ` · since ${since}` : ''}
           </div>
           <SectionStamp section={summary} />
@@ -322,11 +322,11 @@ export default function Dashboard() {
                 background: t.FAILED > 0 ? C.red : C.green,
                 boxShadow: `0 0 0 4px ${t.FAILED > 0 ? C.red + '22' : C.green + '22'}`,
               }} />
-              <span style={{ fontSize: 12.5, fontWeight: 700, color: t.FAILED > 0 ? '#9A1E1E' : '#0B6E4C' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: t.FAILED > 0 ? '#9A1E1E' : '#0B6E4C' }}>
                 {!s ? 'Loading…' : t.FAILED > 0 ? `${num(t.FAILED)} execution${t.FAILED > 1 ? 's' : ''} failed in the last 24 hours` : 'No failed executions in the last 24 hours'}
               </span>
               {active.RUNNING > 0 && (
-                <span style={{ fontSize: 11.5, color: C.textTer }}>
+                <span style={{ fontSize: 12, color: C.textTer }}>
                   · {num(active.RUNNING)} execution{active.RUNNING > 1 ? 's' : ''} running now
                 </span>
               )}
@@ -353,8 +353,8 @@ export default function Dashboard() {
         <Card style={{ marginBottom: 16 }}>
           <CardHead>
             <div>
-              <div style={{ fontSize: 12.5, fontWeight: 700, color: C.ink }}>Job activity — {chartPreset.label.toLowerCase()}</div>
-              <div style={{ fontSize: 10.5, color: C.textTer, marginTop: 1 }}>
+              <div style={{ fontSize: 'var(--fs-section-title)', fontWeight: 600, color: C.ink }}>Job activity — {chartPreset.label.toLowerCase()}</div>
+              <div style={{ fontSize: 12, color: C.textTer, marginTop: 1 }}>
                 {c?.bucket === 'day' ? 'Executions by day (UTC)' : c ? `Executions per ${c.bucket === '1h' ? 'hour' : c.bucket.replace('h', ' hours')} (your local time)` : 'Executions'}, by start time and current outcome
                 {c && ` · ${num(c.totals?.ALL)} in range`}
               </div>
@@ -366,8 +366,8 @@ export default function Dashboard() {
                 onChange={(e) => setChartRange(e.target.value)}
                 aria-label="Chart range"
                 style={{
-                  padding: '6px 10px', borderRadius: 'var(--radius-md)', border: '1px solid #CBD5E1',
-                  background: C.surface, fontSize: 12, color: C.textSec, fontFamily: 'inherit',
+                  padding: '6px 10px', borderRadius: 'var(--radius-md)', border: '1px solid #C9D1DC',
+                  background: C.surface, fontSize: 13, color: C.textSec, fontFamily: 'inherit',
                   outline: 'none', cursor: 'pointer',
                 }}
               >
@@ -384,13 +384,13 @@ export default function Dashboard() {
                   <BarChart data={chartData} barCategoryGap={2} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
                     <CartesianGrid vertical={false} stroke={C.border} strokeDasharray="3 3" />
                     <XAxis
-                      dataKey="hour" tick={{ fontSize: 9.5, fill: C.textTer }}
+                      dataKey="hour" tick={{ fontSize: 12, fill: C.textTer }}
                       interval={Math.max(0, Math.ceil(chartData.length / 10) - 1)}
                       axisLine={{ stroke: C.border }} tickLine={false}
                     />
-                    <YAxis tick={{ fontSize: 10, fill: C.textTer }} axisLine={false} tickLine={false} allowDecimals={false} width={28} />
+                    <YAxis tick={{ fontSize: 12, fill: C.textTer }} axisLine={false} tickLine={false} allowDecimals={false} width={28} />
                     <Tooltip content={<ChartTooltip />} cursor={{ fill: 'rgba(18,21,28,0.04)' }} />
-                    <Legend iconType="square" iconSize={8} wrapperStyle={{ fontSize: 11, color: C.textSec, paddingTop: 8 }} />
+                    <Legend iconType="square" iconSize={8} wrapperStyle={{ fontSize: 12, color: C.textSec, paddingTop: 8 }} />
                     <Bar dataKey="Completed" stackId="s" fill={STATUS_COLOR.Completed} isAnimationActive={false} />
                     <Bar dataKey="Running" stackId="s" fill={STATUS_COLOR.Running} isAnimationActive={false} />
                     <Bar dataKey="Pending" stackId="s" fill={STATUS_COLOR.Pending} isAnimationActive={false} />
@@ -401,7 +401,7 @@ export default function Dashboard() {
               </div>
             )}
             {chartShowsOtherRange && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 12, color: C.textSec }}>
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, fontSize: 13, color: C.textSec }}>
                 <Spinner size={14} /> Loading {chartPreset.label.toLowerCase()}…
               </div>
             )}
@@ -415,14 +415,14 @@ export default function Dashboard() {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, gap: 10 }}>
               <div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: C.ink }}>Recent executions</div>
-                <div style={{ fontSize: 10.5, color: C.textTer }}>
+                <h2 style={{ fontSize: 'var(--fs-section-title)', fontWeight: 600, color: C.ink, margin: 0 }}>Recent executions</h2>
+                <div style={{ fontSize: 12, color: C.textTer }}>
                   The {RECENT_LIMIT} most recently started · <SectionStamp section={recent} />
                 </div>
               </div>
               <button
                 onClick={() => nav('/jobs')}
-                style={{ background: 'none', border: 'none', color: C.orange, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+                style={{ background: 'none', border: 'none', color: C.orange, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
               >
                 View all{recent.data?.total_in_table != null ? ` ${num(recent.data.total_in_table)}` : ''} executions →
               </button>
@@ -440,7 +440,7 @@ export default function Dashboard() {
                       {COLS.map((col) => (
                         <div key={col.key} style={{
                           flex: col.width ? `0 0 ${col.width}px` : '1 1 auto', padding: '10px 14px',
-                          fontSize: 10, fontWeight: 700, color: C.textTer, textTransform: 'uppercase', letterSpacing: 0.6,
+                          fontSize: 12, fontWeight: 600, color: C.textTer,
                         }}>{col.label}</div>
                       ))}
                     </div>
@@ -457,7 +457,7 @@ export default function Dashboard() {
 
             {/* Status breakdown — same 24h counts as the cards */}
             <Card style={{ padding: '16px 18px' }}>
-              <div style={{ fontSize: 10.5, fontWeight: 700, color: C.textTer, textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 12 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 12 }}>
                 Status breakdown · 24h
               </div>
               {[
@@ -467,9 +467,9 @@ export default function Dashboard() {
                 { name: 'Failed', value: t.FAILED, color: C.red },
               ].map((b) => (
                 <div key={b.name} style={{ marginBottom: 9 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11.5, marginBottom: 4 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
                     <span style={{ color: C.textSec, fontWeight: 500 }}>{b.name}</span>
-                    <span style={{ color: C.textTer, fontWeight: 700, fontFamily: 'var(--font-mono)' }}>{s ? num(b.value) : '—'}</span>
+                    <span style={{ color: C.textTer, fontWeight: 600, fontFamily: 'var(--font-mono)' }}>{s ? num(b.value) : '—'}</span>
                   </div>
                   <div style={{ height: 5, background: C.canvas, borderRadius: 4, overflow: 'hidden' }}>
                     <div style={{ height: '100%', background: b.color, borderRadius: 4, width: s ? pct(b.value || 0) : '0%', transition: 'width 0.4s ease' }} />
@@ -477,7 +477,7 @@ export default function Dashboard() {
                 </div>
               ))}
               {s?.avg_duration_seconds != null && (
-                <div style={{ fontSize: 11, color: C.textTer, marginTop: 6 }}>
+                <div style={{ fontSize: 12, color: C.textTer, marginTop: 6 }}>
                   Average completed run: <b style={{ color: C.textSec }}>{fmtSeconds(s.avg_duration_seconds)}</b> ({num(s.avg_duration_sample)} runs)
                 </div>
               )}
@@ -485,11 +485,11 @@ export default function Dashboard() {
 
             {/* Quick actions */}
             <Card style={{ padding: 14 }}>
-              <div style={{ fontSize: 10.5, fontWeight: 700, color: C.textTer, textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10 }}>
                 Quick actions
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                <ActionCard label="Run automation" sub="POST to /v1/notify" icon={IconPlay} color={C.orange} onClick={() => nav('/trigger')} />
+                <ActionCard label="Run automation" sub="One or many servers" icon={IconPlay} color={C.orange} onClick={() => nav('/automations')} />
                 <ActionCard label="View all executions" sub="Browse, filter & export" icon={IconList} color={C.royal} onClick={() => nav('/jobs')} />
                 <ActionCard label="Manage schedules" sub="EventBridge rules" icon={IconClock} color={C.gold} onClick={() => nav('/schedules')} />
                 <ActionCard label="DLQ messages" sub="Failed message queue" icon={IconAlert} color={C.red} onClick={() => nav('/dlq')} />
@@ -498,7 +498,7 @@ export default function Dashboard() {
 
             {/* Pipeline */}
             <Card style={{ padding: 14 }}>
-              <div style={{ fontSize: 10.5, fontWeight: 700, color: C.textTer, textTransform: 'uppercase', letterSpacing: 0.7, marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10 }}>
                 Pipeline
               </div>
               {[
@@ -512,7 +512,7 @@ export default function Dashboard() {
                 <div key={st.name}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 0' }}>
                     <div style={{ width: 7, height: 7, borderRadius: '50%', background: st.color, flexShrink: 0 }} />
-                    <span style={{ fontSize: 11.5, color: C.textSec, fontWeight: 500 }}>{st.name}</span>
+                    <span style={{ fontSize: 12, color: C.textSec, fontWeight: 500 }}>{st.name}</span>
                   </div>
                   {i < arr.length - 1 && (
                     <div style={{ marginLeft: 3, width: 1, height: 8, background: C.border }} />

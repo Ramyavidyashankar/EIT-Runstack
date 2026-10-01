@@ -55,9 +55,9 @@ export const STATUS_META = {
 // Type tags are labels, not statuses, so they use the teal accent and
 // slate — never the green/amber/red that mean Completed/Running/Failed.
 export const TYPE_META = {
-  'SSM-Automation': { color:'#0F766E', bg:'#E6F5F3' },
-  'SSM-RunCommand': { color:'#475569', bg:'#F1F5F9' },
-  'EC2-Action':     { color:'#0B5C56', bg:'#E6F5F3' },
+  'SSM-Automation': { color:'#365D9D', bg:'#EEF3FA' },
+  'SSM-RunCommand': { color:'#4F5B6E', bg:'#F5F6F8' },
+  'EC2-Action':     { color:'#2C4D84', bg:'#EEF3FA' },
 };
 
 export const SSM_DOCS = [

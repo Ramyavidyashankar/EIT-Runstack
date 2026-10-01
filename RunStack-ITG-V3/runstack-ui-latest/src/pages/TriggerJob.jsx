@@ -32,7 +32,7 @@
 //    out of prominent placement into a "Technical details" expander inside
 //    the Review section — still fully editable/visible there, just not
 //    front-and-center for an operator who doesn't need AWS internals.
-//  - Single accent color throughout: Deep Teal (#0F766E), matching the
+//  - Single accent color throughout: Deep Teal (#365D9D), matching the
 //    rest of the app (Dashboard/index.css) rather than introducing a
 //    separate blue — replaces this file's old hardcoded DXC orange
 //    (#EE6C24) everywhere it appeared.
@@ -155,11 +155,11 @@ function SegButton({ active, onClick, children }) {
     <button
       type="button" onClick={onClick}
       style={{
-        padding: '4px 12px', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit',
+        padding: '4px 12px', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
         borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-        border: active ? '1px solid #0F766E' : '1px solid #CBD5E1',
-        background: active ? '#E6F5F3' : '#FFFFFF',
-        color: active ? '#0F766E' : '#334155',
+        border: active ? '1px solid #365D9D' : '1px solid #C9D1DC',
+        background: active ? '#EEF3FA' : '#FFFFFF',
+        color: active ? '#365D9D' : '#3B4658',
         transition: 'all 0.15s',
       }}
     >
@@ -174,8 +174,8 @@ function SectionHeader({ title, helper, right }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
       <div>
-        <div style={{ fontWeight: 700, fontSize: 14, color: '#0F172A' }}>{title}</div>
-        {helper && <div style={{ fontSize: 11.5, color: '#64748B', marginTop: 2, fontWeight: 400 }}>{helper}</div>}
+        <div style={{ fontWeight: 600, fontSize: 14, color: '#202938' }}>{title}</div>
+        {helper && <div style={{ fontSize: 12, color: '#657185', marginTop: 2, fontWeight: 400 }}>{helper}</div>}
       </div>
       {right && <span style={{ marginLeft: 'auto', flexShrink: 0 }}>{right}</span>}
     </div>
@@ -186,15 +186,15 @@ function SectionHeader({ title, helper, right }) {
 // "Optional" tag on the additional-context section.
 function Chip({ children, tone = 'default' }) {
   const tones = {
-    default: { bg: '#E6F5F3', fg: '#0B5C56', border: '#BEE3DE' }, // teal tint
+    default: { bg: '#EEF3FA', fg: '#2C4D84', border: '#C5D3E8' }, // teal tint
     amber:   { bg: '#FDF3E4', fg: '#92400E', border: '#F3D9AE' },
-    gray:    { bg: '#F1F3F5', fg: '#475569', border: '#E2E8F0' },
+    gray:    { bg: '#F1F3F5', fg: '#4F5B6E', border: '#DCE2EA' },
   };
   const t = tones[tone] || tones.default;
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', padding: '2px 9px',
-      borderRadius: 999, fontSize: 10.5, fontWeight: 600,
+      borderRadius: 999, fontSize: 12, fontWeight: 600,
       background: t.bg, color: t.fg, border: `1px solid ${t.border}`,
       whiteSpace: 'nowrap',
     }}>{children}</span>
@@ -212,18 +212,18 @@ function TechnicalDetails({ children, label = 'Technical details' }) {
         type="button" onClick={() => setOpen(o => !o)}
         style={{
           background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-          color: '#64748B', fontSize: 11, fontWeight: 600, fontFamily: 'inherit',
+          color: '#657185', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
           display: 'flex', alignItems: 'center', gap: 4,
         }}
       >
-        <span style={{ fontSize: 9 }}>{open ? '▾' : '▸'}</span> {label}
+        <span style={{ fontSize: 12 }}>{open ? '▾' : '▸'}</span> {label}
       </button>
       {open && <div style={{ marginTop: 10 }}>{children}</div>}
     </div>
   );
 }
 
-function LockIcon({ size = 12, color = '#64748B' }) {
+function LockIcon({ size = 12, color = '#657185' }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" />
@@ -236,9 +236,9 @@ function LockIcon({ size = 12, color = '#64748B' }) {
 // only (no borders/boxes per row), per spec.
 function ReviewRow({ label, value, mono }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12.5 }}>
-      <span style={{ color: '#64748B' }}>{label}</span>
-      <span style={{ color: '#0F172A', fontWeight: 600, fontFamily: mono ? 'var(--font-mono)' : 'inherit', textAlign: 'right' }}>{value}</span>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
+      <span style={{ color: '#657185' }}>{label}</span>
+      <span style={{ color: '#202938', fontWeight: 600, fontFamily: mono ? 'var(--font-mono)' : 'inherit', textAlign: 'right' }}>{value}</span>
     </div>
   );
 }
@@ -281,9 +281,9 @@ function SearchablePicker({ value, onChange, options, placeholder, disabled }) {
         ref={btnRef} type="button" disabled={disabled} onClick={openPanel}
         style={{
           width: '100%', display: 'flex', alignItems: 'center', gap: 6,
-          padding: '8px 12px', borderRadius: 'var(--radius-md)', border: '1px solid #CBD5E1',
-          background: disabled ? '#F8FAFC' : '#FFFFFF', fontSize: 13,
-          color: selected ? '#0F172A' : '#64748B',
+          padding: '8px 12px', borderRadius: 'var(--radius-md)', border: '1px solid #C9D1DC',
+          background: disabled ? '#FAFBFC' : '#FFFFFF', fontSize: 14,
+          color: selected ? '#202938' : '#657185',
           cursor: disabled ? 'not-allowed' : 'pointer', fontFamily: 'inherit', textAlign: 'left',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}
@@ -291,30 +291,30 @@ function SearchablePicker({ value, onChange, options, placeholder, disabled }) {
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {selected ? selected.label : placeholder}
         </span>
-        <span style={{ marginLeft: 'auto', color: '#64748B', fontSize: 10, flexShrink: 0 }}>▾</span>
+        <span style={{ marginLeft: 'auto', color: '#657185', fontSize: 12, flexShrink: 0 }}>▾</span>
       </button>
       {open && panelPos && ReactDOM.createPortal(
         <div ref={panelRef} style={{
           position: 'absolute', zIndex: 1000, top: panelPos.top, left: panelPos.left,
           width: Math.max(panelPos.width, 260), maxHeight: 300, overflowY: 'auto',
-          background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: 'var(--radius-md)',
+          background: '#FFFFFF', border: '1px solid #DCE2EA', borderRadius: 'var(--radius-md)',
           boxShadow: '0 6px 18px rgba(18,21,28,0.14)', padding: 8,
         }}>
           <input
             autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search…"
-            style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 12, border: '1px solid #CBD5E1', borderRadius: 6, marginBottom: 6, fontFamily: 'inherit' }}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 13, border: '1px solid #C9D1DC', borderRadius: 6, marginBottom: 6, fontFamily: 'inherit' }}
           />
           {filtered.length === 0 ? (
-            <div style={{ fontSize: 11, color: '#64748B', padding: '6px 4px' }}>No matches.</div>
+            <div style={{ fontSize: 12, color: '#657185', padding: '6px 4px' }}>No matches.</div>
           ) : filtered.map(o => (
             <div
               key={o.value} onClick={() => { onChange(o.value); setOpen(false); }}
               style={{ padding: '6px 8px', borderRadius: 6, cursor: 'pointer' }}
-              onMouseEnter={e => e.currentTarget.style.background = '#F8FAFC'}
+              onMouseEnter={e => e.currentTarget.style.background = '#FAFBFC'}
               onMouseLeave={e => e.currentTarget.style.background = ''}
             >
-              <div style={{ fontSize: 12.5, color: '#0F172A', fontWeight: 500 }}>{o.label}</div>
-              {o.sublabel && <div style={{ fontSize: 10.5, color: '#64748B', marginTop: 1, fontFamily: 'var(--font-mono)' }}>{o.sublabel}</div>}
+              <div style={{ fontSize: 13, color: '#202938', fontWeight: 500 }}>{o.label}</div>
+              {o.sublabel && <div style={{ fontSize: 12, color: '#657185', marginTop: 1, fontFamily: 'var(--font-mono)' }}>{o.sublabel}</div>}
             </div>
           ))}
         </div>,
@@ -332,19 +332,19 @@ function ResourceSummary({ form, isProdEnv }) {
   const [showDetails, setShowDetails] = useState(false);
 
   if (!form.resource_id) {
-    return <div style={{ fontSize: 12, color: '#64748B' }}>No server selected yet.</div>;
+    return <div style={{ fontSize: 13, color: '#657185' }}>No server selected yet.</div>;
   }
 
   return (
     <div style={{
-      padding: '16px 18px', background: '#F8FAFC', border: '1px solid #E2E8F0',
-      borderRadius: 12, borderLeft: `3px solid ${isProdEnv ? '#B45309' : '#0F766E'}`,
+      padding: '16px 18px', background: '#FAFBFC', border: '1px solid #DCE2EA',
+      borderRadius: 12, borderLeft: `3px solid ${isProdEnv ? '#B45309' : '#365D9D'}`,
     }}>
-      <div style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', fontFamily: 'var(--font-mono)' }}>
+      <div style={{ fontSize: 16, fontWeight: 600, color: '#202938', fontFamily: 'var(--font-mono)' }}>
         {form.server_name || form.resource_id}
       </div>
       {form.app_name && (
-        <div style={{ fontSize: 12.5, color: '#334155', marginTop: 2 }}>{form.app_name}</div>
+        <div style={{ fontSize: 13, color: '#3B4658', marginTop: 2 }}>{form.app_name}</div>
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
@@ -353,14 +353,14 @@ function ResourceSummary({ form, isProdEnv }) {
         {form.account_id && <Chip tone="gray">Account {form.account_id}</Chip>}
       </div>
 
-      <div style={{ fontSize: 11, color: '#64748B', fontFamily: 'var(--font-mono)', marginTop: 10 }}>
+      <div style={{ fontSize: 12, color: '#657185', fontFamily: 'var(--font-mono)', marginTop: 10 }}>
         {form.resource_id}
       </div>
 
       <div style={{ marginTop: 10 }}>
         <button
           type="button" onClick={() => setShowDetails(s => !s)}
-          style={{ background: 'none', border: 'none', color: '#0F766E', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
+          style={{ background: 'none', border: 'none', color: '#365D9D', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
         >
           {showDetails ? 'Hide' : 'View'} technical details
         </button>
@@ -627,9 +627,9 @@ export default function TriggerJob() {
 
   if (result) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div className="rs-page">
         <Topbar title="Run Automation" />
-        <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+        <div className="rs-page-body">
           <Card style={{ maxWidth: 640 }} className="animate-fade">
             <CardHead>
               <span style={{ fontWeight: 600, color: 'var(--green)' }}>✓ Job dispatched successfully</span>
@@ -637,14 +637,14 @@ export default function TriggerJob() {
             </CardHead>
             <div style={{ padding: '16px 18px', display: 'grid', gap: 14 }}>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>Payload sent</div>
-                <pre style={{ fontFamily: 'var(--font-mono)', fontSize: 11, background: 'var(--bg-surface)', padding: 14, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', overflow: 'auto', margin: 0, color: 'var(--text-primary)' }}>
+                <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 600, marginBottom: 8 }}>Payload sent</div>
+                <pre style={{ fontFamily: 'var(--font-mono)', fontSize: 12, background: 'var(--bg-surface)', padding: 14, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', overflow: 'auto', margin: 0, color: 'var(--text-primary)' }}>
                   {JSON.stringify(result.payload, null, 2)}
                 </pre>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8 }}>API response</div>
-                <pre style={{ fontFamily: 'var(--font-mono)', fontSize: 11, background: 'var(--bg-surface)', padding: 14, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', overflow: 'auto', margin: 0, color: 'var(--green)' }}>
+                <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 600, marginBottom: 8 }}>API response</div>
+                <pre style={{ fontFamily: 'var(--font-mono)', fontSize: 12, background: 'var(--bg-surface)', padding: 14, borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', overflow: 'auto', margin: 0, color: 'var(--green)' }}>
                   {JSON.stringify(result.response, null, 2)}
                 </pre>
               </div>
@@ -697,17 +697,17 @@ export default function TriggerJob() {
   const selectedDocLabel = form.docName ? humanizeDocName(form.docName) : '';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="rs-page">
       <Topbar title="Run Automation" subtitle="Choose where the automation should run and what you want RunStack to execute." />
-      <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+      <div className="rs-page-body">
         {error && <ErrorBanner message={error} />}
-        <div style={{ maxWidth: 1360, margin: '0 auto' }}>
+        <div className="rs-page-content rs-page-content--flow">
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 20 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
             {/* ── Where do you want to run the automation? — always visible ── */}
-            <Card style={{ borderLeft: '3px solid #BFE0DB' }}>
-            <CardHead style={{ background: '#F4FAF9' }}>
+            <Card style={{ borderLeft: '3px solid #DCE2EA' }}>
+            <CardHead style={{ background: '#FAFBFC' }}>
               <SectionHeader
                 title="Where do you want to run the automation?"
                 helper="Choose the application, environment, and server you want to work with."
@@ -786,7 +786,7 @@ export default function TriggerJob() {
                   <ResourceSummary form={form} isProdEnv={isProdEnv} />
 
                   {!canManualEntry && !instancesLoading && instances.length === 0 && (
-                    <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+                    <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
                       No instances are available to your account. Contact your RunStack administrator to be granted app access.
                     </div>
                   )}
@@ -814,8 +814,8 @@ export default function TriggerJob() {
 
             {/* ── What would you like to run? — reveals once a target is chosen ── */}
             {step1Complete && (
-            <Card style={{ borderLeft: '3px solid #9FD2CB' }}>
-              <CardHead style={{ background: '#EFF7F5' }}>
+            <Card style={{ borderLeft: '3px solid #DCE2EA' }}>
+              <CardHead style={{ background: '#FAFBFC' }}>
                 <SectionHeader
                   title="What would you like to run?"
                   helper="Choose the automation that should be executed on the selected server."
@@ -841,12 +841,12 @@ export default function TriggerJob() {
                 </div>
 
                 <div>
-                  <label style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', display: 'block', marginBottom: 6 }}>
+                  <label style={{ fontSize: 14, fontWeight: 600, color: '#202938', display: 'block', marginBottom: 6 }}>
                     Automation
                   </label>
                   {isRunCommand && (
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8, alignItems: 'center' }}>
-                      <span style={{ fontSize: 11.5, color: '#64748B' }}>Quick command:</span>
+                      <span style={{ fontSize: 12, color: '#657185' }}>Quick command:</span>
                       {QUICK_COMMAND_DOCS.map(q => (
                         <Btn key={q.doc} size="sm" variant={form.docName === q.doc ? 'primary' : 'default'}
                           onClick={() => setForm(prev => ({
@@ -864,11 +864,11 @@ export default function TriggerJob() {
                     disabled={docsLoading || docs.length === 0}
                   />
                   {!form.docName && !docsLoading && (
-                    <div style={{ fontSize: 11.5, color: '#64748B', marginTop: 4 }}>
+                    <div style={{ fontSize: 12, color: '#657185', marginTop: 4 }}>
                       Nothing is selected yet — choose {isRunCommand ? 'a quick command or ' : ''}an automation to continue.
                     </div>
                   )}
-                  <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4, minHeight: 14 }}>
+                  <div style={{ fontSize: 12, color: '#657185', marginTop: 4, minHeight: 14 }}>
                     {docsLoading ? 'Loading documents…'
                       : docsError ? `Could not load documents: ${docsError}`
                       : docs.length === 0 ? `No ${DOC_TYPE_FOR_AUTOMATION_TYPE[form.automation_type]} documents found for this source`
@@ -888,7 +888,7 @@ export default function TriggerJob() {
                 )}
 
                 <TechnicalDetails>
-                  <div style={{ fontSize: 11.5, color: '#334155', fontFamily: 'var(--font-mono)' }}>
+                  <div style={{ fontSize: 12, color: '#3B4658', fontFamily: 'var(--font-mono)' }}>
                     {form.docArn || 'AWS-managed document — no account-specific ARN'}
                   </div>
                 </TechnicalDetails>
@@ -898,15 +898,15 @@ export default function TriggerJob() {
 
                       {/* ── Review the automation parameters — reveals once an automation is chosen ── */}
             {step2Complete && (
-            <Card style={{ borderLeft: '3px solid #7EC4BB' }}>
-              <CardHead style={{ background: '#E9F4F1' }}>
+            <Card style={{ borderLeft: '3px solid #DCE2EA' }}>
+              <CardHead style={{ background: '#FAFBFC' }}>
                 <SectionHeader
                   title="Review the automation parameters"
                   helper="Check the values RunStack will use during execution."
                   right={
                     <button
                       type="button" onClick={() => setShowParamsJson(s => !s)}
-                      style={{ background: 'none', border: 'none', color: '#64748B', fontSize: 11, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
+                      style={{ background: 'none', border: 'none', color: 'var(--text-primary)', fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit' }}
                     >
                       {showParamsJson ? 'Hide advanced' : 'Advanced: Edit JSON'}
                     </button>
@@ -917,7 +917,7 @@ export default function TriggerJob() {
                 {!paramsValid ? (
                   <ErrorBanner message="Parameters JSON is invalid — fix it in the JSON view below." />
                 ) : Object.keys(parsedParams).length === 0 ? (
-                  <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>This document takes no parameters.</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>This document takes no parameters.</div>
                 ) : !showParamsJson && (
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     {Object.entries(parsedParams).map(([key, val]) => {
@@ -926,12 +926,12 @@ export default function TriggerJob() {
                       if (isInstanceId) {
                         return (
                           <div key={key}>
-                            <div style={{ fontSize: 11.5, fontWeight: 600, color: '#334155', marginBottom: 6 }}>{humanizeKey(key)}</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 12px', background: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: 8 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#3B4658', marginBottom: 6 }}>{humanizeKey(key)}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 12px', background: '#FAFBFC', border: '1px solid #DCE2EA', borderRadius: 8 }}>
                               <LockIcon />
-                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, color: '#334155' }}>{displayVal || '—'}</span>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: '#3B4658' }}>{displayVal || '—'}</span>
                             </div>
-                            <div style={{ fontSize: 10.5, color: '#94A3B8', marginTop: 4 }}>From selected server</div>
+                            <div style={{ fontSize: 12, color: '#657185', marginTop: 4 }}>From selected server</div>
                           </div>
                         );
                       }
@@ -959,16 +959,16 @@ export default function TriggerJob() {
 
             {/* ── Add additional context — always visible, collapsed by default ── */}
             <Card>
-            <CardHead style={{ cursor: 'pointer', background: '#F8FAFC' }} onClick={() => setShowMetadata(s => !s)}>
+            <CardHead style={{ cursor: 'pointer', background: '#FAFBFC' }} onClick={() => setShowMetadata(s => !s)}>
               <span style={{ fontWeight: 600 }}>Add additional context</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Chip tone="gray">Optional</Chip>
-                <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{showMetadata ? '▾' : '▸'}</span>
+                <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{showMetadata ? '▾' : '▸'}</span>
               </span>
             </CardHead>
             {showMetadata && (
               <div style={{ padding: '16px 18px', display: 'grid', gap: 14 }}>
-                <div style={{ fontSize: 11.5, color: 'var(--text-tertiary)', marginBottom: -4 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginBottom: -4 }}>
                   Optionally include information that can help identify or track this execution.
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -984,15 +984,15 @@ export default function TriggerJob() {
 
             {/* Say why the Run step isn't shown yet, instead of hiding it silently. */}
             {step2Complete && !step3Complete && (
-              <div style={{ fontSize: 11.5, color: '#92400E', background: '#FDF3E4', border: '1px solid #F3D9AE', borderRadius: 8, padding: '8px 12px' }}>
+              <div style={{ fontSize: 12, color: '#92400E', background: '#FDF3E4', border: '1px solid #F3D9AE', borderRadius: 8, padding: '8px 12px' }}>
                 To continue, fix: {[!paramsValid && 'Parameters JSON (invalid)', isRunCommand && !form.instances.trim() && 'Instance IDs'].filter(Boolean).join(', ')}
               </div>
             )}
 
             {/* ── Review before you run — reveals once parameters are valid ── */}
             {step3Complete && (
-            <Card style={{ borderLeft: '3px solid #0F766E' }}>
-              <CardHead style={{ background: '#E3F3EE' }}>
+            <Card style={{ borderLeft: '3px solid #365D9D' }}>
+              <CardHead style={{ background: '#FAFBFC' }}>
                 <SectionHeader
                   title="Review before you run"
                   helper="Confirm the target and automation details before starting the execution."
@@ -1001,7 +1001,7 @@ export default function TriggerJob() {
               <div style={{ padding: '18px 20px', display: 'grid', gap: 18 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 28 }}>
                   <div>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10 }}>
                       Target
                     </div>
                     <div style={{ display: 'grid', gap: 8 }}>
@@ -1012,7 +1012,7 @@ export default function TriggerJob() {
                     </div>
                   </div>
                   <div>
-                    <div style={{ fontSize: 10.5, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 10 }}>
                       Automation
                     </div>
                     <div style={{ display: 'grid', gap: 8 }}>
@@ -1025,7 +1025,7 @@ export default function TriggerJob() {
                 </div>
 
                 {!canRun && (
-                  <div style={{ fontSize: 11.5, color: '#92400E', background: '#FDF3E4', border: '1px solid #F3D9AE', borderRadius: 8, padding: '8px 12px' }}>
+                  <div style={{ fontSize: 12, color: '#92400E', background: '#FDF3E4', border: '1px solid #F3D9AE', borderRadius: 8, padding: '8px 12px' }}>
                     Missing: {missing.join(', ')}
                   </div>
                 )}
@@ -1035,7 +1035,7 @@ export default function TriggerJob() {
                     <FormRow label="Notification ID" hint="Unique identifier — auto-generated, editable">
                       <Input value={form.id} onChange={set('id')} placeholder="unique-notification-id" />
                     </FormRow>
-                    <div style={{ fontSize: 11, color: '#94A3B8' }}>
+                    <div style={{ fontSize: 12, color: '#657185' }}>
                       Execution path: SQS → Lambda → DynamoDB → Step Function → SSM
                     </div>
                   </div>
@@ -1056,12 +1056,12 @@ export default function TriggerJob() {
           <div>
             <Card>
               <CardHead style={{ cursor: 'pointer' }} onClick={() => setShowPayloadPreview(s => !s)}>
-                <span style={{ fontWeight: 600, fontSize: 12 }}>Payload Preview</span>
-                <span style={{ fontSize: 11, color: 'var(--text-tertiary)' }}>{showPayloadPreview ? '▾ Hide' : '▸ View generated API payload'}</span>
+                <span style={{ fontWeight: 600, fontSize: 'var(--fs-section-title)' }}>Payload Preview</span>
+                <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{showPayloadPreview ? '▾ Hide' : '▸ View generated API payload'}</span>
               </CardHead>
               {showPayloadPreview && (
                 <div style={{ padding: '14px 16px' }}>
-                  <pre style={{ fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)', overflow: 'auto', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+                  <pre style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--text-secondary)', overflow: 'auto', margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
 {JSON.stringify({
   id: form.id,
   region: form.region,

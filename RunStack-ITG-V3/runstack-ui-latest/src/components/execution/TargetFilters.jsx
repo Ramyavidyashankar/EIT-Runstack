@@ -34,7 +34,7 @@ export default function TargetFilters({
           <Input type="search" value={text} onChange={(e) => onType(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { clearTimeout(timer.current); onSearch(text.trim()); } }}
             placeholder="Search server, instance ID, account or region…" aria-label="Search servers"
-            style={{ width: '100%', padding: '7px 12px', fontSize: 12.5 }} />
+            style={{ width: '100%', padding: '7px 12px', fontSize: 13 }} />
         </div>
         <div role="group" aria-label="Filter by status" style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {chips.map((c) => {
@@ -44,7 +44,7 @@ export default function TargetFilters({
                 onClick={() => onStatus(active && c.value ? '' : c.value)}
                 style={{
                   display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 999, cursor: 'pointer',
-                  fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+                  fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
                   color: active ? 'var(--brand-hover)' : 'var(--text-secondary)',
                   background: active ? 'var(--brand-bg)' : 'var(--bg-surface)',
                   border: `1px solid ${active ? 'var(--brand)' : 'var(--border)'}`,
@@ -57,9 +57,9 @@ export default function TargetFilters({
           })}
         </div>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <label style={{ fontSize: 11.5, color: 'var(--text-tertiary)', display: 'flex', gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}>
+          <label style={{ fontSize: 12, color: 'var(--text-tertiary)', display: 'flex', gap: 6, alignItems: 'center', whiteSpace: 'nowrap' }}>
             Rows
-            <Select value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} aria-label="Rows per page" style={{ width: 76, padding: '5px 8px', fontSize: 12 }}>
+            <Select value={pageSize} onChange={(e) => onPageSize(Number(e.target.value))} aria-label="Rows per page" style={{ width: 76, padding: '5px 8px', fontSize: 13 }}>
               {PAGE_SIZES.map((n) => <option key={n} value={n}>{n}</option>)}
             </Select>
           </label>

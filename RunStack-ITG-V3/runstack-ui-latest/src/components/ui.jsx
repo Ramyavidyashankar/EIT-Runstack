@@ -10,7 +10,7 @@ export function StatusBadge({ status }) {
       display:'inline-flex', alignItems:'center', gap:5,
       padding:'3px 9px', borderRadius:20,
       background: m.bg, color: m.color,
-      fontSize:11, fontWeight:600, letterSpacing:0.3,
+      fontSize:12, fontWeight:600,
       border:`1px solid ${m.color}30`,
     }}>
       <span style={{
@@ -30,7 +30,7 @@ export function TypeTag({ type }) {
     <span style={{
       display:'inline-block', padding:'2px 7px', borderRadius:4,
       background: m.bg, color: m.color,
-      fontSize:10, fontWeight:600, letterSpacing:0.4,
+      fontSize:12, fontWeight:600,
       border:`1px solid ${m.color}30`,
     }}>
       {type}
@@ -39,7 +39,7 @@ export function TypeTag({ type }) {
 }
 
 // ── Button ────────────────────────────────────────────────────────────────────
-export function Btn({ children, variant='default', size='md', onClick, disabled, type='button', style={} }) {
+export function Btn({ children, variant='default', size='md', onClick, disabled, type='button', style={}, className='', ...aria }) {
   const base = {
     display:'inline-flex', alignItems:'center', gap:6,
     borderRadius: size === 'sm' ? 'var(--radius-sm)' : 'var(--radius-md)',
@@ -47,7 +47,8 @@ export function Btn({ children, variant='default', size='md', onClick, disabled,
     fontFamily:'inherit', fontWeight:500,
     transition:'all 0.15s', opacity: disabled ? 0.5 : 1,
     border:'none',
-    ...(size === 'sm' ? { padding:'5px 12px', fontSize:12 } : { padding:'7px 16px', fontSize:13 }),
+    lineHeight:1.4,
+    ...(size === 'sm' ? { padding:'5px 12px', fontSize:'var(--fs-label)' } : { padding:'8px 16px', fontSize:'var(--fs-label)' }),
   };
   const variants = {
     default: {
@@ -77,8 +78,8 @@ export function Btn({ children, variant='default', size='md', onClick, disabled,
     },
   };
   return (
-    <button type={type} onClick={onClick} disabled={disabled}
-      className={`rs-btn rs-btn-${variant}`}
+    <button type={type} onClick={onClick} disabled={disabled} {...aria}
+      className={`rs-btn rs-btn-${variant}${className ? ` ${className}` : ''}`}
       style={{...base, ...variants[variant], ...style}}>
       {children}
     </button>
@@ -95,6 +96,7 @@ export function Card({ children, style={}, onClick, ...rest }) {
         background:'var(--bg-surface)',
         border:'1px solid var(--border)',
         borderRadius:'var(--radius-lg)',
+        boxShadow:'var(--shadow-sm)',
         overflow:'hidden',
         ...(onClick ? { cursor: 'pointer' } : {}),
         ...style,
@@ -111,11 +113,12 @@ export function CardHead({ children, style={}, onClick, ...rest }) {
     <div
       onClick={onClick}
       style={{
-        padding:'13px 18px',
+        padding:'14px 20px',
         borderBottom:'1px solid var(--border)',
         display:'flex', alignItems:'center',
         justifyContent:'space-between',
-        background:'var(--bg-tint)',
+        background:'var(--section-head-bg)',
+        fontSize:'var(--fs-body)', color:'var(--text-primary)',
         ...(onClick ? { cursor: 'pointer' } : {}),
         ...style,
       }}
@@ -142,7 +145,7 @@ export function Empty({ message='No data found.' }) {
   return (
     <div style={{
       padding:'48px 24px', textAlign:'center',
-      color:'var(--text-tertiary)', fontSize:13,
+      color:'var(--text-tertiary)', fontSize:14,
     }}>
       {message}
     </div>
@@ -155,7 +158,7 @@ export function ErrorBanner({ message }) {
     <div style={{
       padding:'10px 16px', borderRadius:'var(--radius-md)',
       background:'var(--danger-bg)', border:'1px solid var(--danger-border)',
-      color:'var(--danger)', fontSize:13, marginBottom:16,
+      color:'var(--danger)', fontSize:14, marginBottom:16,
     }}>
       ⚠ {message}
     </div>
@@ -174,16 +177,15 @@ export function StatCard({ label, value, sub, accent }) {
       boxShadow:'var(--shadow-sm)',
     }}>
       <div style={{
-        fontSize:10, color:'var(--text-tertiary)', fontWeight:600,
-        textTransform:'uppercase', letterSpacing:0.7, marginBottom:8,
+        fontSize:'var(--fs-help)', color:'var(--text-secondary)', fontWeight:500, marginBottom:8,
       }}>
         {label}
       </div>
-      <div style={{ fontSize:26, fontWeight:700, color:'var(--text-primary)', lineHeight:1 }}>
+      <div style={{ fontSize:26, fontWeight:600, color:'var(--text-primary)', lineHeight:1 }}>
         {value}
       </div>
       {sub && (
-        <div style={{ fontSize:11, color:'var(--text-tertiary)', marginTop:6 }}>{sub}</div>
+        <div style={{ fontSize:12, color:'var(--text-tertiary)', marginTop:6 }}>{sub}</div>
       )}
     </div>
   );
@@ -193,8 +195,8 @@ export function StatCard({ label, value, sub, accent }) {
 export function SectionTitle({ children, sub }) {
   return (
     <div style={{ marginBottom:14 }}>
-      <div style={{ fontSize:14, fontWeight:700, color:'var(--text-primary)' }}>{children}</div>
-      {sub && <div style={{ fontSize:11, color:'var(--text-tertiary)', marginTop:2 }}>{sub}</div>}
+      <div style={{ fontSize:'var(--fs-section-title)', fontWeight:600, color:'var(--text-primary)' }}>{children}</div>
+      {sub && <div style={{ fontSize:'var(--fs-help)', color:'var(--text-secondary)', marginTop:2 }}>{sub}</div>}
     </div>
   );
 }
@@ -203,7 +205,7 @@ export function SectionTitle({ children, sub }) {
 export function MonoField({ value, dim }) {
   return (
     <span style={{
-      fontFamily:'var(--font-mono)', fontSize:11,
+      fontFamily:'var(--font-mono)', fontSize:12,
       color: dim ? 'var(--text-tertiary)' : 'var(--text-mono)',
     }}>
       {value}
@@ -214,10 +216,10 @@ export function MonoField({ value, dim }) {
 // ── Form controls ─────────────────────────────────────────────────────────────
 const inputStyle = {
   width:'100%', padding:'8px 12px',
-  borderRadius:'var(--radius-md)',
+  borderRadius:'var(--radius-sm)',
   border:'1px solid var(--border-md)',
   background:'var(--bg-surface)',
-  color:'var(--text-primary)', fontSize:13, outline:'none',
+  color:'var(--text-primary)', fontSize:14, outline:'none',
   transition:'border-color 0.15s',
 };
 
@@ -237,7 +239,7 @@ export function Textarea(props) {
   return (
     <textarea {...props} className={`rs-input ${props.className||''}`} style={{
       ...inputStyle,
-      fontFamily:'var(--font-mono)', fontSize:12,
+      fontFamily:'var(--font-mono)', fontSize:13,
       resize:'vertical', minHeight:100, ...props.style,
     }}/>
   );
@@ -246,9 +248,9 @@ export function Textarea(props) {
 export function FormRow({ label, children, hint }) {
   return (
     <div style={{ display:'grid', gap:6 }}>
-      <label style={{ fontSize:12, fontWeight:500, color:'var(--text-secondary)' }}>{label}</label>
+      <label style={{ fontSize:'var(--fs-label)', fontWeight:500, color:'var(--text-primary)' }}>{label}</label>
       {children}
-      {hint && <div style={{ fontSize:11, color:'var(--text-tertiary)' }}>{hint}</div>}
+      {hint && <div style={{ fontSize:'var(--fs-help)', color:'var(--text-secondary)' }}>{hint}</div>}
     </div>
   );
 }

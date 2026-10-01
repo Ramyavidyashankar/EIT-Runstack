@@ -16,11 +16,11 @@ function Row({ label, value, mono, copy, hint }) {
   if (value === undefined || value === null || value === '') return null;
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '180px minmax(0, 1fr)', gap: 12, padding: '8px 0', borderBottom: '1px solid var(--slate-100)' }}>
-      <div style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{label}</div>
+      <div style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>{label}</div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
         <div style={{ fontSize: mono ? 11.5 : 12.5, fontFamily: mono ? 'var(--font-mono)' : 'inherit', color: 'var(--text-primary)', wordBreak: 'break-all', flex: 1 }}>
           {String(value)}
-          {hint && <div style={{ fontSize: 11, color: 'var(--text-tertiary)', fontFamily: 'var(--font-sans)', marginTop: 2, wordBreak: 'normal' }}>{hint}</div>}
+          {hint && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', fontFamily: 'var(--font-sans)', marginTop: 2, wordBreak: 'normal' }}>{hint}</div>}
         </div>
         {copy && <CopyButton value={String(value)} label={`Copy ${label}`} />}
       </div>
@@ -31,7 +31,7 @@ function Row({ label, value, mono, copy, hint }) {
 function Section({ title, children }) {
   return (
     <section style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', background: 'var(--bg-surface)', padding: '10px 16px 6px' }}>
-      <h3 style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 2 }}>{title}</h3>
+      <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 2 }}>{title}</h3>
       {children}
     </section>
   );
@@ -80,9 +80,9 @@ export default function ExecutionInfoTab({ exec, counts, data, elapsedSec }) {
             </Callout>
           )}
           {errors.length > 0 && (
-            <details style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
+            <details style={{ fontSize: 13, color: 'var(--text-tertiary)' }}>
               <summary style={{ cursor: 'pointer' }}>Some live Systems Manager status couldn't be read ({errors.length})</summary>
-              <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 11, wordBreak: 'break-word' }}>
+              <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 12, wordBreak: 'break-word' }}>
                 {errors.map((e, i) => <div key={i}>{e.job_id ? `${e.job_id}: ` : ''}{e.code}{e.message ? ` — ${e.message}` : ''}</div>)}
               </div>
               <div style={{ marginTop: 4 }}>This is a problem reading status, not a failure of the execution. Affected servers show RunStack's own record.</div>

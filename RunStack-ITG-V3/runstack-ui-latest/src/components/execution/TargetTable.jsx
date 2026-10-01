@@ -16,26 +16,26 @@ import { fmtElapsed, targetElapsed } from '../../utils/executionLogs';
 import { isActiveTarget, isUnsuccessfulTarget, outputActionLabel } from '../../utils/executionStatus';
 
 const th = {
-  textAlign: 'left', padding: '8px 12px', fontSize: 10.5, fontWeight: 700, color: 'var(--text-tertiary)',
-  textTransform: 'uppercase', letterSpacing: 0.6, background: 'var(--bg-tint)', borderBottom: '1px solid var(--border)',
+  textAlign: 'left', padding: '8px 12px', fontSize: 13, fontWeight: 600, color: '#3B4658', background: 'var(--bg-tint)', borderBottom: '1px solid var(--border)',
   whiteSpace: 'nowrap', position: 'sticky', top: 0, zIndex: 1,
 };
-const td = { padding: '8px 12px', borderBottom: '1px solid var(--slate-100)', fontSize: 12.5, verticalAlign: 'middle' };
-const mono = { fontFamily: 'var(--font-mono)', fontSize: 11.5 };
+const td = { padding: '8px 12px', borderBottom: '1px solid var(--slate-100)', fontSize: 14, verticalAlign: 'middle' };
+const mono = { fontFamily: 'var(--font-mono)', fontSize: 12 };
 
 function timeOf(iso) {
   const d = parseUtc(iso);
   return d ? d.toLocaleTimeString('en-GB') : '—';
 }
 
-function OutputAction({ status, onOpen }) {
+function OutputAction({ status, queued, onOpen }) {
+  if (queued) return <span style={{ color: 'var(--slate-400)', fontSize: 13 }}>Queued</span>;
   const label = outputActionLabel(status);
   if (!label) return <span style={{ color: 'var(--slate-400)' }}>—</span>;
   const error = isUnsuccessfulTarget(status);
   return (
     <button type="button" onClick={(e) => { e.stopPropagation(); onOpen(); }}
       style={{
-        background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, fontWeight: 600,
+        background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 600,
         color: error ? 'var(--danger)' : status === 'running' ? 'var(--running-text)' : 'var(--brand-hover)', whiteSpace: 'nowrap',
       }}>
       {label} ›
@@ -45,22 +45,24 @@ function OutputAction({ status, onOpen }) {
 
 function Row({ t, selected, onOpen, now }) {
   const elapsed = targetElapsed(t, now);
-  const open = () => onOpen(t);
+  // Queued servers (multi-target runs, not yet dispatched) have no job yet.
+  const open = () => { if (!t.queued) onOpen(t); };
   return (
     <tr tabIndex={0} aria-selected={selected} onClick={open}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } }}
       className="rs-target-row"
-      style={{ cursor: 'pointer', background: selected ? 'var(--brand-bg)' : undefined }}>
+      style={{ cursor: t.queued ? 'default' : 'pointer', background: selected ? 'var(--brand-bg)' : undefined }}>
       <td style={{ ...td, maxWidth: 260 }}>
         <div style={{ fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {t.server_name || t.instance_id || '—'}
         </div>
-        {t.server_name && t.instance_id && <div style={{ ...mono, fontSize: 10.5, color: 'var(--text-tertiary)' }}>{t.instance_id}</div>}
+        {t.server_name && t.instance_id && <div style={{ ...mono, fontSize: 12, color: 'var(--text-tertiary)' }}>{t.instance_id}</div>}
       </td>
       <td style={td}>
         <TargetStatusBadge status={t.status} detail={t.status_detail} />
+        {t.queued && <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>{t.status_detail}</div>}
         {t.retrieval_error && isActiveTarget(t.status) && (
-          <span title="Live Systems Manager status isn't available; showing RunStack's record" style={{ marginLeft: 6, color: 'var(--warning)', fontSize: 11 }}>⚠</span>
+          <span title="Live Systems Manager status isn't available; showing RunStack's record" style={{ marginLeft: 6, color: 'var(--warning)', fontSize: 12 }}>⚠</span>
         )}
       </td>
       <td style={{ ...td, ...mono, color: 'var(--text-secondary)' }}>{t.account_id || '—'}</td>
@@ -71,7 +73,7 @@ function Row({ t, selected, onOpen, now }) {
       <td style={{ ...td, ...mono, whiteSpace: 'nowrap' }}>
         {t.status === 'pending' || elapsed == null ? '—' : `${fmtElapsed(elapsed)}${isActiveTarget(t.status) ? '…' : ''}`}
       </td>
-      <td style={td}><OutputAction status={t.status} onOpen={open} /></td>
+      <td style={td}><OutputAction status={t.status} queued={t.queued} onOpen={open} /></td>
     </tr>
   );
 }
@@ -106,7 +108,7 @@ export default function TargetTable({
           </tbody>
         </table>
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 2px 0', fontSize: 12, color: 'var(--text-tertiary)', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 2px 0', fontSize: 13, color: 'var(--text-tertiary)', flexWrap: 'wrap' }}>
         <span><strong style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{from.toLocaleString()}–{to.toLocaleString()}</strong> of {total.toLocaleString()}</span>
         {hiddenJobs > 0 && (
           <span title="Servers in this run that your application access or team capabilities don't cover">

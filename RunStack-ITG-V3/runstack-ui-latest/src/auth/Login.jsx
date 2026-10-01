@@ -3,16 +3,16 @@ import React from 'react';
 import { useAuth } from './AuthContext';
 import { Btn } from '../components/ui';
 
-const TEAL = '#0F766E';
-const TEAL_DARK = '#0B5C56';
+const TEAL = '#365D9D';
+const TEAL_DARK = '#2C4D84';
 
 function NetworkBg() {
   return (
     <svg width="480" height="480" viewBox="0 0 480 480" fill="none" aria-hidden="true" style={{ position: 'absolute', right: -80, bottom: -80, opacity: 0.35, pointerEvents: 'none' }}>
       {[[60, 80], [140, 40], [220, 110], [300, 60], [380, 130], [100, 200], [260, 220], [400, 260], [180, 320], [340, 360], [60, 380]].map((p, i) => (
-        <circle key={i} cx={p[0]} cy={p[1]} r="2.5" fill="#CBD5E1" />
+        <circle key={i} cx={p[0]} cy={p[1]} r="2.5" fill="#C9D1DC" />
       ))}
-      <path d="M60 80L140 40M140 40L220 110M220 110L300 60M300 60L380 130M100 200L220 110M100 200L260 220M260 220L400 260M260 220L180 320M180 320L340 360M180 320L60 380" stroke="#E2E8F0" strokeWidth="1" />
+      <path d="M60 80L140 40M140 40L220 110M220 110L300 60M300 60L380 130M100 200L220 110M100 200L260 220M260 220L400 260M260 220L180 320M180 320L340 360M180 320L60 380" stroke="#DCE2EA" strokeWidth="1" />
     </svg>
   );
 }
@@ -62,17 +62,17 @@ export default function Login() {
   const { login, signedOutReason } = useAuth();
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#F1F5F9', fontFamily: 'var(--font-sans)', position: 'relative', overflow: 'hidden' }}>
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#F5F6F8', fontFamily: 'var(--font-sans)', position: 'relative', overflow: 'hidden' }}>
       <NetworkBg />
 
-      <div style={{ height: 56, flexShrink: 0, position: 'relative', zIndex: 2, background: '#12151C', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '3px solid #0F766E' }}>
+      <div style={{ height: 56, flexShrink: 0, position: 'relative', zIndex: 2, background: '#12151C', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '3px solid #365D9D' }}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <img src="/dxc-logo-color.svg" alt="DXC" style={{ height: 22, display: 'block' }} />
-          <div style={{ marginLeft: 16, paddingLeft: 16, borderLeft: '1px solid rgba(255,255,255,0.15)', fontSize: 15, fontWeight: 600, color: '#FFFFFF', letterSpacing: 0.2 }}>
+          <div style={{ marginLeft: 16, paddingLeft: 16, borderLeft: '1px solid rgba(255,255,255,0.15)', fontSize: 15, fontWeight: 600, color: '#FFFFFF',}}>
             EIT RunStack
           </div>
         </div>
-        <div className="rs-header-links" style={{ display: 'flex', alignItems: 'center', gap: 18, fontSize: 12.5, color: 'rgba(226,232,240,0.65)', fontWeight: 500 }}>
+        <div className="rs-header-links" style={{ display: 'flex', alignItems: 'center', gap: 18, fontSize: 13, color: 'rgba(226,232,240,0.65)', fontWeight: 500 }}>
           <span>Automate</span>
           <span style={{ color: 'rgba(226,232,240,0.25)' }}>|</span>
           <span>Optimize</span>
@@ -81,29 +81,29 @@ export default function Login() {
         </div>
       </div>
 
-      <div className="rs-margin-text rs-margin-left" aria-hidden="true" style={{ position: 'absolute', left: 40, top: 96, zIndex: 1, fontSize: 11.5, fontWeight: 700, color: 'rgba(122,125,149,0.55)', letterSpacing: 1, textTransform: 'uppercase', lineHeight: 1.7 }}>
+      <div className="rs-margin-text rs-margin-left" aria-hidden="true" style={{ position: 'absolute', left: 40, top: 96, zIndex: 1, fontSize: 13, fontWeight: 600, color: 'rgba(122,125,149,0.55)', lineHeight: 1.7 }}>
         Automation<br />for a stronger<br />tomorrow
-        <div style={{ width: 26, height: 2, background: '#0F766E', marginTop: 8 }} />
+        <div style={{ width: 26, height: 2, background: '#365D9D', marginTop: 8 }} />
       </div>
 
-      <div className="rs-margin-text rs-margin-right" aria-hidden="true" style={{ position: 'absolute', right: 40, top: 96, zIndex: 1, textAlign: 'right', fontSize: 11.5, fontWeight: 700, color: 'rgba(122,125,149,0.55)', letterSpacing: 1, textTransform: 'uppercase', lineHeight: 1.7 }}>
+      <div className="rs-margin-text rs-margin-right" aria-hidden="true" style={{ position: 'absolute', right: 40, top: 96, zIndex: 1, textAlign: 'right', fontSize: 13, fontWeight: 600, color: 'rgba(122,125,149,0.55)', lineHeight: 1.7 }}>
         People<br />Technology<br />Outcomes
-        <div style={{ width: 26, height: 2, background: '#0F766E', marginTop: 8, marginLeft: 'auto' }} />
+        <div style={{ width: 26, height: 2, background: '#365D9D', marginTop: 8, marginLeft: 'auto' }} />
       </div>
 
       <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, position: 'relative', zIndex: 2 }}>
-        <div className="rs-login-card" style={{ display: 'flex', width: '100%', maxWidth: 980, minHeight: 520, background: '#FFFFFF', borderRadius: 14, border: '1px solid #E2E8F0', boxShadow: '0 8px 32px rgba(18,21,28,0.10)', overflow: 'hidden' }}>
+        <div className="rs-login-card" style={{ display: 'flex', width: '100%', maxWidth: 980, minHeight: 520, background: '#FFFFFF', borderRadius: 14, border: '1px solid #DCE2EA', boxShadow: '0 8px 32px rgba(18,21,28,0.10)', overflow: 'hidden' }}>
 
           <div className="rs-login-left" style={{ flex: '0 0 52%', position: 'relative', overflow: 'hidden', background: 'linear-gradient(160deg, #12151C 0%, #0D1526 100%)', padding: '40px 40px 32px', display: 'flex', flexDirection: 'column', color: '#FFFFFF' }}>
             <img src="/dxc-logo-color.svg" alt="DXC" style={{ height: 18, display: 'block', marginBottom: 22 }} />
 
-            <h1 style={{ fontSize: 25, fontWeight: 700, margin: 0, letterSpacing: 0.2 }}>EIT RunStack</h1>
+            <h1 style={{ fontSize: 25, fontWeight: 600, margin: 0,}}>EIT RunStack</h1>
 
-            <div style={{ fontSize: 12.5, fontWeight: 600, color: '#5EEAD4', textTransform: 'uppercase', letterSpacing: 1, marginTop: 6 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#5EEAD4', marginTop: 6 }}>
               Enterprise Automation Platform
             </div>
 
-            <p style={{ fontSize: 13, lineHeight: 1.6, color: 'rgba(226,232,240,0.75)', marginTop: 16, marginBottom: 24, maxWidth: 300 }}>
+            <p style={{ fontSize: 14, lineHeight: 1.6, color: 'rgba(226,232,240,0.75)', marginTop: 16, marginBottom: 24, maxWidth: 300 }}>
               Securely execute and manage infrastructure and application automations through a centralized platform.
             </p>
 
@@ -113,7 +113,7 @@ export default function Login() {
                   <span style={{ width: 24, height: 24, borderRadius: 7, flexShrink: 0, background: 'rgba(94,234,212,0.12)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                     {f.icon({ size: 13, color: '#5EEAD4' })}
                   </span>
-                  <span style={{ fontSize: 12.5, color: 'rgba(226,232,240,0.9)' }}>{f.text}</span>
+                  <span style={{ fontSize: 13, color: 'rgba(226,232,240,0.9)' }}>{f.text}</span>
                 </li>
               ))}
             </ul>
@@ -123,7 +123,7 @@ export default function Login() {
                 {STACK.map((s, i) => (
                   <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 9, padding: '8px 12px', borderRadius: 8, background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(94,234,212,0.18)', marginLeft: i * 18 }}>
                     {s.icon({ size: 13, color: '#5EEAD4' })}
-                    <span style={{ fontSize: 11.5, color: 'rgba(226,232,240,0.85)', fontWeight: 500 }}>{s.label}</span>
+                    <span style={{ fontSize: 12, color: 'rgba(226,232,240,0.85)', fontWeight: 500 }}>{s.label}</span>
                   </div>
                 ))}
               </div>
@@ -131,15 +131,15 @@ export default function Login() {
               <svg width="100%" height="20" viewBox="0 0 300 20" preserveAspectRatio="none" aria-hidden="true" style={{ display: 'block', marginTop: 14 }}>
                 <defs>
                   <linearGradient id="glow" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#0F766E" stopOpacity="0" />
-                    <stop offset="50%" stopColor="#0F766E" stopOpacity="0.9" />
-                    <stop offset="100%" stopColor="#0F766E" stopOpacity="0" />
+                    <stop offset="0%" stopColor="#365D9D" stopOpacity="0" />
+                    <stop offset="50%" stopColor="#365D9D" stopOpacity="0.9" />
+                    <stop offset="100%" stopColor="#365D9D" stopOpacity="0" />
                   </linearGradient>
                 </defs>
                 <path d="M0 10 Q150 -6 300 10" stroke="url(#glow)" strokeWidth="1.5" fill="none" />
               </svg>
 
-              <div style={{ textAlign: 'center', fontSize: 11, fontWeight: 600, color: 'rgba(226,232,240,0.55)', letterSpacing: 0.6, marginTop: 10 }}>
+              <div style={{ textAlign: 'center', fontSize: 13, fontWeight: 600, color: 'rgba(226,232,240,0.55)', marginTop: 10 }}>
                 Build. Automate. Accelerate.
               </div>
             </div>
@@ -147,15 +147,15 @@ export default function Login() {
 
           <div className="rs-login-right" style={{ flex: '1 1 48%', padding: '40px 48px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
             <div style={{ maxWidth: 320, margin: '0 auto', width: '100%' }}>
-              <h2 style={{ fontSize: 20, fontWeight: 700, color: '#12151C', margin: 0, lineHeight: 1.3 }}>
+              <h2 style={{ fontSize: 20, fontWeight: 600, color: '#12151C', margin: 0, lineHeight: 1.3 }}>
                 Welcome to<br />EIT RunStack
               </h2>
 
-              <p style={{ fontSize: 13.5, color: '#64748B', marginTop: 12, marginBottom: signedOutReason ? 14 : 28, lineHeight: 1.6 }}>
+              <p style={{ fontSize: 14, color: '#657185', marginTop: 12, marginBottom: signedOutReason ? 14 : 28, lineHeight: 1.6 }}>
                 Sign in with your corporate account to continue.
               </p>
               {signedOutReason === 'expired' && (
-                <div role="status" style={{ marginBottom: 18, padding: '9px 12px', borderRadius: 8, background: '#FDF3E4', border: '1px solid #F3D9AE', color: '#92400E', fontSize: 12.5, lineHeight: 1.5 }}>
+                <div role="status" style={{ marginBottom: 18, padding: '9px 12px', borderRadius: 8, background: '#FDF3E4', border: '1px solid #F3D9AE', color: '#92400E', fontSize: 13, lineHeight: 1.5 }}>
                   Your session expired. Sign in again to return to the page you were on.
                 </div>
               )}
@@ -171,20 +171,20 @@ export default function Login() {
                 Sign in with SSO →
               </Btn>
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 16, fontSize: 11.5, color: '#64748B' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 16, fontSize: 12, color: '#657185' }}>
                 <LockIcon size={12} />
                 Secured with enterprise SSO
               </div>
 
-              <div style={{ height: 1, background: '#E2E8F0', margin: '28px 0 20px' }} />
+              <div style={{ height: 1, background: '#DCE2EA', margin: '28px 0 20px' }} />
 
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                <span style={{ width: 24, height: 24, borderRadius: 7, flexShrink: 0, background: '#F1F5F9', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <ChatIcon size={12} color="#64748B" />
+                <span style={{ width: 24, height: 24, borderRadius: 7, flexShrink: 0, background: '#F5F6F8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ChatIcon size={12} color="#657185" />
                 </span>
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>Need help?</div>
-                  <a href="mailto:eit-ai-ops-runstack@dxc.com" style={{ fontSize: 12, color: TEAL, fontWeight: 500, textDecoration: 'none' }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#3B4658' }}>Need help?</div>
+                  <a href="mailto:eit-ai-ops-runstack@dxc.com" style={{ fontSize: 13, color: TEAL, fontWeight: 500, textDecoration: 'none' }}>
                     Contact EIT RunStack Support
                   </a>
                 </div>
@@ -196,7 +196,7 @@ export default function Login() {
         </div>
       </main>
 
-      <div style={{ textAlign: 'center', padding: '16px 0', flexShrink: 0, fontSize: 11, color: '#94A3B8', position: 'relative', zIndex: 2 }}>
+      <div style={{ textAlign: 'center', padding: '16px 0', flexShrink: 0, fontSize: 12, color: '#657185', position: 'relative', zIndex: 2 }}>
         DXC Internal | EIT RunStack Automation Platform
       </div>
 

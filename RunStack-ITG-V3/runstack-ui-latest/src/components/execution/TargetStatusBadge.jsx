@@ -14,7 +14,7 @@ export default function TargetStatusBadge({ status, detail, size = 'sm', overall
       display: 'inline-flex', alignItems: 'center', gap: big ? 6 : 5,
       padding: big ? '3px 10px' : '1px 8px', borderRadius: 999,
       background: m.bg, color: m.color, border: `1px solid ${m.border}`,
-      fontSize: big ? 11.5 : 10.5, fontWeight: 700, whiteSpace: 'nowrap', lineHeight: 1.6,
+      fontSize: big ? 11.5 : 10.5, fontWeight: 600, whiteSpace: 'nowrap', lineHeight: 1.6,
     }}>
       <span style={{
         width: big ? 7 : 6, height: big ? 7 : 6, borderRadius: '50%', background: m.dot, flexShrink: 0,

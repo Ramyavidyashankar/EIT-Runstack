@@ -30,7 +30,7 @@ export function CopyButton({ value, label = 'Copy', size = 'sm' }) {
       style={{
         display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0,
         padding: size === 'sm' ? '1px 6px' : '3px 8px', borderRadius: 5, cursor: 'pointer', fontFamily: 'inherit',
-        fontSize: 10.5, fontWeight: 600,
+        fontSize: 12, fontWeight: 600,
         border: `1px solid ${state === 'copied' ? '#A9E7CD' : 'var(--nav-blue-border)'}`,
         background: state === 'copied' ? '#E4F8F0' : '#FFFFFF',
         color: state === 'copied' ? '#0B6E4C' : 'var(--nav-blue-text)',
@@ -50,15 +50,15 @@ export function CopyButton({ value, label = 'Copy', size = 'sm' }) {
 function Field({ label, value, mono, copy, hint }) {
   const empty = value === undefined || value === null || value === '';
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 12, padding: '7px 0', borderBottom: '1px solid #F1F5F9', alignItems: 'start' }}>
-      <div style={{ fontSize: 12, color: '#64748B' }}>{label}</div>
+    <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 12, padding: '7px 0', borderBottom: '1px solid #F5F6F8', alignItems: 'start' }}>
+      <div style={{ fontSize: 13, color: '#657185' }}>{label}</div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
         <div style={{
-          fontSize: mono ? 11.5 : 12.5, color: empty ? '#94A3B8' : '#0F172A', fontFamily: mono ? 'var(--font-mono)' : 'inherit',
+          fontSize: mono ? 11.5 : 12.5, color: empty ? '#657185' : '#202938', fontFamily: mono ? 'var(--font-mono)' : 'inherit',
           wordBreak: 'break-all', minWidth: 0, flex: 1,
         }}>
           {empty ? 'Not recorded' : value}
-          {hint && <div style={{ fontSize: 11, color: '#64748B', fontFamily: 'var(--font-sans)', marginTop: 2, wordBreak: 'normal' }}>{hint}</div>}
+          {hint && <div style={{ fontSize: 12, color: '#657185', fontFamily: 'var(--font-sans)', marginTop: 2, wordBreak: 'normal' }}>{hint}</div>}
         </div>
         {copy && !empty && <CopyButton value={value} label={`Copy ${label}`} />}
       </div>
@@ -68,9 +68,9 @@ function Field({ label, value, mono, copy, hint }) {
 
 function Section({ title, children, right }) {
   return (
-    <div style={{ border: '1px solid #E2E8F0', borderRadius: 10, overflow: 'hidden', background: '#FFFFFF' }}>
-      <div style={{ padding: '9px 14px', background: '#F8FAFC', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center' }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: 0.6 }}>{title}</div>
+    <div style={{ border: '1px solid #DCE2EA', borderRadius: 10, overflow: 'hidden', background: '#FFFFFF' }}>
+      <div style={{ padding: '9px 14px', background: '#FAFBFC', borderBottom: '1px solid #DCE2EA', display: 'flex', alignItems: 'center' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#3B4658',}}>{title}</div>
         {right && <div style={{ marginLeft: 'auto' }}>{right}</div>}
       </div>
       <div style={{ padding: '6px 14px 10px' }}>{children}</div>
@@ -84,15 +84,15 @@ function OutputBlock({ title, text, tone = 'neutral' }) {
   const long = text.length > 1200 || text.split('\n').length > 18;
   const colors = tone === 'error'
     ? { bg: '#FDECEC', border: '#F7B9B9' }
-    : { bg: '#F8FAFC', border: '#E2E8F0' };
+    : { bg: '#FAFBFC', border: '#DCE2EA' };
   return (
     <div style={{ marginTop: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>{title}</div>
-        <span style={{ fontSize: 11, color: '#94A3B8' }}>{text.split('\n').length} lines</span>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#3B4658' }}>{title}</div>
+        <span style={{ fontSize: 12, color: '#657185' }}>{text.split('\n').length} lines</span>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
           {long && (
-            <button type="button" onClick={() => setExpanded((x) => !x)} style={{ background: 'none', border: 'none', color: 'var(--nav-blue-text)', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>
+            <button type="button" onClick={() => setExpanded((x) => !x)} style={{ background: 'none', border: 'none', color: 'var(--nav-blue-text)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
               {expanded ? 'Collapse' : 'Expand'}
             </button>
           )}
@@ -100,7 +100,7 @@ function OutputBlock({ title, text, tone = 'neutral' }) {
         </span>
       </div>
       <pre style={{
-        margin: 0, fontFamily: 'var(--font-mono)', fontSize: 11.5, lineHeight: 1.55, color: '#0F172A',
+        margin: 0, fontFamily: 'var(--font-mono)', fontSize: 12, lineHeight: 1.55, color: '#202938',
         background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, padding: 12,
         whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: expanded ? 'none' : 280, overflowY: 'auto',
       }}>{text}</pre>
@@ -167,8 +167,8 @@ export default function JobDetailContent({ jobId, initial, onUpdate }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <StatusBadge status={j.status} />
         {j.automation_type && <TypeTag type={j.automation_type} />}
-        {j.environment && <span style={{ fontSize: 11, color: '#475569', background: '#F1F5F9', border: '1px solid #E2E8F0', borderRadius: 999, padding: '2px 8px' }}>{j.environment}</span>}
-        <span style={{ fontSize: 11.5, color: '#64748B' }}>
+        {j.environment && <span style={{ fontSize: 12, color: '#4F5B6E', background: '#F5F6F8', border: '1px solid #DCE2EA', borderRadius: 999, padding: '2px 8px' }}>{j.environment}</span>}
+        <span style={{ fontSize: 12, color: '#657185' }}>
           {active ? `Running for ${dur.text} · updates every ${ACTIVE_POLL_MS / 1000}s` : `Took ${dur.text}`}
         </span>
         {refreshing && <Spinner size={12} />}
@@ -216,7 +216,7 @@ export default function JobDetailContent({ jobId, initial, onUpdate }) {
         <Field label="Received" value={fmtFull(j.created_at)} hint={`${fmtAgo(j.created_at, now)} · job created as PENDING`} />
         <Field label="Last update" value={fmtFull(j.updated_at)} hint={`${fmtAgo(j.updated_at, now)} · status set to ${j.status}`} />
         <Field label={active ? 'Elapsed' : 'Duration'} value={dur.text} />
-        <div style={{ fontSize: 11, color: '#94A3B8', paddingTop: 8 }}>
+        <div style={{ fontSize: 12, color: '#657185', paddingTop: 8 }}>
           RunStack keeps the current status and these two timestamps only; individual status changes are not recorded.
         </div>
       </Section>
@@ -235,12 +235,12 @@ export default function JobDetailContent({ jobId, initial, onUpdate }) {
           <OutputBlock title="Output" text={job.output} />
         </Section>
       ) : job && (
-        <Section title="Output"><div style={{ fontSize: 12, color: '#94A3B8', padding: '6px 0' }}>{active ? 'No output yet.' : 'No output was recorded for this job.'}</div></Section>
+        <Section title="Output"><div style={{ fontSize: 13, color: '#657185', padding: '6px 0' }}>{active ? 'No output yet.' : 'No output was recorded for this job.'}</div></Section>
       )}
 
       {params && Object.keys(params).length > 0 && (
-        <Section title="Parameters" right={<span style={{ fontSize: 11, color: '#94A3B8' }}>Secrets are masked</span>}>
-          <pre style={{ margin: '6px 0 0', fontFamily: 'var(--font-mono)', fontSize: 11.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#0F172A' }}>
+        <Section title="Parameters" right={<span style={{ fontSize: 12, color: '#657185' }}>Secrets are masked</span>}>
+          <pre style={{ margin: '6px 0 0', fontFamily: 'var(--font-mono)', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#202938' }}>
             {JSON.stringify(params, null, 2)}
           </pre>
         </Section>

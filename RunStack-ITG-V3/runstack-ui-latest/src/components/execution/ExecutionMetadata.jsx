@@ -14,7 +14,7 @@ function Field({ label, children, mono }) {
   const empty = children === null || children === undefined || children === '';
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '112px minmax(0, 1fr)', gap: 10, padding: '4px 0', alignItems: 'baseline' }}>
-      <dt style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>{label}</dt>
+      <dt style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>{label}</dt>
       <dd style={{
         margin: 0, fontSize: mono ? 12 : 12.5, fontWeight: 600, color: empty ? 'var(--slate-400)' : 'var(--text-primary)',
         fontFamily: mono ? 'var(--font-mono)' : 'inherit', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',

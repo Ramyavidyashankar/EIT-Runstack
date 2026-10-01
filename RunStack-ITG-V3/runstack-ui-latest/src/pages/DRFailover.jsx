@@ -53,12 +53,12 @@ function CheckRow({ check }) {
   return (
     <div style={{
       display: 'flex', alignItems: 'flex-start', gap: 10,
-      padding: '8px 0', borderBottom: '1px solid #EFEBE7', fontSize: 12.5,
+      padding: '8px 0', borderBottom: '1px solid #EFEBE7', fontSize: 13,
     }}>
       <span style={{
         flexShrink: 0, width: 18, height: 18, borderRadius: '50%',
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        fontSize: 11, fontWeight: 700, color: '#FFFFFF',
+        fontSize: 12, fontWeight: 600, color: '#FFFFFF',
         background: pass ? '#1C9C6B' : '#D14600',
       }}>
         {pass ? '✓' : '✕'}
@@ -71,9 +71,9 @@ function CheckRow({ check }) {
 function RoleTable({ roles, drReplicaHost }) {
   if (!roles || roles.length === 0) return <Empty message="No replica rows returned." />;
   return (
-    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
       <thead>
-        <tr style={{ textAlign: 'left', color: '#7A7D95', fontSize: 11 }}>
+        <tr style={{ textAlign: 'left', color: '#7A7D95', fontSize: 12 }}>
           <th style={{ padding: '6px 8px' }}>Replica</th>
           <th style={{ padding: '6px 8px' }}>Role</th>
           <th style={{ padding: '6px 8px' }}>Sync Health</th>
@@ -88,7 +88,7 @@ function RoleTable({ roles, drReplicaHost }) {
             <tr key={i} style={{ borderTop: '1px solid #EFEBE7', background: isDrReplica ? '#FFF7ED' : 'transparent' }}>
               <td style={{ padding: '6px 8px' }}>
                 <MonoField value={r.Replica} />
-                {isDrReplica && <span style={{ marginLeft: 6, fontSize: 10.5, color: '#D14600', fontWeight: 600 }}>DR TARGET</span>}
+                {isDrReplica && <span style={{ marginLeft: 6, fontSize: 13, color: '#D14600', fontWeight: 600 }}>DR TARGET</span>}
               </td>
               <td style={{ padding: '6px 8px', fontWeight: r.Role === 'PRIMARY' ? 700 : 400, color: r.Role === 'PRIMARY' ? '#004AAC' : '#0E1020' }}>
                 {r.Role}
@@ -357,7 +357,7 @@ export default function DRFailover() {
         title="DR Failover"
         subtitle="AlwaysOn Availability Group manual planned failover"
       />
-      <div style={{ padding: 24, display: 'grid', gap: 20, maxWidth: 900 }}>
+      <div className="rs-page-body" style={{ display: 'grid', gap: 20, alignContent: 'start' }}>
 
         {/* ── AG selection ─────────────────────────────────────────── */}
         <Card>
@@ -382,9 +382,9 @@ export default function DRFailover() {
             {servers && servers.length > 0 && (
               <div style={{ marginTop: 16 }}>
                 <SectionTitle sub="From Dynatrace — not a live SQL query">Servers in this AG</SectionTitle>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                   <thead>
-                    <tr style={{ textAlign: 'left', color: '#7A7D95', fontSize: 11 }}>
+                    <tr style={{ textAlign: 'left', color: '#7A7D95', fontSize: 12 }}>
                       <th style={{ padding: '6px 8px' }}>Host</th>
                       <th style={{ padding: '6px 8px' }}>AG Sync Health</th>
                       <th style={{ padding: '6px 8px' }}>Backup Preference</th>
@@ -404,7 +404,7 @@ export default function DRFailover() {
             )}
 
             {thresholds && (
-              <div style={{ marginTop: 12, fontSize: 11.5, color: '#7A7D95' }}>
+              <div style={{ marginTop: 12, fontSize: 12, color: '#7A7D95' }}>
                 DR thresholds (same for every AG): max log queue {thresholds.max_log_queue_kb} KB
                 {thresholds.dr_replica_override && <> · DR replica override: <MonoField value={thresholds.dr_replica_override} dim /></>}
               </div>
@@ -422,13 +422,13 @@ export default function DRFailover() {
               </Btn>
             </CardHead>
             <div style={{ padding: 18 }}>
-              <div style={{ fontSize: 11.5, color: '#7A7D95', marginBottom: 12 }}>
+              <div style={{ fontSize: 12, color: '#7A7D95', marginBottom: 12 }}>
                 Triggers a real SQL query via SSM against one reachable replica, then polls until it
                 completes — this can take 30-90 seconds. Primary and DR replica are determined from
                 this result, not from stored config.
               </div>
               {rolesLoading && rolesStatus && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 12, color: '#7A7D95' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13, color: '#7A7D95' }}>
                   <Spinner size={13} /> Job status: {rolesStatus}…
                 </div>
               )}
@@ -439,9 +439,9 @@ export default function DRFailover() {
                   {dbSync && dbSync.length > 0 && (
                     <div style={{ marginTop: 16 }}>
                       <SectionTitle>Per-Database Sync State</SectionTitle>
-                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12.5 }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                         <thead>
-                          <tr style={{ textAlign: 'left', color: '#7A7D95', fontSize: 11 }}>
+                          <tr style={{ textAlign: 'left', color: '#7A7D95', fontSize: 12 }}>
                             <th style={{ padding: '6px 8px' }}>Database</th>
                             <th style={{ padding: '6px 8px' }}>Sync State</th>
                             <th style={{ padding: '6px 8px' }}>Log Queue (KB)</th>
@@ -472,7 +472,7 @@ export default function DRFailover() {
           <Card>
             <CardHead><span>3. Pre-Validation</span></CardHead>
             <div style={{ padding: 18, display: 'grid', gap: 14 }}>
-              <div style={{ fontSize: 11.5, color: '#7A7D95' }}>
+              <div style={{ fontSize: 12, color: '#7A7D95' }}>
                 Uses the role check completed in step 2 — re-run step 2 first if that was a while ago.
               </div>
 
@@ -486,7 +486,7 @@ export default function DRFailover() {
 
               {targetChoice && (
                 <div>
-                  <div style={{ fontSize: 12.5, marginBottom: 10 }}>
+                  <div style={{ fontSize: 13, marginBottom: 10 }}>
                     Current Primary: <MonoField value={targetChoice.primary_host} /> — both an HA and a DR
                     failover target are available for this AG. Pick one to continue Pre-Validation.
                   </div>
@@ -509,12 +509,12 @@ export default function DRFailover() {
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
                     <StatusBadge status={planResult.all_pass ? 'SUCCEEDED' : 'FAILED'} />
-                    <span style={{ fontSize: 12, color: '#7A7D95' }}>
+                    <span style={{ fontSize: 13, color: '#7A7D95' }}>
                       Run ID: <MonoField value={planResult.run_id} dim />
                     </span>
                   </div>
                   {planResult.primary_host && (
-                    <div style={{ fontSize: 12.5, marginBottom: 10 }}>
+                    <div style={{ fontSize: 13, marginBottom: 10 }}>
                       Current Primary: <MonoField value={planResult.primary_host} /> → will fail over to: <MonoField value={planResult.dr_replica_host} />
                     </div>
                   )}
@@ -542,7 +542,7 @@ export default function DRFailover() {
                   display: 'flex', alignItems: 'center', gap: 10,
                   padding: '10px 14px', borderRadius: 6,
                   background: '#EFF6FF', border: '1px solid #BFDBFE',
-                  fontSize: 12.5, color: '#1E3A5F',
+                  fontSize: 13, color: '#1E3A5F',
                 }}>
                   <Spinner size={13} />
                   Sent to Teams for approval — waiting for an approver to accept the Adaptive Card,
@@ -584,7 +584,7 @@ export default function DRFailover() {
               } />
             </CardHead>
             <div style={{ padding: 18 }}>
-              <div style={{ fontSize: 13, marginBottom: 12 }}>
+              <div style={{ fontSize: 14, marginBottom: 12 }}>
                 {!RUN_TERMINAL_STATUSES.has(runStatus.status) && (
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                     <Spinner size={13} /> {RUN_STATUS_LABEL[runStatus.status] || runStatus.status}
@@ -605,7 +605,7 @@ export default function DRFailover() {
                 <div style={{ marginBottom: 12 }}>
                   <SectionTitle sub="Error output from the failover SSM command">Error Detail</SectionTitle>
                   <pre style={{
-                    fontFamily: 'var(--font-mono, monospace)', fontSize: 11.5,
+                    fontFamily: 'var(--font-mono, monospace)', fontSize: 12,
                     background: '#FDEEE6', border: '1px solid #F5C4A8', borderRadius: 6,
                     padding: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                     color: '#0E1020', maxHeight: 260, overflowY: 'auto',
@@ -618,7 +618,7 @@ export default function DRFailover() {
                 <div style={{ marginBottom: 12 }}>
                   <SectionTitle sub="Standard output from the failover SSM command">Output Detail</SectionTitle>
                   <pre style={{
-                    fontFamily: 'var(--font-mono, monospace)', fontSize: 11.5,
+                    fontFamily: 'var(--font-mono, monospace)', fontSize: 12,
                     background: '#FDEEE6', border: '1px solid #F5C4A8', borderRadius: 6,
                     padding: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
                     color: '#0E1020', maxHeight: 260, overflowY: 'auto',
@@ -628,7 +628,7 @@ export default function DRFailover() {
                 </div>
               )}
               {runStatus.final_roles && <RoleTable roles={runStatus.final_roles} drReplicaHost={runStatus.dr_replica_host} />}
-              <div style={{ marginTop: 12, fontSize: 11.5, color: '#7A7D95' }}>
+              <div style={{ marginTop: 12, fontSize: 12, color: '#7A7D95' }}>
                 Run ID: <MonoField value={runStatus.run_id} dim />
               </div>
             </div>

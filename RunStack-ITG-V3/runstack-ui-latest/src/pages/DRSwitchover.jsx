@@ -271,31 +271,31 @@ async function runRoleCheck(agName, { onStatus, isStale, onJobId, resumeJobId })
 }
 
 // ─── Small presentational pieces ─────────────────────────────────────────────
-const th = { padding: '8px 10px', fontSize: 10, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.5, textAlign: 'left', background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' };
-const td = { padding: '8px 10px', borderBottom: '1px solid #F1F5F9', fontSize: 12.5, verticalAlign: 'middle' };
+const th = { padding: '8px 10px', fontSize: 13, fontWeight: 600, color: '#3B4658', textAlign: 'left', background: '#FAFBFC', borderBottom: '1px solid #DCE2EA' };
+const td = { padding: '8px 10px', borderBottom: '1px solid #F5F6F8', fontSize: 14, verticalAlign: 'middle' };
 
 function StateChip({ value, good }) {
-  if (!value) return <span style={{ color: '#94A3B8' }}>—</span>;
+  if (!value) return <span style={{ color: '#657185' }}>—</span>;
   return <Chip tone={value === good ? 'green' : 'amber'}>{value}</Chip>;
 }
 
 function RoleTable({ roles, highlight }) {
-  if (!roles?.length) return <div style={{ fontSize: 12, color: '#64748B' }}>No replica rows returned.</div>;
+  if (!roles?.length) return <div style={{ fontSize: 13, color: '#657185' }}>No replica rows returned.</div>;
   return (
-    <div style={{ border: '1px solid #E2E8F0', borderRadius: 8, overflow: 'auto' }}>
+    <div style={{ border: '1px solid #DCE2EA', borderRadius: 8, overflow: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead><tr>{['Replica', 'Role', 'Sync health', 'Connection', 'Commit mode'].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
         <tbody>
           {roles.map((r, i) => (
-            <tr key={`${replicaName(r)}-${i}`} style={{ background: highlight && replicaName(r) === highlight ? '#F4FAF9' : 'transparent' }}>
+            <tr key={`${replicaName(r)}-${i}`} style={{ background: highlight && replicaName(r) === highlight ? '#FAFBFC' : 'transparent' }}>
               <td style={td}>
                 <MonoField value={replicaName(r) || '—'} />
                 {highlight && replicaName(r) === highlight && <span style={{ marginLeft: 8 }}><Chip>Target</Chip></span>}
               </td>
-              <td style={{ ...td, fontWeight: r.Role === 'PRIMARY' ? 700 : 500, color: r.Role === 'PRIMARY' ? '#0B5C56' : '#0F172A' }}>{r.Role || '—'}</td>
+              <td style={{ ...td, fontWeight: r.Role === 'PRIMARY' ? 700 : 500, color: r.Role === 'PRIMARY' ? '#2C4D84' : '#202938' }}>{r.Role || '—'}</td>
               <td style={td}><StateChip value={r.SyncHealth} good="HEALTHY" /></td>
               <td style={td}><StateChip value={r.ConnState} good="CONNECTED" /></td>
-              <td style={{ ...td, color: '#334155' }}>{r.CommitMode === 'ASYNCHRONOUS_COMMIT' ? 'Asynchronous' : r.CommitMode === 'SYNCHRONOUS_COMMIT' ? 'Synchronous' : (r.CommitMode || '—')}</td>
+              <td style={{ ...td, color: '#3B4658' }}>{r.CommitMode === 'ASYNCHRONOUS_COMMIT' ? 'Asynchronous' : r.CommitMode === 'SYNCHRONOUS_COMMIT' ? 'Synchronous' : (r.CommitMode || '—')}</td>
             </tr>
           ))}
         </tbody>
@@ -305,11 +305,11 @@ function RoleTable({ roles, highlight }) {
 }
 
 function DbTable({ dbSync, maxQueueKb }) {
-  if (!dbSync?.length) return <div style={{ fontSize: 12, color: '#64748B' }}>No per-database rows returned.</div>;
+  if (!dbSync?.length) return <div style={{ fontSize: 13, color: '#657185' }}>No per-database rows returned.</div>;
   const limit = maxQueueKb ?? 1024;
-  const q = (v) => <span style={{ fontFamily: 'var(--font-mono)', color: toNum(v) > limit ? '#B91C1C' : '#334155', fontWeight: toNum(v) > limit ? 700 : 400 }}>{v ?? '—'}</span>;
+  const q = (v) => <span style={{ fontFamily: 'var(--font-mono)', color: toNum(v) > limit ? '#B91C1C' : '#3B4658', fontWeight: toNum(v) > limit ? 700 : 400 }}>{v ?? '—'}</span>;
   return (
-    <div style={{ border: '1px solid #E2E8F0', borderRadius: 8, overflow: 'auto' }}>
+    <div style={{ border: '1px solid #DCE2EA', borderRadius: 8, overflow: 'auto' }}>
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead><tr>{['Database', 'Sync state', 'Log send queue (KB)', 'Redo queue (KB)'].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
         <tbody>
@@ -329,16 +329,16 @@ function DbTable({ dbSync, maxQueueKb }) {
 
 function CheckList({ checks }) {
   return (
-    <div style={{ display: 'grid', gap: 0, border: '1px solid #E2E8F0', borderRadius: 8, overflow: 'hidden' }}>
+    <div style={{ display: 'grid', gap: 0, border: '1px solid #DCE2EA', borderRadius: 8, overflow: 'hidden' }}>
       {checks.map((c, i) => {
         const pass = c.result === 'PASS';
         return (
-          <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '9px 12px', borderTop: i ? '1px solid #F1F5F9' : 'none', fontSize: 12.5 }}>
+          <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '9px 12px', borderTop: i ? '1px solid #F5F6F8' : 'none', fontSize: 13 }}>
             <span aria-hidden style={{
               flexShrink: 0, width: 18, height: 18, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 11, fontWeight: 700, color: '#fff', background: pass ? '#0F9D6D' : '#DC2626',
+              fontSize: 12, fontWeight: 600, color: '#fff', background: pass ? '#0F9D6D' : '#DC2626',
             }}>{pass ? '✓' : '✕'}</span>
-            <span style={{ color: '#0F172A' }}><span style={{ position: 'absolute', left: -9999 }}>{pass ? 'Passed: ' : 'Failed: '}</span>{c.detail}</span>
+            <span style={{ color: '#202938' }}><span style={{ position: 'absolute', left: -9999 }}>{pass ? 'Passed: ' : 'Failed: '}</span>{c.detail}</span>
           </div>
         );
       })}
@@ -351,10 +351,10 @@ function Collapsible({ label, defaultOpen = false, children }) {
   return (
     <div>
       <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} style={{
-        background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#334155',
-        fontSize: 12, fontWeight: 600, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6,
+        background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: '#3B4658',
+        fontSize: 13, fontWeight: 600, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 6,
       }}>
-        <span style={{ fontSize: 9, color: '#64748B' }}>{open ? '▾' : '▸'}</span> {label}
+        <span style={{ fontSize: 12, color: '#657185' }}>{open ? '▾' : '▸'}</span> {label}
       </button>
       {open && <div style={{ marginTop: 10 }}>{children}</div>}
     </div>
@@ -364,30 +364,30 @@ function Collapsible({ label, defaultOpen = false, children }) {
 function ModeCard({ title, description, points, cta, onClick, accent }) {
   return (
     <Card onClick={onClick} style={{ borderTop: `3px solid ${accent}`, padding: 20, display: 'grid', gap: 10, alignContent: 'start' }}>
-      <div style={{ fontSize: 16, fontWeight: 700, color: '#0F172A' }}>{title}</div>
-      <div style={{ fontSize: 12.5, color: '#334155', lineHeight: 1.6 }}>{description}</div>
-      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 12, color: '#475569', lineHeight: 1.8 }}>
+      <div style={{ fontSize: 16, fontWeight: 600, color: '#202938' }}>{title}</div>
+      <div style={{ fontSize: 13, color: '#3B4658', lineHeight: 1.6 }}>{description}</div>
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, color: '#4F5B6E', lineHeight: 1.8 }}>
         {points.map((p) => <li key={p}>{p}</li>)}
       </ul>
       <div style={{ marginTop: 4 }}>
-        <Btn variant={accent === '#0F766E' ? 'primary' : 'default'} onClick={(e) => { e.stopPropagation(); onClick(); }}>{cta} →</Btn>
+        <Btn variant={accent === '#365D9D' ? 'primary' : 'default'} onClick={(e) => { e.stopPropagation(); onClick(); }}>{cta} →</Btn>
       </div>
     </Card>
   );
 }
 
 function ProgressItem({ done, active, label, value }) {
-  const color = done ? '#0F9D6D' : active ? '#0F766E' : '#CBD5E1';
+  const color = done ? '#0F9D6D' : active ? '#365D9D' : '#C9D1DC';
   return (
     <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '6px 0' }}>
       <span aria-hidden style={{
         width: 16, height: 16, borderRadius: '50%', flexShrink: 0, marginTop: 1,
         border: `2px solid ${color}`, background: done ? color : 'transparent',
-        color: '#fff', fontSize: 9, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700,
+        color: '#fff', fontSize: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600,
       }}>{done ? '✓' : ''}</span>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: done || active ? '#0F172A' : '#94A3B8' }}>{label}</div>
-        {value && <div style={{ fontSize: 11, color: '#64748B', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>{value}</div>}
+        <div style={{ fontSize: 13, fontWeight: 600, color: done || active ? '#202938' : '#657185' }}>{label}</div>
+        {value && <div style={{ fontSize: 12, color: '#657185', fontFamily: 'var(--font-mono)', wordBreak: 'break-all' }}>{value}</div>}
       </div>
     </div>
   );
@@ -931,7 +931,7 @@ export default function DRSwitchover() {
 
   // ─────────────────────────────────────────────────────────────────────────
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="rs-page">
       <Topbar
         title="DR Switchover"
         subtitle="Planned switchover of a SQL Server Always On availability group to another replica."
@@ -945,22 +945,22 @@ export default function DRSwitchover() {
         </>}
       />
 
-      <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
-        <div style={{ maxWidth: 1360, margin: '0 auto' }}>
+      <div className="rs-page-body">
+        <div className="rs-page-content rs-page-content--flow">
 
           {/* ── Start: choose what to do ─────────────────────────────── */}
           {!mode && (
             <div style={{ display: 'grid', gap: 16, maxWidth: 980 }}>
               <div>
-                <div style={{ fontSize: 15, fontWeight: 700, color: '#0F172A' }}>What would you like to do?</div>
-                <div style={{ fontSize: 12.5, color: '#64748B', marginTop: 2 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#202938' }}>What would you like to do?</div>
+                <div style={{ fontSize: 13, color: '#657185', marginTop: 2 }}>
                   A switchover makes another replica the primary for an availability group. Applications reconnect to the new primary.
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16 }}>
                 <ModeCard
                   title="Plan a switchover"
-                  accent="#7EC4BB"
+                  accent="#DCE2EA"
                   description="Record an upcoming switchover so the team can review it before the change window."
                   points={['Choose the availability group and intended target', 'Add the proposed time and change or reference number', 'Saves a draft only — nothing runs automatically']}
                   cta="Plan a switchover"
@@ -968,7 +968,7 @@ export default function DRSwitchover() {
                 />
                 <ModeCard
                   title="Perform a switchover now"
-                  accent="#0F766E"
+                  accent="#365D9D"
                   description="Check the live database status, confirm readiness and switch over now."
                   points={['Live role and sync checks against the availability group', 'Readiness checks and Teams approval', 'A final live check runs just before execution']}
                   cta="Perform a switchover"
@@ -994,7 +994,7 @@ export default function DRSwitchover() {
                   right={<ModeSwitch mode={mode} setMode={setMode} disabled={executeLoading || runInProgress} />}
                 >
                   {agLoading ? (
-                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#64748B' }}><Spinner size={14} /> Loading availability groups…</div>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#657185' }}><Spinner size={14} /> Loading availability groups…</div>
                   ) : agError ? (
                     <ErrorBanner message={`Could not load availability groups from Dynatrace: ${agError}`} />
                   ) : (
@@ -1033,8 +1033,8 @@ export default function DRSwitchover() {
 
                   {servers && servers.length > 0 && (
                     <Collapsible label={`Servers in this availability group (${servers.length})`}>
-                      <div style={{ fontSize: 11, color: '#64748B', marginBottom: 8 }}>From Dynatrace — monitoring data, not a live SQL query.</div>
-                      <div style={{ border: '1px solid #E2E8F0', borderRadius: 8, overflow: 'auto' }}>
+                      <div style={{ fontSize: 12, color: '#657185', marginBottom: 8 }}>From Dynatrace — monitoring data, not a live SQL query.</div>
+                      <div style={{ border: '1px solid #DCE2EA', borderRadius: 8, overflow: 'auto' }}>
                         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                           <thead><tr>{['Host', 'AG sync health', 'Backup preference'].map((h) => <th key={h} style={th}>{h}</th>)}</tr></thead>
                           <tbody>{servers.map((s, i) => (
@@ -1080,7 +1080,7 @@ export default function DRSwitchover() {
                     </div>
                     <FormRow label="Notes (optional)">
                       <Textarea value={planForm.notes} onChange={setPlanField('notes')} maxLength={2000}
-                        style={{ fontFamily: 'var(--font-sans)', fontSize: 13, minHeight: 70 }}
+                        style={{ fontFamily: 'var(--font-sans)', fontSize: 14, minHeight: 70 }}
                         placeholder="Application owners informed, rollback approach, etc." />
                     </FormRow>
 
@@ -1094,7 +1094,7 @@ export default function DRSwitchover() {
                     )}
 
                     <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap' }}>
-                      {planMissing.length > 0 && planTouched && <span style={{ fontSize: 11.5, color: '#92400E' }}>Missing: {planMissing.join(', ')}</span>}
+                      {planMissing.length > 0 && planTouched && <span style={{ fontSize: 12, color: '#92400E' }}>Missing: {planMissing.join(', ')}</span>}
                       {planForm.planId && <Btn variant="default" onClick={() => setPlanForm(EMPTY_PLAN_FORM)}>Discard changes</Btn>}
                       <Btn variant="primary" onClick={savePlan} disabled={planSaving || planMissing.length > 0}>
                         {planSaving ? <Spinner size={13} /> : null} {planForm.planId ? 'Save changes' : 'Save plan'}
@@ -1113,7 +1113,7 @@ export default function DRSwitchover() {
                       ? 'Optional while planning — check which replicas are secondaries today.'
                       : 'Runs a live SQL query through SSM. This usually takes 30–90 seconds.'}
                     right={<>
-                      <span style={{ fontSize: 11, color: '#64748B' }} aria-live="polite">
+                      <span style={{ fontSize: 12, color: '#657185' }} aria-live="polite">
                         {liveLoading ? `Checking… ${liveJobStatus ? `(${liveJobStatus.toLowerCase()})` : ''}` : `Last checked ${live ? fmtClock(live.checkedAt) : 'never'}`}
                       </span>
                       <Btn variant={live ? 'default' : 'primary'} size="sm" onClick={onCheckLiveClick} disabled={liveLoading || executeLoading || finalLoading}>
@@ -1132,12 +1132,12 @@ export default function DRSwitchover() {
                     )}
                     {liveError && <ErrorBanner message={liveError} />}
                     {!live && !liveLoading && !liveError && (
-                      <div style={{ fontSize: 12.5, color: '#64748B' }}>
+                      <div style={{ fontSize: 13, color: '#657185' }}>
                         No live status yet. Choose <strong>Check live status</strong> to see the current primary, secondaries and database sync state.
                       </div>
                     )}
                     {liveLoading && !live && (
-                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, color: '#64748B' }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#657185' }}>
                         <Spinner size={14} /> Querying the availability group… you can leave this page; the check keeps running and resumes here.
                       </div>
                     )}
@@ -1165,7 +1165,7 @@ export default function DRSwitchover() {
                           <RoleTable roles={live.roles} highlight={targetReplica} />
                         </Collapsible>
                         <Collapsible label={`Database details (${live.dbSync.length})`} defaultOpen={mode === 'perform' && analysis.unsyncedDbs > 0}>
-                          <div style={{ fontSize: 11, color: '#64748B', marginBottom: 8 }}>
+                          <div style={{ fontSize: 12, color: '#657185', marginBottom: 8 }}>
                             Queue limit {config?.max_log_queue_kb ?? '—'} KB. Values are from the replica RunStack queried.
                           </div>
                           <DbTable dbSync={live.dbSync} maxQueueKb={config?.max_log_queue_kb} />
@@ -1194,14 +1194,14 @@ export default function DRSwitchover() {
                           return (
                             <label key={t.name} style={{
                               display: 'flex', alignItems: 'center', gap: 12, padding: '12px 14px', borderRadius: 8,
-                              border: `1px solid ${selected ? '#0F766E' : '#E2E8F0'}`, background: selected ? '#F4FAF9' : '#FFFFFF',
+                              border: `1px solid ${selected ? '#365D9D' : '#DCE2EA'}`, background: selected ? '#FAFBFC' : '#FFFFFF',
                               cursor: t.eligible && !readinessLoading ? 'pointer' : 'not-allowed', opacity: t.eligible ? 1 : 0.65,
                             }}>
                               <input type="radio" name="dr-target" value={t.name} checked={selected} disabled={!t.eligible || readinessLoading || executeLoading}
                                 onChange={() => { setTargetReplica(t.name); clearReadiness(); }} />
                               <div style={{ minWidth: 0, flex: 1 }}>
-                                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12.5, fontWeight: 600, color: '#0F172A', wordBreak: 'break-all' }}>{t.name}</div>
-                                <div style={{ fontSize: 11.5, color: '#64748B', marginTop: 2 }}>
+                                <div style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: '#202938', wordBreak: 'break-all' }}>{t.name}</div>
+                                <div style={{ fontSize: 12, color: '#657185', marginTop: 2 }}>
                                   {t.eligible ? 'Connected and healthy' : `Not eligible: ${t.reasons.join(', ')}`}
                                 </div>
                               </div>
@@ -1225,7 +1225,7 @@ export default function DRSwitchover() {
                     right={<Btn variant={readiness ? 'default' : 'primary'} size="sm" onClick={runReadiness} disabled={readinessLoading || executeLoading || !!runActive}>
                       {readinessLoading ? <Spinner size={13} /> : null} {readiness ? 'Run readiness again' : 'Run readiness checks'}
                     </Btn>}>
-                    <div style={{ fontSize: 12.5, color: '#334155' }}>
+                    <div style={{ fontSize: 13, color: '#3B4658' }}>
                       Uses the live status from <strong>{fmtClock(live.checkedAt)}</strong>. If that was a while ago, check live status again first.
                     </div>
                     {readinessError && <ErrorBanner message={readinessError} />}
@@ -1233,22 +1233,22 @@ export default function DRSwitchover() {
                       <>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                           <StatusBadge status={readiness.all_pass ? 'SUCCEEDED' : 'FAILED'} />
-                          <span style={{ fontSize: 12.5, color: '#0F172A', fontWeight: 600 }}>
+                          <span style={{ fontSize: 13, color: '#202938', fontWeight: 600 }}>
                             {readiness.all_pass ? 'Ready to switch over' : 'Not ready — resolve the failed checks, check live status again and re-run readiness'}
                           </span>
-                          {readinessAt && <span style={{ fontSize: 11, color: '#64748B' }}>Checked {fmtClock(new Date(readinessAt))}</span>}
+                          {readinessAt && <span style={{ fontSize: 12, color: '#657185' }}>Checked {fmtClock(new Date(readinessAt))}</span>}
                         </div>
                         {readiness.primary_host && (
-                          <div style={{ fontSize: 12.5, color: '#334155' }}>
+                          <div style={{ fontSize: 13, color: '#3B4658' }}>
                             <MonoField value={readiness.primary_host} /> → <MonoField value={readiness.dr_replica_host} />
                             {readiness.failover_scope && <span style={{ marginLeft: 8 }}><Chip tone={readiness.failover_scope === 'DR' ? 'amber' : 'default'}>{readiness.failover_scope} switchover</Chip></span>}
                           </div>
                         )}
                         <CheckList checks={readiness.checks || []} />
                         {readiness.all_pass && readiness.teams_notification_sent === false && (
-                          <div style={{ fontSize: 11.5, color: '#64748B' }}>Teams approval card was not sent{readiness.teams_notification_error ? `: ${readiness.teams_notification_error}` : ''}.</div>
+                          <div style={{ fontSize: 12, color: '#657185' }}>Teams approval card was not sent{readiness.teams_notification_error ? `: ${readiness.teams_notification_error}` : ''}.</div>
                         )}
-                        <div style={{ fontSize: 11, color: '#94A3B8' }}>Run ID <MonoField value={readiness.run_id} dim /></div>
+                        <div style={{ fontSize: 12, color: '#657185' }}>Run ID <MonoField value={readiness.run_id} dim /></div>
                       </>
                     )}
                   </SectionCard>
@@ -1268,7 +1268,7 @@ export default function DRSwitchover() {
                         ? <Callout tone="warning" title="Readiness approval expired" action={<Btn variant="default" size="sm" onClick={runReadiness}>Run readiness again</Btn>}>
                             For safety, readiness results can only be used for {Math.round(readiness.token_ttl_seconds / 60)} minutes.
                           </Callout>
-                        : <div style={{ fontSize: 11.5, color: tokenSecondsLeft < 90 ? '#92400E' : '#64748B' }}>
+                        : <div style={{ fontSize: 12, color: tokenSecondsLeft < 90 ? '#92400E' : '#657185' }}>
                             Readiness can be used for another {Math.floor(tokenSecondsLeft / 60)}m {String(tokenSecondsLeft % 60).padStart(2, '0')}s.
                           </div>
                     )}
@@ -1303,14 +1303,14 @@ export default function DRSwitchover() {
                     <div style={{ borderTop: '1px solid #F3D9AE', paddingTop: 14, display: 'grid', gap: 10 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                         <div style={{ flex: 1, minWidth: 220 }}>
-                          <div style={{ fontSize: 13, fontWeight: 700, color: '#0F172A' }}>Final live check</div>
-                          <div style={{ fontSize: 11.5, color: '#64748B' }}>Runs a fresh role and sync check right before the switchover and compares it with what you reviewed.</div>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: '#202938' }}>Final live check</div>
+                          <div style={{ fontSize: 12, color: '#657185' }}>Runs a fresh role and sync check right before the switchover and compares it with what you reviewed.</div>
                         </div>
                         <Btn variant={finalValid ? 'default' : 'primary'} size="sm" onClick={runFinalCheck} disabled={finalLoading || executeLoading || tokenExpired}>
                           {finalLoading ? <Spinner size={13} /> : null} {finalCheck ? 'Run final check again' : 'Run final live check'}
                         </Btn>
                       </div>
-                      {finalLoading && <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#64748B' }}><Spinner size={13} /> Checking live status… ({(finalStatus || 'pending').toLowerCase()})</div>}
+                      {finalLoading && <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#657185' }}><Spinner size={13} /> Checking live status… ({(finalStatus || 'pending').toLowerCase()})</div>}
                       {finalError && <ErrorBanner message={finalError} />}
                       {finalCheck && !finalCheck.changed && (
                         finalValid
@@ -1332,7 +1332,7 @@ export default function DRSwitchover() {
                       <Input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} placeholder="YES"
                         disabled={!finalValid || executeLoading} aria-describedby="dr-confirm-help" style={{ maxWidth: 220 }} />
                     </FormRow>
-                    <div id="dr-confirm-help" style={{ fontSize: 11.5, color: '#64748B', marginTop: -8 }}>
+                    <div id="dr-confirm-help" style={{ fontSize: 12, color: '#657185', marginTop: -8 }}>
                       {!finalCheck ? 'Run the final live check to unlock confirmation.'
                         : finalCheck.changed ? 'Blocked until the new results are reviewed.'
                         : !finalValid ? 'Run the final check again to unlock confirmation.'
@@ -1378,7 +1378,7 @@ export default function DRSwitchover() {
               {/* ── Right rail: progress summary ───────────────────────── */}
               <div style={{ position: 'sticky', top: 0 }}>
                 <Card>
-                  <CardHead><span style={{ fontSize: 12.5, fontWeight: 700 }}>{mode === 'plan' ? 'Your plan' : 'Your switchover'}</span></CardHead>
+                  <CardHead><span style={{ fontSize: 'var(--fs-section-title)', fontWeight: 600 }}>{mode === 'plan' ? 'Your plan' : 'Your switchover'}</span></CardHead>
                   <div style={{ padding: '10px 16px 14px' }}>
                     {mode === 'plan' ? (
                       <>
@@ -1386,7 +1386,7 @@ export default function DRSwitchover() {
                         <ProgressItem done={!!planForm.intended_target} active={!!selectedAg} label="Intended target" value={planForm.intended_target} />
                         <ProgressItem done={!!planForm.proposed_local} active={!!selectedAg} label="Proposed time" value={planForm.proposed_local ? fmtWhen(new Date(planForm.proposed_local).toISOString()) : ''} />
                         <ProgressItem done={!!planForm.change_reference} active={!!selectedAg} label="Change reference" value={planForm.change_reference} />
-                        <div style={{ fontSize: 11, color: '#64748B', marginTop: 10, lineHeight: 1.5 }}>
+                        <div style={{ fontSize: 12, color: '#657185', marginTop: 10, lineHeight: 1.5 }}>
                           Drafts are kept if you leave this page. Saved plans are visible to everyone with DR access for this availability group.
                         </div>
                       </>
@@ -1405,7 +1405,7 @@ export default function DRSwitchover() {
                           value={!runActive ? '' : runStatus.status === 'SUCCESS' ? 'Completed'
                             : runStatus.status === 'NEEDS_MANUAL_CHECK' ? 'Attention required'
                             : runStatus.status === 'CONFIRMING' ? 'In progress' : ''} />
-                        <div style={{ fontSize: 11, color: '#64748B', marginTop: 10, lineHeight: 1.5 }}>
+                        <div style={{ fontSize: 12, color: '#657185', marginTop: 10, lineHeight: 1.5 }}>
                           Leaving this page keeps your progress; a running check or switchover is picked up again when you return, including in another tab. Readiness must be re-run after leaving.
                         </div>
                       </>
@@ -1424,10 +1424,10 @@ export default function DRSwitchover() {
 // ─── Mode toggle (segmented, as on Run Automation) ───────────────────────────
 function ModeSwitch({ mode, setMode, disabled }) {
   const seg = (active) => ({
-    padding: '4px 12px', fontSize: 11.5, fontWeight: 600, fontFamily: 'inherit', borderRadius: 'var(--radius-sm)',
+    padding: '4px 12px', fontSize: 12, fontWeight: 600, fontFamily: 'inherit', borderRadius: 'var(--radius-sm)',
     cursor: disabled ? 'not-allowed' : 'pointer',
-    border: active ? '1px solid #0F766E' : '1px solid #CBD5E1', background: active ? '#E6F5F3' : '#FFFFFF',
-    color: active ? '#0F766E' : '#334155',
+    border: active ? '1px solid #365D9D' : '1px solid #C9D1DC', background: active ? '#EEF3FA' : '#FFFFFF',
+    color: active ? '#365D9D' : '#3B4658',
   });
   return (
     <div style={{ display: 'flex', gap: 4 }} role="group" aria-label="Mode">
@@ -1446,14 +1446,14 @@ function SavedPlans({
     <Callout tone={notice.tone} action={<Btn variant="ghost" size="sm" onClick={onDismissNotice}>Dismiss</Btn>}>{notice.text}</Callout>
   );
   if (loading && plans.length === 0) {
-    return <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#64748B' }}><Spinner size={13} /> Loading saved plans…</div>;
+    return <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#657185' }}><Spinner size={13} /> Loading saved plans…</div>;
   }
   if (plans.length === 0) {
     return (
       <>
         {noticeBox}
         {error ? <Callout tone="warning">Saved plans could not be loaded: {error}</Callout>
-          : mode === 'perform' ? null : <div style={{ fontSize: 12, color: '#64748B' }}>No saved plans for this availability group.</div>}
+          : mode === 'perform' ? null : <div style={{ fontSize: 13, color: '#657185' }}>No saved plans for this availability group.</div>}
       </>
     );
   }
@@ -1469,15 +1469,15 @@ function SavedPlans({
           return (
             <div key={p.plan_id} style={{
               display: 'grid', gap: 8, padding: '10px 12px', borderRadius: 8,
-              border: `1px solid ${p.plan_id === activePlanId ? '#0F766E' : confirming ? '#F3D9AE' : '#E2E8F0'}`,
+              border: `1px solid ${p.plan_id === activePlanId ? '#365D9D' : confirming ? '#F3D9AE' : '#DCE2EA'}`,
               background: confirming ? '#FFFBF4' : '#FFFFFF', opacity: cancelling ? 0.7 : 1,
             }}>
               <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
                 <div style={{ flex: 1, minWidth: 220 }}>
-                  <div style={{ fontSize: 12.5, fontWeight: 600, color: '#0F172A' }}>
-                    {fmtWhen(p.proposed_time)} <span style={{ fontWeight: 400, color: '#64748B' }}>· {p.change_reference}</span>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#202938' }}>
+                    {fmtWhen(p.proposed_time)} <span style={{ fontWeight: 400, color: '#657185' }}>· {p.change_reference}</span>
                   </div>
-                  <div style={{ fontSize: 11.5, color: '#64748B', marginTop: 2 }}>
+                  <div style={{ fontSize: 12, color: '#657185', marginTop: 2 }}>
                     Target <span style={{ fontFamily: 'var(--font-mono)' }}>{p.intended_target}</span> · saved by {p.created_by}
                     {p.proposed_time && new Date(p.proposed_time).getTime() < Date.now() && <span style={{ marginLeft: 6 }}><Chip tone="amber">Time passed</Chip></span>}
                     {p.plan_id === activePlanId && <span style={{ marginLeft: 6 }}><Chip>Being performed</Chip></span>}
@@ -1493,7 +1493,7 @@ function SavedPlans({
               </div>
               {confirming && (
                 <div role="alertdialog" aria-label="Confirm cancelling this plan" style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', borderTop: '1px solid #F3D9AE', paddingTop: 8 }}>
-                  <span style={{ flex: 1, minWidth: 220, fontSize: 12.5, color: '#92400E' }}>
+                  <span style={{ flex: 1, minWidth: 220, fontSize: 13, color: '#92400E' }}>
                     Cancel this plan? It is removed from the saved plans list for everyone. Nothing is changed on the availability group.
                   </span>
                   <Btn variant="default" size="sm" onClick={() => setCancelConfirmId(null)} disabled={cancelling}>Keep plan</Btn>
@@ -1514,20 +1514,20 @@ function SavedPlans({
 function StatusRow({ title, state, tone, detail, busy }) {
   const colors = {
     green: { dot: '#0F9D6D', bg: '#F1FBF6', border: '#BFE9D6' },
-    teal: { dot: '#0F766E', bg: '#F4FAF9', border: '#BFE0DB' },
+    teal: { dot: '#365D9D', bg: '#FAFBFC', border: '#DCE2EA' },
     amber: { dot: '#D97706', bg: '#FFFBF4', border: '#F3D9AE' },
     red: { dot: '#DC2626', bg: '#FEF6F6', border: '#F7C4C4' },
-    gray: { dot: '#94A3B8', bg: '#F8FAFC', border: '#E2E8F0' },
-  }[tone] || { dot: '#94A3B8', bg: '#F8FAFC', border: '#E2E8F0' };
+    gray: { dot: '#657185', bg: '#FAFBFC', border: '#DCE2EA' },
+  }[tone] || { dot: '#657185', bg: '#FAFBFC', border: '#DCE2EA' };
   return (
     <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', padding: '12px 14px', borderRadius: 10, background: colors.bg, border: `1px solid ${colors.border}` }}>
       <span aria-hidden style={{ marginTop: 3, flexShrink: 0 }}>
         {busy ? <Spinner size={14} /> : <span style={{ display: 'block', width: 12, height: 12, borderRadius: '50%', background: colors.dot }} />}
       </span>
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.5 }}>{title}</div>
-        <div style={{ fontSize: 13.5, fontWeight: 700, color: '#0F172A', marginTop: 2 }}>{state}</div>
-        {detail && <div style={{ fontSize: 12, color: '#475569', marginTop: 3, lineHeight: 1.5 }}>{detail}</div>}
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)',}}>{title}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, color: '#202938', marginTop: 2 }}>{state}</div>
+        {detail && <div style={{ fontSize: 13, color: '#4F5B6E', marginTop: 3, lineHeight: 1.5 }}>{detail}</div>}
       </div>
     </div>
   );
@@ -1579,8 +1579,8 @@ function RunProgress({ run, agName, now, maxQueueKb, onCheckNow, checkingNow, ch
   const overallTone = { SUCCESS: 4, EXECUTE_FAILED: 'caution', NEEDS_MANUAL_CHECK: 'caution' }[s] || 3;
   const pre = (text) => (
     <pre style={{
-      fontFamily: 'var(--font-mono)', fontSize: 11.5, background: '#FDF3E4', border: '1px solid #F3D9AE', borderRadius: 8,
-      padding: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#0F172A', maxHeight: 260, overflowY: 'auto', margin: 0,
+      fontFamily: 'var(--font-mono)', fontSize: 12, background: '#FDF3E4', border: '1px solid #F3D9AE', borderRadius: 8,
+      padding: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#202938', maxHeight: 260, overflowY: 'auto', margin: 0,
     }}>{text}</pre>
   );
 
@@ -1625,7 +1625,7 @@ function RunProgress({ run, agName, now, maxQueueKb, onCheckNow, checkingNow, ch
       {s === 'STALE_PLAN' && <Callout tone="warning" title="Blocked before execution">{run.error || 'The live state changed after readiness was reviewed.'} No changes were made.</Callout>}
 
       {run.post_check_pending?.length > 0 && s === 'CONFIRMING' && (
-        <div style={{ fontSize: 12, color: '#475569' }}>
+        <div style={{ fontSize: 13, color: '#4F5B6E' }}>
           <strong>Still waiting for:</strong>
           <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{run.post_check_pending.map((m) => <li key={m}>{m}</li>)}</ul>
         </div>
@@ -1639,7 +1639,7 @@ function RunProgress({ run, agName, now, maxQueueKb, onCheckNow, checkingNow, ch
       )}
       {dbSync.length > 0 && (
         <Collapsible label={`Databases (${dbSync.length})`}>
-          <div style={{ fontSize: 11, color: '#64748B', marginBottom: 8 }}>
+          <div style={{ fontSize: 12, color: '#657185', marginBottom: 8 }}>
             From the replica RunStack queried. Asynchronous-commit replicas normally stay SYNCHRONIZING; replica sync health is what decides completion.
           </div>
           <DbTable dbSync={dbSync} maxQueueKb={maxQueueKb} />
@@ -1649,7 +1649,7 @@ function RunProgress({ run, agName, now, maxQueueKb, onCheckNow, checkingNow, ch
       {s === 'EXECUTE_FAILED' && run.ssm_output && <Collapsible label="Command output">{pre(run.ssm_output)}</Collapsible>}
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-        <span style={{ fontSize: 11, color: '#94A3B8', flex: 1 }}>
+        <span style={{ fontSize: 12, color: '#657185', flex: 1 }}>
           Run ID <MonoField value={run.run_id} dim /> · requested by {run.requested_by || '—'} · created {fmtRunTime(run.created_at)}
         </span>
         {canCheckNow && (
@@ -1700,10 +1700,10 @@ function PreviousRuns({ agName, runs, loading, error, now, maxQueueKb, currentRu
     <SectionCard tone="neutral" title="Previous runs"
       helper={`All switchover runs for ${agName}, newest first, including the one shown above. Kept for audit — they don't affect a new switchover.`}>
       {error && <Callout tone="warning">Previous runs could not be loaded: {error}</Callout>}
-      {loading && runs.length === 0 && <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#64748B' }}><Spinner size={13} /> Loading previous runs…</div>}
-      {!loading && !error && runs.length === 0 && <div style={{ fontSize: 12.5, color: '#64748B' }}>No previous runs for this availability group.</div>}
+      {loading && runs.length === 0 && <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#657185' }}><Spinner size={13} /> Loading previous runs…</div>}
+      {!loading && !error && runs.length === 0 && <div style={{ fontSize: 13, color: '#657185' }}>No previous runs for this availability group.</div>}
       {runs.length > 0 && (
-        <div style={{ border: '1px solid #E2E8F0', borderRadius: 8, overflow: 'auto' }}>
+        <div style={{ border: '1px solid #DCE2EA', borderRadius: 8, overflow: 'auto' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 760 }}>
             <thead><tr>{['Started', 'Run ID', 'Switchover', 'Result', 'Requested by', ''].map((h) => <th key={h || 'x'} style={th}>{h}</th>)}</tr></thead>
             {runs.map((r) => {
@@ -1717,24 +1717,24 @@ function PreviousRuns({ agName, runs, loading, error, now, maxQueueKb, currentRu
                       <MonoField value={r.run_id} dim />
                       {r.run_id === currentRunId && <div style={{ marginTop: 3 }}><Chip>Current · shown above</Chip></div>}
                     </td>
-                    <td style={{ ...td, fontSize: 12 }}>
+                    <td style={{ ...td, fontSize: 13 }}>
                       <span style={{ fontFamily: 'var(--font-mono)' }}>{r.primary_host || '—'}</span> → <span style={{ fontFamily: 'var(--font-mono)' }}>{r.dr_replica_host || '—'}</span>
                       {r.failover_scope && <span style={{ marginLeft: 6 }}><Chip tone={r.failover_scope === 'DR' ? 'amber' : 'gray'}>{r.failover_scope}</Chip></span>}
                     </td>
                     <td style={td}>
                       <Chip tone={RUN_STATUS_TONE[r.status] || 'gray'}>{RUN_STATUS_LABEL[r.status] || r.status}</Chip>
-                      {r.attention_code && <div style={{ fontSize: 11, color: '#92400E', marginTop: 3 }}>{ATTENTION_TITLE[r.attention_code] || r.attention_code}</div>}
-                      {r.is_active && r.run_id !== currentRunId && <div style={{ fontSize: 11, color: '#0F766E', marginTop: 3 }}>In progress</div>}
+                      {r.attention_code && <div style={{ fontSize: 12, color: '#92400E', marginTop: 3 }}>{ATTENTION_TITLE[r.attention_code] || r.attention_code}</div>}
+                      {r.is_active && r.run_id !== currentRunId && <div style={{ fontSize: 12, color: '#365D9D', marginTop: 3 }}>In progress</div>}
                     </td>
-                    <td style={{ ...td, fontSize: 12 }}>{r.requested_by || '—'}</td>
+                    <td style={{ ...td, fontSize: 13 }}>{r.requested_by || '—'}</td>
                     <td style={{ ...td, textAlign: 'right' }}>
                       {r.run_id !== currentRunId && <Btn variant="ghost" size="sm" onClick={() => open(r.run_id)} aria-expanded={isOpen}>{isOpen ? 'Hide' : 'Details'}</Btn>}
                     </td>
                   </tr>
                   {isOpen && (
-                    <tr><td colSpan={6} style={{ padding: 14, background: '#F8FAFC', borderBottom: '1px solid #E2E8F0' }}>
+                    <tr><td colSpan={6} style={{ padding: 14, background: '#FAFBFC', borderBottom: '1px solid #DCE2EA' }}>
                       {detailError && <ErrorBanner message={detailError} />}
-                      {!full && !detailError && <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#64748B' }}><Spinner size={13} /> Loading run…</div>}
+                      {!full && !detailError && <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#657185' }}><Spinner size={13} /> Loading run…</div>}
                       {full && (
                         <RunProgress run={full} agName={agName} now={now} maxQueueKb={maxQueueKb} compact
                           onCheckNow={() => open(r.run_id, true)} checkingNow={checking} />

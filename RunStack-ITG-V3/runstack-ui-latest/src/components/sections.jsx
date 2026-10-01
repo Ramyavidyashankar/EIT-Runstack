@@ -8,38 +8,37 @@
 import React from 'react';
 import { Btn, Card, CardHead, Spinner } from './ui';
 
-// Light teal ladder used down the Run Automation page, lightest first,
-// plus a caution tone for the irreversible final step.
+// Every section uses the same white card with a near-white header and a
+// thin divider. tone is kept for callers; only "caution" (an irreversible
+// step) still changes the header, to a warm warning tint.
 const TONES = {
-  1:       { border: '#BFE0DB', head: '#F4FAF9' },
-  2:       { border: '#9FD2CB', head: '#EFF7F5' },
-  3:       { border: '#7EC4BB', head: '#E9F4F1' },
-  4:       { border: '#0F766E', head: '#E3F3EE' },
-  neutral: { border: '#E2E8F0', head: '#F8FAFC' },
-  caution: { border: '#F3D9AE', head: '#FDF3E4' },
+  default: { head: 'var(--section-head-bg)', rule: null },
+  caution: { head: '#FDF3E4', rule: '#F3D9AE' },
 };
 
 export function SectionHeader({ title, helper, right }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, width: '100%' }}>
       <div style={{ minWidth: 0 }}>
-        <div style={{ fontWeight: 700, fontSize: 14, color: '#0F172A' }}>{title}</div>
-        {helper && <div style={{ fontSize: 11.5, color: '#64748B', marginTop: 2, fontWeight: 400 }}>{helper}</div>}
+        <h2 style={{ fontWeight: 600, fontSize: 'var(--fs-section-title)', lineHeight: 1.35, color: 'var(--text-primary)', margin: 0 }}>{title}</h2>
+        {helper && <div style={{ fontSize: 'var(--fs-help)', color: 'var(--text-secondary)', marginTop: 2, fontWeight: 400 }}>{helper}</div>}
       </div>
       {right && <span style={{ marginLeft: 'auto', flexShrink: 0, display: 'flex', gap: 8, alignItems: 'center' }}>{right}</span>}
     </div>
   );
 }
 
-/** Card with a coloured left rule and tinted header, as on Run Automation. */
-export function SectionCard({ tone = 1, title, helper, right, children, bodyStyle, id }) {
-  const t = TONES[tone] || TONES[1];
+/** White card with a near-white header, bold title and a thin divider. */
+// open: lets dropdowns inside float over the following sections (the card
+// normally clips its contents to its rounded corners).
+export function SectionCard({ tone = 1, title, helper, right, children, bodyStyle, id, open = false }) {
+  const t = TONES[tone] || TONES.default;
   return (
-    <Card id={id} style={{ borderLeft: `3px solid ${t.border}` }} className="animate-fade">
-      <CardHead style={{ background: t.head }}>
+    <Card id={id} style={t.rule ? { borderColor: t.rule } : undefined} className={`animate-fade${open ? ' rs-section-open' : ''}`}>
+      <CardHead style={{ background: t.head, padding: '14px 20px' }}>
         <SectionHeader title={title} helper={helper} right={right} />
       </CardHead>
-      <div style={{ padding: '16px 18px', display: 'grid', gap: 14, ...bodyStyle }}>
+      <div style={{ padding: '16px 20px 20px', display: 'grid', gap: 14, ...bodyStyle }}>
         {children}
       </div>
     </Card>
@@ -48,9 +47,9 @@ export function SectionCard({ tone = 1, title, helper, right, children, bodyStyl
 
 export function Chip({ children, tone = 'default', title }) {
   const tones = {
-    default: { bg: '#E6F5F3', fg: '#0B5C56', border: '#BEE3DE' },
+    default: { bg: '#EEF3FA', fg: '#2C4D84', border: '#C5D3E8' },
     amber:   { bg: '#FDF3E4', fg: '#92400E', border: '#F3D9AE' },
-    gray:    { bg: '#F1F3F5', fg: '#475569', border: '#E2E8F0' },
+    gray:    { bg: '#F1F3F5', fg: '#4F5B6E', border: '#DCE2EA' },
     red:     { bg: '#FDECEC', fg: '#B91C1C', border: '#F7B9B9' },
     green:   { bg: '#E4F8F0', fg: '#0B6E4C', border: '#A9E7CD' },
   };
@@ -58,7 +57,7 @@ export function Chip({ children, tone = 'default', title }) {
   return (
     <span title={title} style={{
       display: 'inline-flex', alignItems: 'center', gap: 5, padding: '2px 9px',
-      borderRadius: 999, fontSize: 10.5, fontWeight: 600,
+      borderRadius: 999, fontSize: 12, fontWeight: 600,
       background: t.bg, color: t.fg, border: `1px solid ${t.border}`,
       whiteSpace: 'nowrap',
     }}>{children}</span>
@@ -67,9 +66,9 @@ export function Chip({ children, tone = 'default', title }) {
 
 export function ReviewRow({ label, value, mono }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 12.5 }}>
-      <span style={{ color: '#64748B' }}>{label}</span>
-      <span style={{ color: '#0F172A', fontWeight: 600, fontFamily: mono ? 'var(--font-mono)' : 'inherit', textAlign: 'right', wordBreak: 'break-all' }}>{value}</span>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 'var(--fs-body)' }}>
+      <span style={{ color: 'var(--text-secondary)' }}>{label}</span>
+      <span style={{ color: 'var(--text-primary)', fontWeight: 500, fontFamily: mono ? 'var(--font-mono)' : 'inherit', textAlign: 'right', wordBreak: 'break-all' }}>{value}</span>
     </div>
   );
 }
@@ -77,7 +76,7 @@ export function ReviewRow({ label, value, mono }) {
 /** Plain-language message box. tone: info | success | warning | danger. */
 export function Callout({ tone = 'info', title, children, action }) {
   const tones = {
-    info:    { bg: '#EFF7F5', border: '#BFE0DB', fg: '#0B5C56' },
+    info:    { bg: '#EEF3FA', border: '#C5D3E8', fg: '#233F6C' },
     success: { bg: '#E4F8F0', border: '#A9E7CD', fg: '#0B6E4C' },
     warning: { bg: '#FDF3E4', border: '#F3D9AE', fg: '#92400E' },
     danger:  { bg: '#FDECEC', border: '#F7B9B9', fg: '#9A1E1E' },
@@ -87,10 +86,10 @@ export function Callout({ tone = 'info', title, children, action }) {
     <div role={tone === 'danger' || tone === 'warning' ? 'alert' : 'status'} style={{
       display: 'flex', alignItems: 'flex-start', gap: 12,
       background: t.bg, border: `1px solid ${t.border}`, borderRadius: 8,
-      padding: '10px 14px', fontSize: 12.5, color: t.fg, lineHeight: 1.55,
+      padding: '10px 14px', fontSize: 'var(--fs-body)', color: t.fg, lineHeight: 1.5,
     }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        {title && <div style={{ fontWeight: 700, marginBottom: children ? 2 : 0 }}>{title}</div>}
+        {title && <div style={{ fontWeight: 600, marginBottom: children ? 2 : 0 }}>{title}</div>}
         {children}
       </div>
       {action && <div style={{ flexShrink: 0 }}>{action}</div>}
@@ -98,10 +97,10 @@ export function Callout({ tone = 'info', title, children, action }) {
   );
 }
 
-/** Small uppercase label used above groups of review rows. */
+/** Small group label used above review rows (sentence case, not uppercase). */
 export function Eyebrow({ children }) {
   return (
-    <div style={{ fontSize: 10.5, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 }}>
+    <div style={{ fontSize: 'var(--fs-label)', fontWeight: 600, color: 'var(--text-primary)', marginBottom: 8 }}>
       {children}
     </div>
   );
@@ -121,7 +120,7 @@ export function fmtClock(date) {
 export function RefreshControl({ onRefresh, refreshing, lastUpdated, label = 'Refresh', stampLabel = 'Last updated', autoEverySec, error }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <span style={{ fontSize: 11, color: error ? '#B91C1C' : '#64748B', whiteSpace: 'nowrap' }} aria-live="polite">
+      <span style={{ fontSize: 12, color: error ? '#B91C1C' : '#657185', whiteSpace: 'nowrap' }} aria-live="polite">
         {error
           ? `Refresh failed — showing data from ${fmtClock(lastUpdated)}`
           : <>{stampLabel} {fmtClock(lastUpdated)}{autoEverySec ? ` · auto every ${autoEverySec}s` : ''}</>}
@@ -135,7 +134,7 @@ export function RefreshControl({ onRefresh, refreshing, lastUpdated, label = 'Re
 
 function RefreshIcon() {
   return (
-    <svg width={13} height={13} viewBox="0 0 16 16" fill="none" stroke="#334155" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg width={13} height={13} viewBox="0 0 16 16" fill="none" stroke="#3B4658" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M13 8a5 5 0 1 1-1.5-3.6" /><path d="M13 2.5V6h-3.5" />
     </svg>
   );
@@ -143,15 +142,15 @@ function RefreshIcon() {
 
 /** Compact stat for summary strips. */
 export function SummaryTile({ label, value, sub, tone = 'default', mono }) {
-  const accents = { default: '#0F766E', green: '#0F9D6D', amber: '#B45309', red: '#DC2626', gray: '#94A3B8' };
+  const accents = { default: '#365D9D', green: '#0F9D6D', amber: '#B45309', red: '#DC2626', gray: '#657185' };
   return (
     <div style={{
-      background: '#FFFFFF', border: '1px solid #E2E8F0', borderTop: `3px solid ${accents[tone] || accents.default}`,
+      background: '#FFFFFF', border: '1px solid #DCE2EA', borderTop: `3px solid ${accents[tone] || accents.default}`,
       borderRadius: 10, padding: '12px 14px', minWidth: 0,
     }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 14, fontWeight: 700, color: '#0F172A', fontFamily: mono ? 'var(--font-mono)' : 'inherit', wordBreak: 'break-all' }}>{value}</div>
-      {sub && <div style={{ fontSize: 11, color: '#64748B', marginTop: 4 }}>{sub}</div>}
+      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 600, color: '#202938', fontFamily: mono ? 'var(--font-mono)' : 'inherit', wordBreak: 'break-all' }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: '#657185', marginTop: 4 }}>{sub}</div>}
     </div>
   );
 }

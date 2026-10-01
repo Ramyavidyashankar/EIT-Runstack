@@ -19,7 +19,10 @@ const NAV = [
     { to: '/dlq',       label: 'Dead Letter Queue',     icon: IconAlert, badge: '!', badgeColor: '#DC2626', minRole: 'operator' },
   ]},
   { group: 'Automate', items: [
-    { to: '/trigger',   label: 'Run Automation',        icon: IconPlay  },
+    { to: '/automations', label: 'Run Automations',     icon: IconPlay  },
+    { to: '/ec2',       label: 'EC2 Start/Stop',        icon: IconPower },
+    // Original single-target page (manual targets, raw JSON) — admins only.
+    { to: '/trigger',   label: 'Advanced Run',          icon: IconCode, minRole: 'admin' },
     { to: '/schedules', label: 'Triggers & Schedules',  icon: IconClock, minRole: 'operator' },
     { to: '/accounts',  label: 'Registered Targets',    icon: IconCloud },
   ]},
@@ -158,8 +161,8 @@ export default function Layout({ children }) {
             position:'fixed', top:'22vh', left:'50%', transform:'translateX(-50%)', width:'min(440px, 92vw)', zIndex:61,
             background:'#FFFFFF', borderRadius:12, padding:18, boxShadow:'var(--shadow-lg)', display:'grid', gap:12,
           }}>
-            <div id="rs-leave-title" style={{ fontSize:15, fontWeight:700, color:'#0F172A' }}>Leave this page?</div>
-            <div style={{ fontSize:13, color:'#334155', lineHeight:1.55 }}>{pendingLeave.message}</div>
+            <div id="rs-leave-title" style={{ fontSize:15, fontWeight:700, color:'#202938' }}>Leave this page?</div>
+            <div style={{ fontSize:13, color:'#3B4658', lineHeight:1.55 }}>{pendingLeave.message}</div>
             <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
               <Btn variant="default" onClick={leaveAnyway}>Leave page</Btn>
               <Btn variant="primary" onClick={() => setPendingLeave(null)}>Stay on this page</Btn>
@@ -193,7 +196,7 @@ function Sidebar({ onNavigate }) {
   };
 
   return (
-    <aside style={{
+    <aside className="rs-sidebar" style={{
       width:'var(--sidebar-w)', minWidth:'var(--sidebar-w)',
       background:'linear-gradient(180deg, var(--slate-950) 0%, #0D1526 100%)',
       borderRight:'1px solid rgba(255,255,255,0.06)',
@@ -201,7 +204,7 @@ function Sidebar({ onNavigate }) {
     }}>
 
       {/* ── Logo + Product name ── */}
-      <div style={{
+      <div className="rs-sidebar-brand" style={{
         padding:'20px 18px 16px',
         borderBottom:'1px solid rgba(255,255,255,0.06)',
       }}>
@@ -211,17 +214,17 @@ function Sidebar({ onNavigate }) {
           style={{ width:85, height:'auto', display:'block', marginBottom:10 }}
         />
         {/* Divider line */}
-        <div style={{
+        <div className="rs-sidebar-brand-text" style={{
           height:1, background:'rgba(148,163,184,0.18)', marginBottom:10,
         }}/>
         {/* Product name */}
-        <div style={{
+        <div className="rs-sidebar-brand-text" style={{
           fontSize:12, fontWeight:700, color:'#7FA8FF',
           letterSpacing:1.4, textTransform:'uppercase',
         }}>
           RunStack ITG
         </div>
-        <div style={{ fontSize:10, color:'rgba(148,163,184,0.6)', marginTop:2 }}>
+        <div className="rs-sidebar-brand-text" style={{ fontSize:10, color:'rgba(148,163,184,0.6)', marginTop:2 }}>
           Automation Platform
         </div>
       </div>
@@ -231,7 +234,7 @@ function Sidebar({ onNavigate }) {
         {visibleNav.map(group => (
           <div key={group.group} style={{ marginBottom:4 }}>
             {/* Group label */}
-            <div style={{
+            <div className="rs-nav-group" style={{
               fontSize:10, fontWeight:600,
               color:'rgba(148,163,184,0.4)',
               letterSpacing:1, textTransform:'uppercase',
@@ -243,7 +246,8 @@ function Sidebar({ onNavigate }) {
             {group.items.map(item => (
               <NavLink key={item.to} to={item.to} end={item.to === '/'} className="rs-navlink"
                 onClick={(e) => onNavClick(e, item.to)}
-                title={pathname === item.to ? `Refresh ${item.label}` : undefined}
+                title={pathname === item.to ? `Refresh ${item.label}` : item.label}
+                aria-label={item.label}
                 style={({ isActive }) => ({
                 display:'flex', alignItems:'center', gap:9,
                 padding:'7px 10px', borderRadius:'var(--radius-md)',
@@ -260,9 +264,9 @@ function Sidebar({ onNavigate }) {
                       size={15}
                       color={isActive ? '#7FA8FF' : 'rgba(226,232,240,0.45)'}
                     />
-                    <span style={{ flex:1 }}>{item.label}</span>
+                    <span className="rs-nav-text" style={{ flex:1 }}>{item.label}</span>
                     {item.badge && (
-                      <span style={{
+                      <span className="rs-nav-text" style={{
                         fontSize:10, fontWeight:700, padding:'1px 5px',
                         borderRadius:10,
                         background: item.badgeColor || '#DC2626',
@@ -280,11 +284,11 @@ function Sidebar({ onNavigate }) {
       </nav>
 
       {/* ── Footer ── */}
-      <div style={{
+      <div className="rs-sidebar-foot" style={{
         padding:'12px 18px',
         borderTop:'1px solid rgba(255,255,255,0.06)',
       }}>
-        <div style={{
+        <div className="rs-sidebar-user" style={{
           display:'flex', alignItems:'center', justifyContent:'space-between',
           marginBottom:8, paddingBottom:8, borderBottom:'1px solid rgba(255,255,255,0.06)',
         }}>
@@ -297,7 +301,7 @@ function Sidebar({ onNavigate }) {
             }}>
               {(email || '?').trim().charAt(0).toUpperCase()}
             </div>
-            <div style={{ minWidth:0 }}>
+            <div className="rs-sidebar-meta" style={{ minWidth:0 }}>
               <div style={{
                 fontSize:11, color:'rgba(226,232,240,0.85)', fontWeight:500,
                 overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
@@ -319,10 +323,10 @@ function Sidebar({ onNavigate }) {
             Sign out
           </button>
         </div>
-        <div style={{ fontSize:11, color:'rgba(148,163,184,0.5)', lineHeight:1.6 }}>
+        <div className="rs-sidebar-meta" style={{ fontSize:11, color:'rgba(148,163,184,0.5)', lineHeight:1.6 }}>
           {process.env.REACT_APP_SOLUTION_NAME || 'runstack-custom-automation'}
         </div>
-        <div style={{ fontSize:10, color:'rgba(148,163,184,0.3)', marginTop:2 }}>
+        <div className="rs-sidebar-meta" style={{ fontSize:10, color:'rgba(148,163,184,0.3)', marginTop:2 }}>
           Serverless · AWS SAM
         </div>
       </div>
@@ -337,25 +341,25 @@ export function Topbar({ title, subtitle, actions }) {
       height:'var(--topbar-h)', minHeight:'var(--topbar-h)',
       background:'var(--bg-surface)',
       borderBottom:'1px solid var(--border)',
-      boxShadow:'var(--shadow-sm)',
-      padding:'0 24px',
+      padding:'0 var(--page-pad-x)', gap:12,
       display:'flex', alignItems:'center', justifyContent:'space-between',
       position:'sticky', top:0, zIndex:5,
     }}>
-      <div>
-        <div style={{
-          fontSize:15, fontWeight:700, color:'var(--text-primary)',
+      <div style={{ minWidth:0 }}>
+        <h1 style={{
+          fontSize:'var(--fs-page-title)', fontWeight:600, color:'var(--text-primary)', margin:0, lineHeight:1.25,
+          overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
         }}>
           {title}
-        </div>
+        </h1>
         {subtitle && (
-          <div style={{ fontSize:11, color:'var(--text-tertiary)', marginTop:1 }}>
+          <div className="rs-topbar-sub" style={{ fontSize:'var(--fs-help)', color:'var(--text-secondary)', marginTop:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
             {subtitle}
           </div>
         )}
       </div>
       {actions && (
-        <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+        <div style={{ display:'flex', gap:8, alignItems:'center', flexShrink:0 }}>
           {actions}
         </div>
       )}
@@ -396,6 +400,16 @@ function IconAlert({ size, color }) {
 function IconPlay({ size, color }) {
   return <Icon size={size} color={color}>
     <path fill={color} stroke="none" d="M3.5 2.5l10 5.5-10 5.5z"/>
+  </Icon>;
+}
+function IconPower({ size, color }) {
+  return <Icon size={size} color={color}>
+    <path d="M8 1.5v6"/><path d="M4.4 3.8a5.5 5.5 0 1 0 7.2 0"/>
+  </Icon>;
+}
+function IconCode({ size, color }) {
+  return <Icon size={size} color={color}>
+    <path d="M5.5 4.5L2 8l3.5 3.5"/><path d="M10.5 4.5L14 8l-3.5 3.5"/>
   </Icon>;
 }
 function IconClock({ size, color }) {

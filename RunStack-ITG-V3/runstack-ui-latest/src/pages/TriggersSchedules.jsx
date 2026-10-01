@@ -29,7 +29,7 @@ import {
   fromCronUtc, nextRuns, normalizeCron, observesDst, parseExpression, prettyJson, summarizeEventPattern, toCronUtc, tzAbbrev,
 } from '../utils/schedule';
 
-const TEAL = '#0F766E';
+const TEAL = '#365D9D';
 const TZ_KEY = 'runstack.triggers.tz';
 const SOURCES = [
   { value: 'runstack', label: 'RunStack rules' },
@@ -42,20 +42,20 @@ const SERVICE_LABEL = { lambda: 'Lambda', states: 'Step Functions', sqs: 'SQS', 
 function loadTz() { try { return localStorage.getItem(TZ_KEY) || DEFAULT_TZ; } catch { return DEFAULT_TZ; } }
 function saveTz(tz) { try { localStorage.setItem(TZ_KEY, tz); } catch { /* optional */ } }
 
-const mono = { fontFamily: 'var(--font-mono)', fontSize: 11.5 };
-const label = { display: 'grid', gap: 5, fontSize: 12, fontWeight: 600, color: '#334155' };
+const mono = { fontFamily: 'var(--font-mono)', fontSize: 12 };
+const label = { display: 'grid', gap: 5, fontSize: 13, fontWeight: 600, color: '#3B4658' };
 
 function Seg({ options, value, onChange, disabled }) {
   return (
-    <div role="radiogroup" style={{ display: 'inline-flex', border: '1px solid #CBD5E1', borderRadius: 8, overflow: 'hidden', flexWrap: 'wrap' }}>
+    <div role="radiogroup" style={{ display: 'inline-flex', border: '1px solid #C9D1DC', borderRadius: 8, overflow: 'hidden', flexWrap: 'wrap' }}>
       {options.map((o, i) => {
         const on = o.value === value;
         return (
           <button key={o.value} type="button" role="radio" aria-checked={on} disabled={disabled || o.disabled} onClick={() => onChange(o.value)}
             title={o.title}
             style={{
-              padding: '6px 12px', fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit', cursor: disabled || o.disabled ? 'not-allowed' : 'pointer',
-              border: 'none', borderLeft: i ? '1px solid #CBD5E1' : 'none', background: on ? TEAL : '#FFFFFF', color: on ? '#FFFFFF' : '#334155',
+              padding: '6px 12px', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: disabled || o.disabled ? 'not-allowed' : 'pointer',
+              border: 'none', borderLeft: i ? '1px solid #C9D1DC' : 'none', background: on ? TEAL : '#FFFFFF', color: on ? '#FFFFFF' : '#3B4658',
               opacity: o.disabled ? 0.5 : 1,
             }}>{o.label}</button>
         );
@@ -106,7 +106,7 @@ function RunStackTagControl({ rule, onChanged }) {
     finally { setBusy(false); }
   };
   return (
-    <div style={{ display: 'grid', gap: 6, padding: 10, background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: 8 }}>
+    <div style={{ display: 'grid', gap: 6, padding: 10, background: '#FFFFFF', border: '1px solid #DCE2EA', borderRadius: 8 }}>
       <div>
         {rule.runstack_managed
           ? <>Listed under <strong>RunStack rules</strong> because {rule.runstack_reason.toLowerCase()}.</>
@@ -116,7 +116,7 @@ function RunStackTagControl({ rule, onChanged }) {
         {rule.runstack_managed
           ? <Btn variant="default" size="sm" disabled={busy} onClick={() => mark(false)} style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{busy ? <Spinner size={12} /> : null} Not a RunStack rule</Btn>
           : <Btn variant="primary" size="sm" disabled={busy} onClick={() => mark(true)} style={{ whiteSpace: 'nowrap', flexShrink: 0 }}>{busy ? <Spinner size={12} /> : null} Mark as RunStack</Btn>}
-        <span style={{ fontSize: 11.5, color: '#64748B' }}>Sets the tag <span style={mono}>runstack:managed</span>. The rule, its schedule and targets aren't changed.</span>
+        <span style={{ fontSize: 12, color: '#657185' }}>Sets the tag <span style={mono}>runstack:managed</span>. The rule, its schedule and targets aren't changed.</span>
       </div>
       {err && <div style={{ color: '#B91C1C' }}>{err}</div>}
     </div>
@@ -127,28 +127,28 @@ function TechDetails({ rule, tz, isAdmin, onChanged }) {
   const runs = rule.kind === 'scheduled' && rule.resource_type !== 'scheduler' ? nextRuns(rule.schedule_expression, 5) : null;
   const ev = rule.kind === 'event' ? summarizeEventPattern(rule.event_pattern) : null;
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, padding: '12px 16px 16px', background: '#F8FAFC', borderTop: '1px solid #E2E8F0' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 16, padding: '12px 16px 16px', background: '#FAFBFC', borderTop: '1px solid #DCE2EA' }}>
       <div style={{ display: 'grid', gap: 8, alignContent: 'start' }}>
-        <div style={{ fontSize: 11, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.6 }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)',}}>
           {rule.kind === 'event' ? 'Event pattern' : rule.resource_type === 'scheduler' ? `Schedule expression (${rule.timezone || 'UTC'})` : 'Schedule expression (UTC)'}
         </div>
-        <pre style={{ ...mono, margin: 0, padding: 10, background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        <pre style={{ ...mono, margin: 0, padding: 10, background: '#FFFFFF', border: '1px solid #DCE2EA', borderRadius: 8, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
           {rule.kind === 'event' ? prettyJson(rule.event_pattern) : rule.schedule_expression}
         </pre>
         {ev && ev.conditions.length > 0 && (
-          <div style={{ fontSize: 12, color: '#334155' }}>
+          <div style={{ fontSize: 13, color: '#3B4658' }}>
             <strong>Matching conditions</strong>
             <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{ev.conditions.map((c) => <li key={c.path}><span style={mono}>{c.path}</span> is {c.text}</li>)}</ul>
           </div>
         )}
         {runs && runs.length > 0 && (
-          <div style={{ fontSize: 12, color: '#334155' }}>
+          <div style={{ fontSize: 13, color: '#3B4658' }}>
             <strong>Next runs</strong>
-            <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{runs.map((r) => <li key={r.toISOString()}>{fmtInZone(r, tz)} <span style={{ color: '#94A3B8' }}>· {fmtInZone(r, 'UTC')}</span></li>)}</ul>
+            <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{runs.map((r) => <li key={r.toISOString()}>{fmtInZone(r, tz)} <span style={{ color: '#657185' }}>· {fmtInZone(r, 'UTC')}</span></li>)}</ul>
           </div>
         )}
       </div>
-      <div style={{ display: 'grid', gap: 8, alignContent: 'start', fontSize: 12, color: '#334155' }}>
+      <div style={{ display: 'grid', gap: 8, alignContent: 'start', fontSize: 13, color: '#3B4658' }}>
         <div><strong>ARN</strong> <div style={{ ...mono, wordBreak: 'break-all' }}>{rule.arn || '—'}</div></div>
         {rule.event_bus_name && <div><strong>Event bus</strong> <span style={mono}>{rule.event_bus_name}</span></div>}
         {rule.role_arn && <div><strong>Role</strong> <div style={{ ...mono, wordBreak: 'break-all' }}>{rule.role_arn}</div></div>}
@@ -159,13 +159,13 @@ function TechDetails({ rule, tz, isAdmin, onChanged }) {
         <div>
           <strong>Targets ({(rule.targets || []).length})</strong>
           {(rule.targets || []).map((t) => (
-            <div key={t.id || t.target_arn} style={{ marginTop: 6, padding: 8, background: '#FFFFFF', border: '1px solid #E2E8F0', borderRadius: 8 }}>
-              <div style={{ fontWeight: 600 }}>{targetLine(t)} {t.id && <span style={{ ...mono, color: '#94A3B8' }}>id {t.id}</span>}</div>
-              <div style={{ ...mono, color: '#64748B', wordBreak: 'break-all' }}>{t.target_arn}</div>
-              {t.has_input_transformer ? <div style={{ marginTop: 4, color: '#64748B' }}>Uses an input transformer</div>
-                : t.input_path ? <div style={{ marginTop: 4, color: '#64748B' }}>Input path: <span style={mono}>{t.input_path}</span></div>
+            <div key={t.id || t.target_arn} style={{ marginTop: 6, padding: 8, background: '#FFFFFF', border: '1px solid #DCE2EA', borderRadius: 8 }}>
+              <div style={{ fontWeight: 600 }}>{targetLine(t)} {t.id && <span style={{ ...mono, color: '#657185' }}>id {t.id}</span>}</div>
+              <div style={{ ...mono, color: '#657185', wordBreak: 'break-all' }}>{t.target_arn}</div>
+              {t.has_input_transformer ? <div style={{ marginTop: 4, color: '#657185' }}>Uses an input transformer</div>
+                : t.input_path ? <div style={{ marginTop: 4, color: '#657185' }}>Input path: <span style={mono}>{t.input_path}</span></div>
                   : t.input ? <pre style={{ ...mono, margin: '6px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{prettyJson(t.input)}</pre>
-                    : <div style={{ marginTop: 4, color: '#64748B' }}>Receives the matched event</div>}
+                    : <div style={{ marginTop: 4, color: '#657185' }}>Receives the matched event</div>}
             </div>
           ))}
         </div>
@@ -260,8 +260,8 @@ function ScheduleEditor({ st, setSt, tz, setTz, original }) {
               const on = (st.spec.days || []).includes(i);
               return (
                 <button key={d} type="button" aria-pressed={on} onClick={() => setSpec({ days: on ? st.spec.days.filter((x) => x !== i) : [...(st.spec.days || []), i].sort() })}
-                  style={{ padding: '6px 11px', borderRadius: 8, fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
-                    border: `1px solid ${on ? TEAL : '#CBD5E1'}`, background: on ? '#E6F5F3' : '#FFFFFF', color: on ? '#0B5C56' : '#334155' }}>{d}</button>
+                  style={{ padding: '6px 11px', borderRadius: 8, fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+                    border: `1px solid ${on ? TEAL : '#C9D1DC'}`, background: on ? '#EEF3FA' : '#FFFFFF', color: on ? '#2C4D84' : '#3B4658' }}>{d}</button>
               );
             })}
           </div>
@@ -279,24 +279,24 @@ function ScheduleEditor({ st, setSt, tz, setTz, original }) {
       )}
       {st.mode === 'advanced' && (
         <label style={label}>Cron expression (UTC)
-          <Input value={st.cron} onChange={(e) => set({ cron: e.target.value })} style={{ ...mono, fontSize: 13 }} placeholder="cron(0 1 * * ? *)" spellCheck={false} />
-          <span style={{ fontSize: 11, fontWeight: 400, color: '#64748B' }}>EventBridge rules evaluate cron in UTC. Fields: minutes hours day-of-month month day-of-week (1=SUN) year.</span>
+          <Input value={st.cron} onChange={(e) => set({ cron: e.target.value })} style={{ ...mono, fontSize: 14 }} placeholder="cron(0 1 * * ? *)" spellCheck={false} />
+          <span style={{ fontSize: 12, fontWeight: 400, color: '#657185' }}>EventBridge rules evaluate cron in UTC. Fields: minutes hours day-of-month month day-of-week (1=SUN) year.</span>
         </label>
       )}
 
       {/* Preview */}
-      <div style={{ border: '1px solid #BFE0DB', background: '#F4FAF9', borderRadius: 10, padding: '10px 12px', display: 'grid', gap: 6 }}>
-        {result.error ? <div style={{ color: '#B91C1C', fontSize: 12.5 }}>{result.error}</div> : (
+      <div style={{ border: '1px solid #DCE2EA', background: '#FAFBFC', borderRadius: 10, padding: '10px 12px', display: 'grid', gap: 6 }}>
+        {result.error ? <div style={{ color: '#B91C1C', fontSize: 13 }}>{result.error}</div> : (
           <>
-            <div style={{ fontSize: 13.5, fontWeight: 700, color: '#0F172A' }}>{result.preview}</div>
-            <div style={{ fontSize: 12, color: '#475569' }}>Saved as <span style={mono}>{result.expression}</span>{original && normalizeCron(original) !== normalizeCron(result.expression) && <> · was <span style={mono}>{original}</span></>}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color: '#202938' }}>{result.preview}</div>
+            <div style={{ fontSize: 13, color: '#4F5B6E' }}>Saved as <span style={mono}>{result.expression}</span>{original && normalizeCron(original) !== normalizeCron(result.expression) && <> · was <span style={mono}>{original}</span></>}</div>
             {runs && runs.length > 0 && (
-              <div style={{ fontSize: 12, color: '#334155' }}>
+              <div style={{ fontSize: 13, color: '#3B4658' }}>
                 Next runs:
-                <ul style={{ margin: '2px 0 0', paddingLeft: 18 }}>{runs.map((r) => <li key={r.toISOString()}>{fmtInZone(r, tz)} <span style={{ color: '#94A3B8' }}>· {fmtInZone(r, 'UTC')}</span></li>)}</ul>
+                <ul style={{ margin: '2px 0 0', paddingLeft: 18 }}>{runs.map((r) => <li key={r.toISOString()}>{fmtInZone(r, tz)} <span style={{ color: '#657185' }}>· {fmtInZone(r, 'UTC')}</span></li>)}</ul>
               </div>
             )}
-            {result.zoneIndependent && <div style={{ fontSize: 12, color: '#64748B' }}>Intervals don't depend on a time zone; the first run is counted from when the rule is saved.</div>}
+            {result.zoneIndependent && <div style={{ fontSize: 13, color: '#657185' }}>Intervals don't depend on a time zone; the first run is counted from when the rule is saved.</div>}
           </>
         )}
       </div>
@@ -339,14 +339,14 @@ function EventEditor({ ev, setEv, isCreate }) {
           <Input value={(summary.detailTypes || []).join(', ')} onChange={(e) => quickUpdate('detail-type', e.target.value)} placeholder="Security Hub Findings - Imported" />
         </label>
       </div>
-      <div style={{ border: '1px solid #BFE0DB', background: '#F4FAF9', borderRadius: 10, padding: '10px 12px', fontSize: 12.5, color: '#334155' }}>
-        <div style={{ fontSize: 13.5, fontWeight: 700, color: summary.valid ? '#0F172A' : '#B91C1C' }}>{summary.summary}</div>
+      <div style={{ border: '1px solid #DCE2EA', background: '#FAFBFC', borderRadius: 10, padding: '10px 12px', fontSize: 13, color: '#3B4658' }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: summary.valid ? '#202938' : '#B91C1C' }}>{summary.summary}</div>
         {summary.conditions?.length > 0 && (
           <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>{summary.conditions.map((c) => <li key={c.path}><span style={mono}>{c.path}</span> is {c.text}</li>)}</ul>
         )}
       </div>
       <div>
-        <button type="button" onClick={() => setShowJson((x) => !x)} style={{ background: 'none', border: 'none', color: TEAL, fontWeight: 600, fontSize: 12.5, cursor: 'pointer', padding: 0 }}>
+        <button type="button" onClick={() => setShowJson((x) => !x)} style={{ background: 'none', border: 'none', color: TEAL, fontWeight: 600, fontSize: 13, cursor: 'pointer', padding: 0 }}>
           {showJson ? '▾' : '▸'} Advanced: edit event pattern JSON
         </button>
         {showJson && (
@@ -383,17 +383,17 @@ function TargetsEditor({ targets, setTargets, isCreate, knownTargets, newTarget,
       </div>
     );
   }
-  if (!targets.length) return <div style={{ fontSize: 12.5, color: '#64748B' }}>This rule has no targets, so it doesn't invoke anything.</div>;
+  if (!targets.length) return <div style={{ fontSize: 13, color: '#657185' }}>This rule has no targets, so it doesn't invoke anything.</div>;
   return (
     <div style={{ display: 'grid', gap: 10 }}>
       {targets.map((t, i) => (
-        <div key={t.id} style={{ border: '1px solid #E2E8F0', borderRadius: 8, padding: 10, display: 'grid', gap: 6 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, color: '#0F172A' }}>{targetLine(t)} <span style={{ ...mono, color: '#94A3B8' }}>id {t.id}</span></div>
-          <div style={{ ...mono, color: '#64748B', wordBreak: 'break-all' }}>{t.target_arn}</div>
+        <div key={t.id} style={{ border: '1px solid #DCE2EA', borderRadius: 8, padding: 10, display: 'grid', gap: 6 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: '#202938' }}>{targetLine(t)} <span style={{ ...mono, color: '#657185' }}>id {t.id}</span></div>
+          <div style={{ ...mono, color: '#657185', wordBreak: 'break-all' }}>{t.target_arn}</div>
           {t.has_input_transformer || t.input_path ? (
-            <div style={{ fontSize: 12, color: '#64748B' }}>Uses an {t.has_input_transformer ? 'input transformer' : 'input path'} — kept as is (edit in the AWS console).</div>
+            <div style={{ fontSize: 13, color: '#657185' }}>Uses an {t.has_input_transformer ? 'input transformer' : 'input path'} — kept as is (edit in the AWS console).</div>
           ) : (
-            <label style={{ ...label, fontWeight: 500 }}>Input sent to the target (JSON){!t.input && <span style={{ fontWeight: 400, color: '#64748B' }}> — empty means the matched event is passed</span>}
+            <label style={{ ...label, fontWeight: 500 }}>Input sent to the target (JSON){!t.input && <span style={{ fontWeight: 400, color: '#657185' }}> — empty means the matched event is passed</span>}
               <Textarea value={t.draft} onChange={(e) => setTargets((all) => all.map((x, j) => (j === i ? { ...x, draft: e.target.value } : x)))} style={{ minHeight: 100 }} spellCheck={false} />
             </label>
           )}
@@ -509,7 +509,7 @@ function RuleEditor({ rule, tz: pageTz, knownTargets, onClose, onSaved }) {
 
   const section = (title, children, sub) => (
     <section style={{ display: 'grid', gap: 10 }}>
-      <div><div style={{ fontSize: 14, fontWeight: 700, color: '#0F172A' }}>{title}</div>{sub && <div style={{ fontSize: 12, color: '#64748B' }}>{sub}</div>}</div>
+      <div><div style={{ fontSize: 14, fontWeight: 600, color: '#202938' }}>{title}</div>{sub && <div style={{ fontSize: 13, color: '#657185' }}>{sub}</div>}</div>
       {children}
     </section>
   );
@@ -521,12 +521,12 @@ function RuleEditor({ rule, tz: pageTz, knownTargets, onClose, onSaved }) {
         position: 'fixed', top: '4vh', bottom: '4vh', left: '50%', transform: 'translateX(-50%)', width: 'min(780px, 96vw)', zIndex: 41,
         background: '#FFFFFF', borderRadius: 12, boxShadow: 'var(--shadow-lg)', display: 'flex', flexDirection: 'column',
       }}>
-        <div style={{ padding: '14px 18px', borderBottom: '1px solid #E2E8F0', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ padding: '14px 18px', borderBottom: '1px solid #DCE2EA', display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 15, fontWeight: 700, color: '#0F172A' }}>{isCreate ? 'New rule' : rule.name}</div>
-            <div style={{ fontSize: 12, color: '#64748B' }}>{step === 'review' ? 'Review changes' : isCreate ? 'EventBridge rule' : `${KIND_LABEL[kind]} EventBridge rule`}</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: '#202938' }}>{isCreate ? 'New rule' : rule.name}</div>
+            <div style={{ fontSize: 13, color: '#657185' }}>{step === 'review' ? 'Review changes' : isCreate ? 'EventBridge rule' : `${KIND_LABEL[kind]} EventBridge rule`}</div>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', fontSize: 22, color: '#64748B', cursor: 'pointer' }}>×</button>
+          <button type="button" onClick={onClose} aria-label="Close" style={{ background: 'none', border: 'none', fontSize: 22, color: '#657185', cursor: 'pointer' }}>×</button>
         </div>
 
         <div style={{ flex: 1, overflowY: 'auto', padding: 18, display: 'grid', gap: 20, alignContent: 'start' }}>
@@ -541,7 +541,7 @@ function RuleEditor({ rule, tz: pageTz, knownTargets, onClose, onSaved }) {
                     </>
                   )}
                   <label style={label}>Description <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What this rule is for" /></label>
-                  <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5, fontWeight: 600, color: '#334155' }}>
+                  <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, fontWeight: 600, color: '#3B4658' }}>
                     <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> Enabled
                   </label>
                 </div>
@@ -557,26 +557,26 @@ function RuleEditor({ rule, tz: pageTz, knownTargets, onClose, onSaved }) {
               {changes.length === 0 ? (
                 <Callout tone="info" title="No changes">Nothing has been changed, so there's nothing to save.</Callout>
               ) : (
-                <div style={{ border: '1px solid #E2E8F0', borderRadius: 10, overflow: 'hidden' }}>
+                <div style={{ border: '1px solid #DCE2EA', borderRadius: 10, overflow: 'hidden' }}>
                   {changes.map((c) => (
-                    <div key={c.label} style={{ display: 'grid', gridTemplateColumns: '170px 1fr', gap: 12, padding: '10px 12px', borderTop: '1px solid #F1F5F9' }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 700, color: '#334155' }}>{c.label}</div>
-                      <div style={{ display: 'grid', gap: 4, fontSize: 12.5 }}>
-                        {c.before !== undefined && <div style={{ color: '#94A3B8', textDecoration: 'line-through', whiteSpace: c.pre ? 'pre-wrap' : 'normal', ...(c.pre ? mono : {}) }}>{c.before}</div>}
-                        <div style={{ color: '#0F172A', fontWeight: 600, whiteSpace: c.pre ? 'pre-wrap' : 'normal', ...(c.pre ? mono : {}) }}>{c.after}</div>
+                    <div key={c.label} style={{ display: 'grid', gridTemplateColumns: '170px 1fr', gap: 12, padding: '10px 12px', borderTop: '1px solid #F5F6F8' }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#3B4658' }}>{c.label}</div>
+                      <div style={{ display: 'grid', gap: 4, fontSize: 13 }}>
+                        {c.before !== undefined && <div style={{ color: '#657185', textDecoration: 'line-through', whiteSpace: c.pre ? 'pre-wrap' : 'normal', ...(c.pre ? mono : {}) }}>{c.before}</div>}
+                        <div style={{ color: '#202938', fontWeight: 600, whiteSpace: c.pre ? 'pre-wrap' : 'normal', ...(c.pre ? mono : {}) }}>{c.after}</div>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
-              {!isCreate && <div style={{ fontSize: 12, color: '#64748B' }}>Everything not listed — targets, role, event bus{kind === 'event' ? ', event pattern' : ''} — stays exactly as it is.</div>}
+              {!isCreate && <div style={{ fontSize: 13, color: '#657185' }}>Everything not listed — targets, role, event bus{kind === 'event' ? ', event pattern' : ''} — stays exactly as it is.</div>}
             </>
           )}
           {error && <ErrorBanner message={error} />}
         </div>
 
-        <div style={{ padding: '12px 18px', borderTop: '1px solid #E2E8F0', display: 'flex', gap: 10, alignItems: 'center' }}>
-          {step === 'edit' && errors.length > 0 && <span style={{ fontSize: 12, color: '#B45309', flex: 1 }}>{errors[0]}</span>}
+        <div style={{ padding: '12px 18px', borderTop: '1px solid #DCE2EA', display: 'flex', gap: 10, alignItems: 'center' }}>
+          {step === 'edit' && errors.length > 0 && <span style={{ fontSize: 13, color: '#B45309', flex: 1 }}>{errors[0]}</span>}
           <span style={{ flex: errors.length && step === 'edit' ? 0 : 1 }} />
           {step === 'edit' ? (
             <>
@@ -650,8 +650,8 @@ export default function TriggersSchedules() {
   }, [data]);
   const now = new Date();
 
-  const th = { textAlign: 'left', padding: '9px 12px', fontSize: 10, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.6, background: '#F8FAFC', borderBottom: '1px solid #E2E8F0', whiteSpace: 'nowrap' };
-  const td = { padding: '10px 12px', borderBottom: '1px solid #F1F5F9', verticalAlign: 'top', fontSize: 12.5 };
+  const th = { textAlign: 'left', padding: '9px 12px', fontSize: 13, fontWeight: 600, color: '#3B4658', background: '#FAFBFC', borderBottom: '1px solid #DCE2EA', whiteSpace: 'nowrap' };
+  const td = { padding: '10px 12px', borderBottom: '1px solid #F5F6F8', verticalAlign: 'top', fontSize: 14 };
 
   const doDelete = async () => {
     setDelBusy(true);
@@ -659,18 +659,18 @@ export default function TriggersSchedules() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="rs-page">
       <Topbar
         title="Triggers & Schedules"
         subtitle="EventBridge rules that start RunStack automations — on a schedule or when an event happens."
         actions={<>
-          <span style={{ fontSize: 11, color: '#64748B' }}>{lastUpdated ? `Last updated ${lastUpdated.toLocaleTimeString('en-GB')}` : ''}</span>
+          <span style={{ fontSize: 12, color: '#657185' }}>{lastUpdated ? `Last updated ${lastUpdated.toLocaleTimeString('en-GB')}` : ''}</span>
           <Btn variant="default" size="sm" onClick={() => load(source)} disabled={loading}>{loading ? <Spinner size={12} /> : '↺'} Refresh</Btn>
           {isAdmin && <Btn variant="primary" size="sm" onClick={() => setEditing('new')}>+ New rule</Btn>}
         </>}
       />
-      <div style={{ flex: 1, overflowY: 'auto', padding: '18px 24px 24px' }}>
-        <div style={{ maxWidth: 1500, margin: '0 auto', display: 'grid', gap: 14 }}>
+      <div className="rs-page-body">
+        <div className="rs-page-content">
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <Seg options={SOURCES} value={source} onChange={(v) => { setSource(v); setOpen(null); if (v === 'scheduler') setKindFilter('all'); }} />
             {source !== 'scheduler' && (
@@ -680,10 +680,10 @@ export default function TriggersSchedules() {
                 { value: 'event', label: `Event-triggered ${current ? counts.event : ''}` },
               ]} />
             )}
-            <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, description or target…" style={{ maxWidth: 280, fontSize: 12.5 }} />
+            <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, description or target…" style={{ maxWidth: 280, fontSize: 13 }} />
             <span style={{ flex: 1 }} />
-            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, color: '#475569', fontWeight: 600 }}>Show times in
-              <Select value={tz} onChange={(e) => setTz(e.target.value)} style={{ width: 210, fontSize: 12.5 }}>
+            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#4F5B6E', fontWeight: 600 }}>Show times in
+              <Select value={tz} onChange={(e) => setTz(e.target.value)} style={{ width: 210, fontSize: 13 }}>
                 {zones.map((z) => <option key={z} value={z}>{z}</option>)}
               </Select>
             </label>
@@ -716,19 +716,19 @@ export default function TriggersSchedules() {
                           <tbody key={key}>
                             <tr className="rs-exec-row">
                               <td style={{ ...td, maxWidth: 280 }}>
-                                <div style={{ fontWeight: 700, color: '#0F172A', wordBreak: 'break-all' }}>{r.name}</div>
-                                {r.description && <div style={{ fontSize: 11.5, color: '#64748B' }}>{r.description}</div>}
+                                <div style={{ fontWeight: 600, color: '#202938', wordBreak: 'break-all' }}>{r.name}</div>
+                                {r.description && <div style={{ fontSize: 12, color: '#657185' }}>{r.description}</div>}
                               </td>
                               <td style={td}><Chip tone={r.kind === 'event' ? 'default' : 'gray'}>{r.resource_type === 'scheduler' ? 'Scheduler' : KIND_LABEL[r.kind]}</Chip></td>
                               <td style={{ ...td, maxWidth: 420 }}>
-                                <div style={{ fontWeight: 600, color: '#0F172A' }}>{info.text}</div>
-                                {info.sub && <div style={{ fontSize: 11.5, color: '#64748B' }}>{info.sub}</div>}
+                                <div style={{ fontWeight: 600, color: '#202938' }}>{info.text}</div>
+                                {info.sub && <div style={{ fontSize: 12, color: '#657185' }}>{info.sub}</div>}
                               </td>
                               <td style={{ ...td, maxWidth: 240 }}>
-                                {(r.targets || []).length === 0 ? <span style={{ color: '#94A3B8' }}>No target</span> : (
+                                {(r.targets || []).length === 0 ? <span style={{ color: '#657185' }}>No target</span> : (
                                   <>
-                                    <div style={{ color: '#0F172A' }}>{targetLine(r.targets[0])}</div>
-                                    {r.targets.length > 1 && <div style={{ fontSize: 11.5, color: '#64748B' }}>+{r.targets.length - 1} more</div>}
+                                    <div style={{ color: '#202938' }}>{targetLine(r.targets[0])}</div>
+                                    {r.targets.length > 1 && <div style={{ fontSize: 12, color: '#657185' }}>+{r.targets.length - 1} more</div>}
                                   </>
                                 )}
                               </td>
@@ -747,7 +747,7 @@ export default function TriggersSchedules() {
                   </div>
                 )}
           </Card>
-          {source !== 'scheduler' && <div style={{ fontSize: 11.5, color: '#64748B' }}>Scheduled EventBridge rules run in UTC. Times are shown in {tz} ({tzAbbrev(tz)}) and UTC.</div>}
+          {source !== 'scheduler' && <div style={{ fontSize: 12, color: '#657185' }}>Scheduled EventBridge rules run in UTC. Times are shown in {tz} ({tzAbbrev(tz)}) and UTC.</div>}
         </div>
       </div>
 
@@ -759,8 +759,8 @@ export default function TriggersSchedules() {
         <>
           <div onClick={() => setDeleting(null)} aria-hidden style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.28)', zIndex: 40 }} />
           <div role="dialog" aria-modal="true" style={{ position: 'fixed', top: '20vh', left: '50%', transform: 'translateX(-50%)', width: 'min(460px, 94vw)', zIndex: 41, background: '#FFFFFF', borderRadius: 12, padding: 18, boxShadow: 'var(--shadow-lg)', display: 'grid', gap: 12 }}>
-            <div style={{ fontSize: 15, fontWeight: 700 }}>Delete {deleting.name}?</div>
-            <div style={{ fontSize: 12.5, color: '#334155' }}>
+            <div style={{ fontSize: 15, fontWeight: 600 }}>Delete {deleting.name}?</div>
+            <div style={{ fontSize: 13, color: '#3B4658' }}>
               {triggerInfo(deleting, tz, now).text}. It invokes {deleting.targets?.length ? deleting.targets.map(targetLine).join(', ') : 'nothing'}. Its targets are removed too. This can't be undone.
             </div>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>

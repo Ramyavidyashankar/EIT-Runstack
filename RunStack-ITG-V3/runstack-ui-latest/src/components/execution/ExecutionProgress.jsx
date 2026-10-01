@@ -45,8 +45,8 @@ function ProgressRing({ counts }) {
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: 20, fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.1 }}>
           {p.finished.toLocaleString()}
         </div>
-        <div style={{ fontSize: 10.5, color: 'var(--text-tertiary)', marginTop: 2 }}>of {total.toLocaleString()}</div>
-        <div style={{ fontSize: 9.5, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.6 }}>finished</div>
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)', marginTop: 2 }}>of {total.toLocaleString()}</div>
+        <div style={{ fontSize: 12, color: 'var(--text-tertiary)',}}>finished</div>
       </div>
     </div>
   );
@@ -61,17 +61,17 @@ export function ExecutionSummaryCards({ counts }) {
           background: c.meta.bg, border: `1px solid ${c.meta.border}`, borderRadius: 'var(--radius-md)',
           padding: '10px 12px', display: 'grid', gap: 2, minWidth: 0,
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 600, color: c.meta.color }}>
-            <span aria-hidden="true" style={{ fontSize: 12, width: 14, textAlign: 'center' }}>{c.meta.icon}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600, color: c.meta.color }}>
+            <span aria-hidden="true" style={{ fontSize: 13, width: 14, textAlign: 'center' }}>{c.meta.icon}</span>
             {c.label}
           </div>
           <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: 22, fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.2 }}>
               {c.value.toLocaleString()}
             </span>
-            <span style={{ fontSize: 12, color: c.meta.color, fontWeight: 600 }}>{c.pct}</span>
+            <span style={{ fontSize: 13, color: c.meta.color, fontWeight: 600 }}>{c.pct}</span>
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-tertiary)', minHeight: 15 }}>{c.note || ''}</div>
+          <div style={{ fontSize: 12, color: 'var(--text-tertiary)', minHeight: 15 }}>{c.note || ''}</div>
         </div>
       ))}
     </div>

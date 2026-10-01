@@ -82,7 +82,7 @@ export default function Uploads() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div className="rs-page">
       <Topbar
         title="Uploads"
         subtitle="Upload files directly to S3 — stored in the job-scheduler bucket"
@@ -91,7 +91,7 @@ export default function Uploads() {
           <Btn variant="primary" size="sm" onClick={() => fileInputRef.current?.click()}>Upload file</Btn>
         </>}
       />
-      <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+      <div className="rs-page-body">
         {error && <ErrorBanner message={error} />}
 
         <input
@@ -108,20 +108,20 @@ export default function Uploads() {
           onDrop={(e) => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
           onClick={() => fileInputRef.current?.click()}
           style={{
-            border: `2px dashed ${dragOver ? 'var(--accent, #0F766E)' : '#CBD5E1'}`,
+            border: `2px dashed ${dragOver ? 'var(--accent, #365D9D)' : '#C9D1DC'}`,
             borderRadius: 'var(--radius-lg)',
             padding: '36px 24px',
             textAlign: 'center',
             cursor: 'pointer',
             marginBottom: 20,
-            background: dragOver ? 'rgba(73,149,255,0.06)' : '#F8FAFC',
+            background: dragOver ? 'rgba(73,149,255,0.06)' : '#FAFBFC',
             transition: 'all 0.15s',
           }}
         >
-          <div style={{ fontSize: 13, color: '#0F172A', fontWeight: 600, marginBottom: 4 }}>
+          <div style={{ fontSize: 14, color: '#202938', fontWeight: 600, marginBottom: 4 }}>
             Drag &amp; drop files here, or click to browse
           </div>
-          <div style={{ fontSize: 11, color: '#64748B' }}>
+          <div style={{ fontSize: 12, color: '#657185' }}>
             Files upload directly to S3 via a presigned URL — nothing passes through this server.
           </div>
         </div>
@@ -131,21 +131,21 @@ export default function Uploads() {
             {inFlight.map((f) => (
               <Card key={f.name}>
                 <div style={{ padding: '10px 16px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 6 }}>
-                    <span style={{ color: '#0F172A', fontWeight: 500 }}>{f.name}</span>
-                    <span style={{ color: f.error ? '#DC2626' : '#64748B' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 6 }}>
+                    <span style={{ color: '#202938', fontWeight: 500 }}>{f.name}</span>
+                    <span style={{ color: f.error ? '#DC2626' : '#657185' }}>
                       {f.error ? 'Failed' : `${f.progress}%`}
                     </span>
                   </div>
                   {!f.error ? (
-                    <div style={{ height: 4, background: '#E2E8F0', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ height: 4, background: '#DCE2EA', borderRadius: 2, overflow: 'hidden' }}>
                       <div style={{
                         height: '100%', width: `${f.progress}%`,
-                        background: '#0F766E', transition: 'width 0.15s',
+                        background: '#365D9D', transition: 'width 0.15s',
                       }} />
                     </div>
                   ) : (
-                    <div style={{ fontSize: 11, color: '#DC2626' }}>{f.error}</div>
+                    <div style={{ fontSize: 12, color: '#DC2626' }}>{f.error}</div>
                   )}
                 </div>
               </Card>
@@ -155,7 +155,7 @@ export default function Uploads() {
 
         <Card>
           <CardHead>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#0F172A' }}>
+            <div style={{ fontSize: 'var(--fs-section-title)', fontWeight: 600, color: '#202938' }}>
               Files {files.length > 0 && `(${files.length})`}
             </div>
             <Btn variant="default" size="sm" onClick={loadFiles}>Refresh</Btn>
@@ -170,13 +170,13 @@ export default function Uploads() {
               {files.map((f) => (
                 <div key={f.key} style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                  padding: '12px 18px', borderBottom: '1px solid #E2E8F0', fontSize: 12,
+                  padding: '12px 18px', borderBottom: '1px solid #DCE2EA', fontSize: 13,
                 }}>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ color: '#0F172A', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    <div style={{ color: '#202938', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis' }}>
                       {f.filename}
                     </div>
-                    <div style={{ color: '#64748B', fontSize: 11, marginTop: 2 }}>
+                    <div style={{ color: '#657185', fontSize: 12, marginTop: 2 }}>
                       {formatBytes(f.size)} · {formatDate(f.last_modified)}
                     </div>
                   </div>

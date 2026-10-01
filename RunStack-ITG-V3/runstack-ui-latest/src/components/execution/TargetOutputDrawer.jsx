@@ -17,6 +17,7 @@ import { CopyButton } from '../JobDetail';
 import OutputPanel from './OutputPanel';
 import { DetailsPanel, StepsPanel } from './StepsAndDetails';
 import TargetStatusBadge from './TargetStatusBadge';
+import VarCleanupSummary from './VarCleanupSummary';
 import { fmtFull } from '../../utils/jobs';
 import { fmtElapsed, targetElapsed } from '../../utils/executionLogs';
 import { isActiveTarget, isUnsuccessfulTarget } from '../../utils/executionStatus';
@@ -24,7 +25,7 @@ import { isActiveTarget, isUnsuccessfulTarget } from '../../utils/executionStatu
 function Info({ label, children, mono, copy }) {
   return (
     <div style={{ minWidth: 0 }}>
-      <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.6 }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)',}}>{label}</div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 2, minWidth: 0 }}>
         <span style={{
           fontSize: mono ? 11.5 : 12.5, fontWeight: 600, color: children ? 'var(--text-primary)' : 'var(--slate-400)',
@@ -52,8 +53,8 @@ function StateBox({ target, selected }) {
       <div style={{ border: '1px solid var(--running-border)', background: 'var(--running-bg)', borderRadius: 'var(--radius-md)', padding: '10px 12px', display: 'grid', gap: 6 }}>
         <Info label="Current step">{target.status === 'pending' ? 'Waiting to start' : target.current_step}</Info>
         <div>
-          <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.6 }}>Latest status</div>
-          <div style={{ fontSize: 12.5, color: 'var(--text-primary)', marginTop: 2, wordBreak: 'break-word' }}>{target.status_detail || '—'}</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)',}}>Latest status</div>
+          <div style={{ fontSize: 13, color: 'var(--text-primary)', marginTop: 2, wordBreak: 'break-word' }}>{target.status_detail || '—'}</div>
         </div>
       </div>
     );
@@ -69,8 +70,8 @@ function StateBox({ target, selected }) {
         <Info label="Execution ID" mono copy>{execId}</Info>
       </div>
       <div>
-        <div style={{ fontSize: 10.5, fontWeight: 700, color: 'var(--text-tertiary)', textTransform: 'uppercase', letterSpacing: 0.6 }}>Reason</div>
-        <div style={{ fontSize: 12.5, color: '#7F1D1D', marginTop: 2, wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>{reason || 'No reason recorded.'}</div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)',}}>Reason</div>
+        <div style={{ fontSize: 13, color: '#7F1D1D', marginTop: 2, wordBreak: 'break-word', whiteSpace: 'pre-wrap' }}>{reason || 'No reason recorded.'}</div>
       </div>
     </div>
   );
@@ -120,11 +121,11 @@ export default function TargetOutputDrawer({ jobId, target, selected, paused, ge
         <div style={{ padding: '14px 18px 12px', borderBottom: '1px solid var(--border)', display: 'grid', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
+              <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</div>
               <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <TargetStatusBadge status={target.status} detail={target.status_detail} size="md" />
                 {target.retrieval_error && isActiveTarget(target.status) && (
-                  <span style={{ fontSize: 11.5, color: 'var(--text-tertiary)' }}>Live Systems Manager status isn't available; showing RunStack's record.</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>Live Systems Manager status isn't available; showing RunStack's record.</span>
                 )}
               </div>
             </div>
@@ -151,7 +152,7 @@ export default function TargetOutputDrawer({ jobId, target, selected, paused, ge
           {tabs.map((t) => (
             <button key={t.k} type="button" role="tab" aria-selected={activeTab === t.k} onClick={() => setTab(t.k)}
               style={{
-                padding: '9px 12px', fontSize: 12.5, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', background: 'none', border: 'none',
+                padding: '9px 12px', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', background: 'none', border: 'none',
                 color: activeTab === t.k ? 'var(--brand-hover)' : 'var(--text-tertiary)',
                 borderBottom: `2px solid ${activeTab === t.k ? 'var(--brand)' : 'transparent'}`, marginBottom: -1,
               }}>{t.l}</button>
@@ -162,7 +163,8 @@ export default function TargetOutputDrawer({ jobId, target, selected, paused, ge
         {/* Body — scrolls inside the drawer, never the page */}
         <div role="tabpanel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
           {activeTab === 'output' && (
-            <OutputPanel key={target.key} jobId={jobId} target={target} paused={paused} getBuffer={getBuffer} isEc2={isEc2} />
+            <OutputPanel key={target.key} jobId={jobId} target={target} paused={paused} getBuffer={getBuffer} isEc2={isEc2}
+              Summary={VarCleanupSummary} />
           )}
           {activeTab === 'steps' && <StepsPanel selected={selected} />}
           {activeTab === 'details' && <DetailsPanel selected={selected} target={target} />}

@@ -5,6 +5,8 @@ import Dashboard from './pages/Dashboard';
 import Jobs from './pages/Jobs';
 import ExecutionDetails from './pages/ExecutionDetails';
 import TriggerJob from './pages/TriggerJob';
+import RunAutomations from './pages/RunAutomations';
+import Ec2StartStop from './pages/Ec2StartStop';
 import { DLQ, Settings } from './pages/Schedules';
 import SSMDocuments from './pages/SSMDocuments';
 import RegisteredTargets from './pages/RegisteredTargets';
@@ -28,12 +30,12 @@ function ConfigWarning() {
       position:'fixed', bottom:16, right:16, zIndex:9999,
       padding:'12px 18px', borderRadius:'var(--radius-lg)',
       background:'var(--amber-bg)', border:'1px solid var(--amber-border)',
-      color:'var(--amber)', fontSize:12, maxWidth:340, lineHeight:1.6,
+      color:'var(--amber)', fontSize:13, maxWidth:340, lineHeight:1.6,
       boxShadow:'0 4px 20px rgba(0,0,0,0.4)',
     }}>
       <strong>⚠ API not configured</strong><br/>
-      Copy <code style={{ fontFamily:'var(--font-mono)', fontSize:11 }}>.env.example</code> to{' '}
-      <code style={{ fontFamily:'var(--font-mono)', fontSize:11 }}>.env</code> and fill in your RunStack
+      Copy <code style={{ fontFamily:'var(--font-mono)', fontSize:12 }}>.env.example</code> to{' '}
+      <code style={{ fontFamily:'var(--font-mono)', fontSize:12 }}>.env</code> and fill in your RunStack
       CloudFormation outputs, then restart the dev server.
     </div>
   );
@@ -62,7 +64,10 @@ function AppRoutes() {
         <Route path="/"            element={<Dashboard/>}/>
         <Route path="/jobs"        element={<Jobs/>}/>
         <Route path="/jobs/:jobId" element={<ExecutionDetails/>}/>
-        <Route path="/trigger"     element={<TriggerJob/>}/>
+        <Route path="/automations" element={<RunAutomations/>}/>
+        <Route path="/ec2"         element={<Ec2StartStop/>}/>
+        {/* Advanced (original) single-target page — admins only */}
+        <Route path="/trigger"     element={<RequireRole minRole="admin"><TriggerJob/></RequireRole>}/>
         <Route path="/schedules"   element={<RequireRole minRole="operator"><TriggersSchedules/></RequireRole>}/>
         <Route path="/dlq"         element={<RequireRole minRole="operator"><DLQ/></RequireRole>}/>
         <Route path="/accounts"    element={<RegisteredTargets/>}/>

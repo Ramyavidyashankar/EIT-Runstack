@@ -7,8 +7,14 @@
  *  Optional appId narrows server-side to a single app; TriggerJob.jsx fetches
  *  once with no filter and slices the result client-side per selected app,
  *  so this param mainly exists for future/other callers. */
-export async function fetchAppInstances(appId) {
-  const params = appId ? `?app_id=${encodeURIComponent(appId)}` : '';
+export async function fetchAppInstances(appId, { includeState = false, forDocument = null } = {}) {
+  const qs = new URLSearchParams();
+  if (appId) qs.set('app_id', appId);
+  if (includeState) qs.set('include_state', 'true');   // live EC2 state (EC2 Start/Stop page)
+  // Servers to offer for an approved automation: team-capability documents
+  // (SQL/SAP/Tidal) list the caller's team scope; others list app access.
+  if (forDocument) qs.set('for_document', forDocument);
+  const params = qs.toString() ? `?${qs}` : '';
   return apiFetch(`/app-instances${params}`);
 }
 
@@ -182,6 +188,22 @@ export async function runSqlHealthcheckBatch({ instanceIds, checkType, parameter
       ...(executionGroupId ? { execution_group_id: executionGroupId } : {}),
     }),
   });
+}
+
+// ─── Multi-server runs (Run Automations, EC2 Start/Stop) ─────────────────────
+
+/** GET /ssm/documents?approved=true — automations approved for RunStack runs,
+ *  each with its type, settable parameters and regions; plus run limits. */
+export async function fetchApprovedAutomations() {
+  return apiFetch('/ssm/documents?approved=true');
+}
+
+/** POST /notify with targets — one grouped run. body: { kind: 'automation',
+ *  document, parameters } or { kind: 'ec2_power', action }, plus targets
+ *  (instance IDs) and client_request_id. Returns { execution_group_id,
+ *  run_job_id, accepted, rejected: [...], targets: [...], concurrency }. */
+export async function submitRun(body) {
+  return apiFetch('/notify', { method: 'POST', body: JSON.stringify(body) });
 }
 
 // ─── Execution Details ───────────────────────────────────────────────────────

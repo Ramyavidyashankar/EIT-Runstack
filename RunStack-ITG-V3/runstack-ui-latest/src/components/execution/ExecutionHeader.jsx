@@ -36,7 +36,7 @@ export function ExecutionTopbar({ title, active, paused, onTogglePause, poll, in
         </nav>
       )}
       actions={<>
-        <span className="rs-hide-narrow" style={{ fontSize: 11, color: poll.error ? 'var(--warning)' : 'var(--text-tertiary)', whiteSpace: 'nowrap' }} aria-live="polite">
+        <span className="rs-hide-narrow" style={{ fontSize: 12, color: poll.error ? 'var(--warning)' : 'var(--text-tertiary)', whiteSpace: 'nowrap' }} aria-live="polite">
           {statusText}
         </span>
         {active && (
@@ -62,22 +62,22 @@ export function ExecutionTitle({ exec, fallbackTitle }) {
         <TargetStatusBadge overall status={exec?.status} size="md" />
         {exec?.automation_type && <TypeTag type={exec.automation_type} />}
         {exec?.scope === 'group' && (
-          <span style={{ fontSize: 11, color: 'var(--text-secondary)', background: 'var(--slate-100)', border: '1px solid var(--border)', borderRadius: 999, padding: '2px 8px' }}>
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)', background: 'var(--slate-100)', border: '1px solid var(--border)', borderRadius: 999, padding: '2px 8px' }}>
             Bulk run
           </span>
         )}
       </div>
-      <h1 style={{ fontSize: 19, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.25, wordBreak: 'break-word' }}>
+      <h1 style={{ fontSize: 19, fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.25, wordBreak: 'break-word' }}>
         {exec?.automation_name || fallbackTitle}
       </h1>
       {runId && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, color: 'var(--text-tertiary)', minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-tertiary)', minWidth: 0 }}>
           <span>{exec.group_id ? 'Execution group' : 'Job'}</span>
           <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{runId}</span>
           <CopyButton value={runId} label={exec.group_id ? 'Copy group ID' : 'Copy job ID'} />
         </div>
       )}
-      <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', display: 'flex', flexWrap: 'wrap', gap: '2px 8px' }}>
+      <div style={{ fontSize: 13, color: 'var(--text-secondary)', display: 'flex', flexWrap: 'wrap', gap: '2px 8px' }}>
         <span>{trigger.label}</span>
         {exec?.started_at && <><span aria-hidden="true">•</span><span>Started {fmtFull(exec.started_at)}</span></>}
         {trigger.by && <><span aria-hidden="true">•</span><span>Initiated by <strong style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{trigger.by}</strong></span></>}

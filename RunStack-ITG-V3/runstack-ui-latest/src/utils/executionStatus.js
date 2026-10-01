@@ -19,7 +19,7 @@ const BLUE = { color: '#1D4ED8', bg: '#EFF6FF', dot: '#2563EB', border: '#BFDBFE
 const AMBER = { color: '#B45309', bg: '#FEF3E2', dot: '#F59E0B', border: '#FBDCA0' };
 const RED = { color: '#B91C1C', bg: '#FDECEC', dot: '#DC2626', border: '#F7B9B9' };
 const ORANGE = { color: '#9A3412', bg: '#FFEDD5', dot: '#EA580C', border: '#FDBA8C' };
-const GRAY = { color: '#475569', bg: '#F1F5F9', dot: '#64748B', border: '#CBD5E1' };
+const GRAY = { color: '#4F5B6E', bg: '#F5F6F8', dot: '#657185', border: '#C9D1DC' };
 
 export const TARGET_STATUS = {
   pending:   { label: 'Pending',   icon: '○', ...AMBER },

@@ -5,18 +5,18 @@ import { useAuth } from '../auth/AuthContext';
 import { fetchSchedules, createSchedule, updateSchedule, deleteSchedule } from '../api/client';
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
-const td = { padding:'10px 14px', borderBottom:'1px solid var(--border)', verticalAlign:'middle' };
+const td = { fontSize: 14, padding:'10px 14px', borderBottom:'1px solid var(--border)', verticalAlign:'middle' };
 
 const selectStyle = {
   padding:'6px 12px', borderRadius:'var(--radius-md)',
   border:'1px solid var(--border-md)', background:'var(--bg-card)',
-  color:'var(--text-primary)', fontSize:13, fontFamily:'inherit',
+  color:'var(--text-primary)', fontSize:14, fontFamily:'inherit',
 };
 
 const inputStyle = {
   width:'100%', padding:'8px 12px', borderRadius:'var(--radius-md)',
   border:'1px solid var(--border-md)', background:'var(--bg-card)',
-  color:'var(--text-primary)', fontSize:13, fontFamily:'inherit',
+  color:'var(--text-primary)', fontSize:14, fontFamily:'inherit',
   boxSizing:'border-box',
 };
 
@@ -94,8 +94,7 @@ function CronBuilder({ value, onChange }) {
     ...inputStyle, width:'100%', textAlign:'center', padding:'8px 6px',
   };
   const labelStyle = {
-    fontSize:10, color:'var(--text-tertiary)', fontWeight:600,
-    textTransform:'uppercase', letterSpacing:0.4, textAlign:'center',
+    fontSize:12, color:'var(--text-tertiary)', fontWeight:600, textAlign:'center',
     display:'block', marginTop:4,
   };
 
@@ -109,7 +108,7 @@ function CronBuilder({ value, onChange }) {
             padding:'10px 14px', borderRadius:'var(--radius-md)',
             border:`1px solid ${mode===m ? 'var(--accent)' : 'var(--border)'}`,
             background: mode===m ? 'var(--accent-bg)' : 'var(--bg-card)',
-            fontSize:13,
+            fontSize:14,
           }}>
             <input type="radio" checked={mode===m} onChange={() => {
               setMode(m);
@@ -138,23 +137,23 @@ function CronBuilder({ value, onChange }) {
               </div>
             ))}
           </div>
-          <div style={{ fontSize:11, color:'var(--text-tertiary)', marginTop:8 }}>
+          <div style={{ fontSize:12, color:'var(--text-tertiary)', marginTop:8 }}>
             Result: <code style={{ fontFamily:'var(--font-mono)', color:'var(--text-secondary)' }}>
               cron({cron.minutes} {cron.hours} {cron.dayOfMonth} {cron.month} {cron.dayOfWeek} {cron.year})
             </code>
           </div>
-          <div style={{ fontSize:11, color:'var(--text-tertiary)', marginTop:4 }}>
+          <div style={{ fontSize:12, color:'var(--text-tertiary)', marginTop:4 }}>
             Use <code style={{ fontFamily:'var(--font-mono)' }}>*</code> for any · <code style={{ fontFamily:'var(--font-mono)' }}>?</code> for no value · <code style={{ fontFamily:'var(--font-mono)' }}>1,6,15</code> for multiple
           </div>
         </>
       ) : (
         <div style={{ display:'flex', gap:10, alignItems:'flex-end' }}>
           <div style={{ flex:1 }}>
-            <label style={{ fontSize:12, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>Every</label>
+            <label style={{ fontSize:13, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>Every</label>
             <input style={inputStyle} type="number" min="1" value={rate.value} onChange={e => updateRate('value', e.target.value)} placeholder="1"/>
           </div>
           <div style={{ flex:2 }}>
-            <label style={{ fontSize:12, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>Unit</label>
+            <label style={{ fontSize:13, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>Unit</label>
             <select style={{ ...selectStyle, width:'100%' }} value={rate.unit} onChange={e => updateRate('unit', e.target.value)}>
               <option value="minute">Minute(s)</option>
               <option value="hour">Hour(s)</option>
@@ -162,7 +161,7 @@ function CronBuilder({ value, onChange }) {
             </select>
           </div>
           <div style={{ flex:2, paddingBottom:1 }}>
-            <div style={{ fontSize:11, color:'var(--text-tertiary)' }}>
+            <div style={{ fontSize:12, color:'var(--text-tertiary)' }}>
               Result: <code style={{ fontFamily:'var(--font-mono)' }}>{`rate(${rate.value||1} ${(parseInt(rate.value)||1)===1?rate.unit:rate.unit+'s'})`}</code>
             </div>
           </div>
@@ -204,7 +203,7 @@ function ScheduleForm({ initial = {}, lambdaFunctions = [], onSave, onCancel, sa
 
       {/* Rule Name */}
       <div>
-        <label style={{ fontSize:12, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>
+        <label style={{ fontSize:13, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>
           Rule Name {!initial.name && <span style={{ color:'var(--red)' }}>*</span>}
         </label>
         <input
@@ -212,12 +211,12 @@ function ScheduleForm({ initial = {}, lambdaFunctions = [], onSave, onCancel, sa
           value={form.name} onChange={e => set('name', e.target.value)}
           disabled={!!initial.name} placeholder="e.g. runstack-sql-cleanup"
         />
-        {initial.name && <div style={{ fontSize:11, color:'var(--text-tertiary)', marginTop:4 }}>Rule name cannot be changed after creation.</div>}
+        {initial.name && <div style={{ fontSize:12, color:'var(--text-tertiary)', marginTop:4 }}>Rule name cannot be changed after creation.</div>}
       </div>
 
       {/* Schedule Expression — cron builder */}
       <div>
-        <label style={{ fontSize:12, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>
+        <label style={{ fontSize:13, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>
           Schedule <span style={{ color:'var(--red)' }}>*</span>
         </label>
         <CronBuilder value={form.schedule_expression} onChange={v => set('schedule_expression', v)}/>
@@ -225,13 +224,13 @@ function ScheduleForm({ initial = {}, lambdaFunctions = [], onSave, onCancel, sa
 
       {/* Description */}
       <div>
-        <label style={{ fontSize:12, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>Description</label>
+        <label style={{ fontSize:13, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>Description</label>
         <input style={inputStyle} value={form.description} onChange={e => set('description', e.target.value)} placeholder="Optional description"/>
       </div>
 
       {/* State */}
       <div>
-        <label style={{ fontSize:12, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>State</label>
+        <label style={{ fontSize:13, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>State</label>
         <select style={{ ...selectStyle, width:'100%' }} value={form.state} onChange={e => set('state', e.target.value)}>
           <option value="ENABLED">Enabled</option>
           <option value="DISABLED">Disabled</option>
@@ -240,11 +239,11 @@ function ScheduleForm({ initial = {}, lambdaFunctions = [], onSave, onCancel, sa
 
       {/* Target section */}
       <div style={{ borderTop:'1px solid var(--border)', paddingTop:16 }}>
-        <div style={{ fontSize:12, fontWeight:600, color:'var(--text-secondary)', marginBottom:12 }}>Target — Lambda function</div>
+        <div style={{ fontSize:13, fontWeight:600, color:'var(--text-secondary)', marginBottom:12 }}>Target — Lambda function</div>
 
         {/* Lambda dropdown */}
         <div style={{ marginBottom:12 }}>
-          <label style={{ fontSize:12, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>
+          <label style={{ fontSize:13, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>
             Function
           </label>
           <select
@@ -263,7 +262,7 @@ function ScheduleForm({ initial = {}, lambdaFunctions = [], onSave, onCancel, sa
         {/* Manual ARN input if custom selected */}
         {form.target_arn === '__custom__' && (
           <div style={{ marginBottom:12 }}>
-            <label style={{ fontSize:12, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>Lambda ARN</label>
+            <label style={{ fontSize:13, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>Lambda ARN</label>
             <input style={inputStyle} placeholder="arn:aws:lambda:us-east-1:246314649749:function:my-function"
               onChange={e => set('target_arn', e.target.value)}/>
           </div>
@@ -271,18 +270,18 @@ function ScheduleForm({ initial = {}, lambdaFunctions = [], onSave, onCancel, sa
 
         {/* Target input JSON */}
         <div>
-          <label style={{ fontSize:12, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>
+          <label style={{ fontSize:13, fontWeight:600, color:'var(--text-secondary)', display:'block', marginBottom:6 }}>
             Input — Constant JSON
           </label>
           <textarea
-            style={{ ...inputStyle, height:180, resize:'vertical', fontFamily:'var(--font-mono)', fontSize:12 }}
+            style={{ ...inputStyle, height:180, resize:'vertical', fontFamily:'var(--font-mono)', fontSize:13 }}
             value={form.target_input}
             onChange={e => { set('target_input', e.target.value); setInputError(null); }}
             placeholder={`{\n  "id": "my-schedule-notification",\n  "region": "us-east-1",\n  "account_id": "246314649749",\n  "automation_type": "SSM-Automation",\n  "automation_data": {\n    "DocumentName": "My-Document",\n    "Parameters": {}\n  }\n}`}
             spellCheck={false}
           />
-          {inputError && <div style={{ fontSize:11, color:'var(--red)', marginTop:4 }}>{inputError}</div>}
-          <div style={{ fontSize:11, color:'var(--text-tertiary)', marginTop:4 }}>
+          {inputError && <div style={{ fontSize:12, color:'var(--red)', marginTop:4 }}>{inputError}</div>}
+          <div style={{ fontSize:12, color:'var(--text-tertiary)', marginTop:4 }}>
             Constant JSON passed to the Lambda — same payload format as POST /notify.
           </div>
         </div>
@@ -387,7 +386,7 @@ export default function Schedules() {
   }
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+    <div className="rs-page">
       <Topbar title="Schedules" subtitle="EventBridge rules"
         actions={
           <div style={{ display:'flex', gap:8 }}>
@@ -396,7 +395,7 @@ export default function Schedules() {
           </div>
         }
       />
-      <div style={{ flex:1, overflowY:'auto', padding:24 }}>
+      <div className="rs-page-body">
         {error && <ErrorBanner message={error}/>}
         <Card>
           {loading ? (
@@ -404,14 +403,13 @@ export default function Schedules() {
           ) : schedules.length === 0 ? (
             <Empty message="No EventBridge rules found."/>
           ) : (
-            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:14 }}>
               <thead>
                 <tr>
                   {['Name','Schedule','State','Targets','Description', ...(isAdmin ? ['Actions'] : [])].map(h => (
                     <th key={h} style={{
                       textAlign:'left', padding:'9px 14px',
-                      fontSize:10, fontWeight:600, color:'var(--text-tertiary)',
-                      textTransform:'uppercase', letterSpacing:0.5,
+                      fontSize:12, fontWeight:600, color:'var(--text-tertiary)',
                       borderBottom:'1px solid var(--border)'
                     }}>{h}</th>
                   ))}
@@ -424,25 +422,25 @@ export default function Schedules() {
                     onMouseLeave={e => e.currentTarget.style.background=''}>
                     <td style={td}><span style={{ fontWeight:500 }}>{s.name}</span></td>
                     <td style={td}>
-                      <code style={{ fontSize:11, background:'var(--bg-page)', padding:'2px 7px',
+                      <code style={{ fontSize:12, background:'var(--bg-page)', padding:'2px 7px',
                         borderRadius:4, border:'1px solid var(--border)' }}>
                         {s.schedule_expression || s.event_pattern || '—'}
                       </code>
                     </td>
                     <td style={td}>
                       <span style={{
-                        padding:'3px 9px', borderRadius:10, fontSize:11, fontWeight:600,
+                        padding:'3px 9px', borderRadius:10, fontSize:12, fontWeight:600,
                         background: s.state === 'ENABLED' ? 'var(--green-bg)' : 'var(--amber-bg)',
                         color: s.state === 'ENABLED' ? 'var(--green)' : 'var(--amber)',
                       }}>{s.state}</span>
                     </td>
                     <td style={td}>
-                      <span style={{ fontSize:11, color:'var(--text-secondary)' }}>
+                      <span style={{ fontSize:12, color:'var(--text-secondary)' }}>
                         {s.targets?.length || 0} target{s.targets?.length !== 1 ? 's' : ''}
                       </span>
                     </td>
                     <td style={td}>
-                      <span style={{ fontSize:11, color:'var(--text-tertiary)' }}>{s.description || '—'}</span>
+                      <span style={{ fontSize:12, color:'var(--text-tertiary)' }}>{s.description || '—'}</span>
                     </td>
                     {isAdmin && (
                       <td style={td}>
@@ -462,14 +460,14 @@ export default function Schedules() {
 
       {modal === 'create' && (
         <Modal title="Create EventBridge rule" onClose={() => setModal(null)} width={640}>
-          {actionError && <div style={{ marginBottom:12, padding:'8px 12px', borderRadius:'var(--radius-md)', background:'var(--red-bg)', color:'var(--red)', fontSize:12 }}>{actionError}</div>}
+          {actionError && <div style={{ marginBottom:12, padding:'8px 12px', borderRadius:'var(--radius-md)', background:'var(--red-bg)', color:'var(--red)', fontSize:13 }}>{actionError}</div>}
           <ScheduleForm lambdaFunctions={lambdaFunctions} onSave={handleCreate} onCancel={() => setModal(null)} saving={saving}/>
         </Modal>
       )}
 
       {modal?.edit && (
         <Modal title={`Edit rule — ${modal.edit.name}`} onClose={() => setModal(null)} width={640}>
-          {actionError && <div style={{ marginBottom:12, padding:'8px 12px', borderRadius:'var(--radius-md)', background:'var(--red-bg)', color:'var(--red)', fontSize:12 }}>{actionError}</div>}
+          {actionError && <div style={{ marginBottom:12, padding:'8px 12px', borderRadius:'var(--radius-md)', background:'var(--red-bg)', color:'var(--red)', fontSize:13 }}>{actionError}</div>}
           <ScheduleForm initial={modal.edit} lambdaFunctions={lambdaFunctions} onSave={handleEdit} onCancel={() => setModal(null)} saving={saving}/>
         </Modal>
       )}
@@ -477,11 +475,11 @@ export default function Schedules() {
       {/* Delete confirmation modal */}
       {modal?.delete && (
         <Modal title="Delete rule" onClose={() => setModal(null)} width={420}>
-          <div style={{ fontSize:13, color:'var(--text-secondary)', marginBottom:20 }}>
+          <div style={{ fontSize:14, color:'var(--text-secondary)', marginBottom:20 }}>
             Are you sure you want to delete <strong style={{ color:'var(--text-primary)' }}>{modal.delete.name}</strong>?
             This will remove all targets and cannot be undone.
           </div>
-          {actionError && <div style={{ marginBottom:12, padding:'8px 12px', borderRadius:'var(--radius-md)', background:'var(--red-bg)', color:'var(--red)', fontSize:12 }}>{actionError}</div>}
+          {actionError && <div style={{ marginBottom:12, padding:'8px 12px', borderRadius:'var(--radius-md)', background:'var(--red-bg)', color:'var(--red)', fontSize:13 }}>{actionError}</div>}
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
             <Btn variant="default" size="sm" onClick={() => setModal(null)} disabled={saving}>Cancel</Btn>
             <Btn variant="danger" size="sm" onClick={() => handleDelete(modal.delete.name)} disabled={saving}>
@@ -506,15 +504,15 @@ export function DLQ() {
   ]);
 
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+    <div className="rs-page">
       <Topbar title="Dead Letter Queue"
         subtitle="Failed messages from SQS — manual review required"
         actions={isAdmin ? <Btn variant="danger" size="sm">Purge queue</Btn> : undefined}
       />
-      <div style={{ flex:1, overflowY:'auto', padding:24 }}>
+      <div className="rs-page-body">
         <div style={{ marginBottom:16, padding:'10px 16px', borderRadius:'var(--radius-md)',
           background:'var(--red-bg)', border:'1px solid var(--red-border)',
-          color:'var(--red)', fontSize:13 }}>
+          color:'var(--red)', fontSize:14 }}>
           ⚠ {messages.length} message{messages.length !== 1 ? 's' : ''} in DLQ — investigate and reprocess or discard
         </div>
         <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
@@ -522,8 +520,8 @@ export function DLQ() {
             <Card key={m.id}>
               <CardHead>
                 <div>
-                  <code style={{ fontFamily:'var(--font-mono)', fontSize:12, color:'var(--red)' }}>{m.id}</code>
-                  <span style={{ fontSize:11, color:'var(--text-tertiary)', marginLeft:12 }}>Received {m.received}</span>
+                  <code style={{ fontFamily:'var(--font-mono)', fontSize:13, color:'var(--red)' }}>{m.id}</code>
+                  <span style={{ fontSize:12, color:'var(--text-tertiary)', marginLeft:12 }}>Received {m.received}</span>
                 </div>
                 <div style={{ display:'flex', gap:8 }}>
                   {isAdmin && <Btn variant="default" size="sm">Reprocess</Btn>}
@@ -532,14 +530,13 @@ export function DLQ() {
               </CardHead>
               <div style={{ padding:'14px 18px', display:'grid', gap:10 }}>
                 <div>
-                  <div style={{ fontSize:11, color:'var(--red)', fontWeight:600, marginBottom:5 }}>Failure reason</div>
-                  <div style={{ fontSize:12, color:'var(--text-secondary)' }}>{m.reason}</div>
+                  <div style={{ fontSize: 13, color:'var(--red)', fontWeight:600, marginBottom:5 }}>Failure reason</div>
+                  <div style={{ fontSize:13, color:'var(--text-secondary)' }}>{m.reason}</div>
                 </div>
                 <div>
-                  <div style={{ fontSize:11, color:'var(--text-tertiary)', fontWeight:600,
-                    textTransform:'uppercase', letterSpacing:0.5, marginBottom:5 }}>Message body</div>
+                  <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight:600, marginBottom:5 }}>Message body</div>
                   <pre style={{
-                    fontFamily:'var(--font-mono)', fontSize:11,
+                    fontFamily:'var(--font-mono)', fontSize:12,
                     background:'var(--bg-surface)', padding:12,
                     borderRadius:'var(--radius-md)', border:'1px solid var(--border)',
                     overflow:'auto', margin:0, color:'var(--text-secondary)',
@@ -567,18 +564,18 @@ export function Settings() {
     ['Solution name',        process.env.REACT_APP_SOLUTION_NAME || 'runstack'],
   ];
   return (
-    <div style={{ display:'flex', flexDirection:'column', height:'100%' }}>
+    <div className="rs-page">
       <Topbar title="Settings" subtitle="Runtime configuration (set via .env file)"/>
-      <div style={{ flex:1, overflowY:'auto', padding:24 }}>
+      <div className="rs-page-body">
         <Card style={{ maxWidth:600 }}>
-          <CardHead><span style={{ fontWeight:600 }}>Environment configuration</span></CardHead>
+          <CardHead><span style={{ fontWeight:600, fontSize:'var(--fs-section-title)' }}>Environment configuration</span></CardHead>
           <div style={{ padding:'16px 18px' }}>
-            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:14 }}>
               {fields.map(([k, v]) => (
                 <tr key={k}>
                   <td style={{ padding:'9px 0', color:'var(--text-secondary)', borderBottom:'1px solid var(--border)', width:180 }}>{k}</td>
                   <td style={{ padding:'9px 0 9px 16px', borderBottom:'1px solid var(--border)' }}>
-                    <code style={{ fontFamily:'var(--font-mono)', fontSize:11,
+                    <code style={{ fontFamily:'var(--font-mono)', fontSize:12,
                       color: v.includes('not set') ? 'var(--red)' : 'var(--text-mono)' }}>
                       {v}
                     </code>
@@ -586,9 +583,9 @@ export function Settings() {
                 </tr>
               ))}
             </table>
-            <div style={{ marginTop:16, fontSize:12, color:'var(--text-tertiary)', lineHeight:1.7 }}>
-              Edit <code style={{ fontFamily:'var(--font-mono)', fontSize:11 }}>.env</code> in the project root and rebuild
-              (<code style={{ fontFamily:'var(--font-mono)', fontSize:11 }}>npm run build</code>) for changes to take effect.
+            <div style={{ marginTop:16, fontSize:13, color:'var(--text-tertiary)', lineHeight:1.7 }}>
+              Edit <code style={{ fontFamily:'var(--font-mono)', fontSize:12 }}>.env</code> in the project root and rebuild
+              (<code style={{ fontFamily:'var(--font-mono)', fontSize:12 }}>npm run build</code>) for changes to take effect.
             </div>
           </div>
         </Card>

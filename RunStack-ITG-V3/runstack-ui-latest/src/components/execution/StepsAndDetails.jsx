@@ -21,8 +21,8 @@ function dur(a, b) {
   return fmtElapsed(((Number.isNaN(y) ? Date.now() : y) - x) / 1000);
 }
 
-const th = { textAlign: 'left', padding: '8px 10px', fontSize: 10, fontWeight: 700, color: '#64748B', textTransform: 'uppercase', letterSpacing: 0.6, background: '#F8FAFC', borderBottom: '1px solid #E2E8F0', whiteSpace: 'nowrap' };
-const td = { padding: '8px 10px', borderBottom: '1px solid #F1F5F9', fontSize: 12.5, verticalAlign: 'top' };
+const th = { textAlign: 'left', padding: '8px 10px', fontSize: 13, fontWeight: 600, color: '#3B4658', background: '#FAFBFC', borderBottom: '1px solid #DCE2EA', whiteSpace: 'nowrap' };
+const td = { padding: '8px 10px', borderBottom: '1px solid #F5F6F8', fontSize: 14, verticalAlign: 'top' };
 
 function StepRow({ s, kind }) {
   const [open, setOpen] = useState(false);
@@ -32,24 +32,24 @@ function StepRow({ s, kind }) {
     <>
       <tr>
         <td style={td}>
-          <div style={{ fontWeight: 600, color: '#0F172A' }}>{s.name || '—'}</div>
-          {s.action && <div style={{ fontSize: 11, color: '#64748B', fontFamily: 'var(--font-mono)' }}>{s.action}</div>}
+          <div style={{ fontWeight: 600, color: '#202938' }}>{s.name || '—'}</div>
+          {s.action && <div style={{ fontSize: 12, color: '#657185', fontFamily: 'var(--font-mono)' }}>{s.action}</div>}
         </td>
         <td style={td}><TargetStatusBadge status={s.status} detail={s.status_detail} />
           {s.status_detail && !['Success', 'InProgress', 'Pending'].includes(s.status_detail) && (
-            <div style={{ fontSize: 11, color: '#64748B', marginTop: 3 }}>{s.status_detail}</div>
+            <div style={{ fontSize: 12, color: '#657185', marginTop: 3 }}>{s.status_detail}</div>
           )}
         </td>
-        <td style={{ ...td, whiteSpace: 'nowrap', color: '#334155' }} title={s.started_at ? fmtFull(s.started_at) : ''}>
+        <td style={{ ...td, whiteSpace: 'nowrap', color: '#3B4658' }} title={s.started_at ? fmtFull(s.started_at) : ''}>
           {s.started_at ? new Date(s.started_at).toLocaleTimeString('en-GB') : '—'}
         </td>
-        <td style={{ ...td, whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: 12 }}>{s.started_at ? dur(s.started_at, s.ended_at) : '—'}</td>
+        <td style={{ ...td, whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: 13 }}>{s.started_at ? dur(s.started_at, s.ended_at) : '—'}</td>
         <td style={td}>
           {kind === 'step' && (s.has_running_output
-            ? <span style={{ fontSize: 11, color: '#0B6E4C', fontWeight: 600 }}>Console output (Output tab)</span>
-            : <span style={{ fontSize: 11, color: '#94A3B8' }}>No console output</span>)}
+            ? <span style={{ fontSize: 13, color: '#0B6E4C', fontWeight: 600 }}>Console output (Output tab)</span>
+            : <span style={{ fontSize: 12, color: '#657185' }}>No console output</span>)}
           {kind === 'plugin' && s.response_code != null && s.response_code !== -1 && (
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>exit {s.response_code}</span>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>exit {s.response_code}</span>
           )}
           {expandable && (
             <div><Btn size="sm" variant="ghost" onClick={() => setOpen((x) => !x)}>{open ? 'Hide' : 'Show'} details</Btn></div>
@@ -61,16 +61,16 @@ function StepRow({ s, kind }) {
           <td colSpan={5} style={{ ...td, background: '#FBFCFD' }}>
             {s.failure_message && <Callout tone="danger" title="Failure message">{s.failure_message}</Callout>}
             {outputs && (
-              <pre style={{ margin: '8px 0 0', fontFamily: 'var(--font-mono)', fontSize: 11.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+              <pre style={{ margin: '8px 0 0', fontFamily: 'var(--font-mono)', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                 {JSON.stringify(outputs, null, 2)}
               </pre>
             )}
             {kind === 'plugin' && s.final_output_preview && (
               <>
-                <div style={{ fontSize: 11, color: '#64748B', margin: '8px 0 4px' }}>
+                <div style={{ fontSize: 12, color: '#657185', margin: '8px 0 4px' }}>
                   Final output preview from Systems Manager (first 2,500 characters). The full output is on the Output tab when CloudWatch output is enabled.
                 </div>
-                <pre style={{ margin: 0, fontFamily: 'var(--font-mono)', fontSize: 11.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 240, overflow: 'auto', background: '#F8FAFC', padding: 10, borderRadius: 8, border: '1px solid #E2E8F0' }}>
+                <pre style={{ margin: 0, fontFamily: 'var(--font-mono)', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 240, overflow: 'auto', background: '#FAFBFC', padding: 10, borderRadius: 8, border: '1px solid #DCE2EA' }}>
                   {s.final_output_preview}
                 </pre>
               </>
@@ -92,7 +92,7 @@ export function StepsPanel({ selected }) {
     <div style={{ padding: 12, display: 'grid', gap: 14, overflow: 'auto' }}>
       {steps.length > 0 && (
         <section>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#3B4658', marginBottom: 6 }}>
             Automation steps
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -103,7 +103,7 @@ export function StepsPanel({ selected }) {
       )}
       {plugins.length > 0 && (
         <section>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#334155', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 6 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#3B4658', marginBottom: 6 }}>
             Command steps on this server
           </div>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
@@ -119,12 +119,12 @@ export function StepsPanel({ selected }) {
 function Row({ label, value, mono, copy, hint }) {
   if (value === undefined || value === null || value === '') return null;
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '170px 1fr', gap: 12, padding: '7px 0', borderBottom: '1px solid #F1F5F9' }}>
-      <div style={{ fontSize: 12, color: '#64748B' }}>{label}</div>
+    <div style={{ display: 'grid', gridTemplateColumns: '170px 1fr', gap: 12, padding: '7px 0', borderBottom: '1px solid #F5F6F8' }}>
+      <div style={{ fontSize: 13, color: '#657185' }}>{label}</div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
-        <div style={{ fontSize: mono ? 11.5 : 12.5, fontFamily: mono ? 'var(--font-mono)' : 'inherit', color: '#0F172A', wordBreak: 'break-all', flex: 1 }}>
+        <div style={{ fontSize: mono ? 11.5 : 12.5, fontFamily: mono ? 'var(--font-mono)' : 'inherit', color: '#202938', wordBreak: 'break-all', flex: 1 }}>
           {String(value)}
-          {hint && <div style={{ fontSize: 11, color: '#64748B', fontFamily: 'var(--font-sans)', marginTop: 2 }}>{hint}</div>}
+          {hint && <div style={{ fontSize: 12, color: '#657185', fontFamily: 'var(--font-sans)', marginTop: 2 }}>{hint}</div>}
         </div>
         {copy && <CopyButton value={String(value)} label={`Copy ${label}`} />}
       </div>
@@ -149,11 +149,11 @@ export function DetailsPanel({ selected, target }) {
       {(selected?.output_notes || []).map((n, i) => <Callout key={i} tone="info">{n}</Callout>)}
       {d.workflow_error && (
         <Callout tone="danger" title="Failed before Systems Manager started anything">
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5 }}>{d.workflow_error.step}</div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12 }}>{d.workflow_error.step}</div>
           <div><strong>{d.workflow_error.error}</strong>: {d.workflow_error.cause}</div>
         </Callout>
       )}
-      <section style={{ border: '1px solid #E2E8F0', borderRadius: 10, padding: '4px 14px 8px', background: '#FFFFFF' }}>
+      <section style={{ border: '1px solid #DCE2EA', borderRadius: 10, padding: '4px 14px 8px', background: '#FFFFFF' }}>
         <Row label="Server" value={t.server_name} />
         <Row label="Instance ID" value={t.instance_id} mono copy />
         <Row label="Account" value={t.account_id} mono copy />
@@ -162,7 +162,7 @@ export function DetailsPanel({ selected, target }) {
         <Row label="Started" value={t.started_at ? fmtFull(t.started_at) : null} />
         <Row label="Ended" value={t.ended_at ? fmtFull(t.ended_at) : null} />
       </section>
-      <section style={{ border: '1px solid #E2E8F0', borderRadius: 10, padding: '4px 14px 8px', background: '#FFFFFF' }}>
+      <section style={{ border: '1px solid #DCE2EA', borderRadius: 10, padding: '4px 14px 8px', background: '#FFFFFF' }}>
         <Row label="Job ID" value={d.job_id} mono copy />
         <Row label="Execution group" value={d.execution_group_id} mono copy />
         <Row label="Initiated by" value={d.initiated_by} />
@@ -179,9 +179,9 @@ export function DetailsPanel({ selected, target }) {
         <Row label="Exit code" value={d.exit_code != null && d.exit_code !== -1 ? d.exit_code : null} mono />
       </section>
       {(selected?.retrieval_errors || []).length > 0 && (
-        <details style={{ fontSize: 12, color: '#64748B' }}>
+        <details style={{ fontSize: 13, color: '#657185' }}>
           <summary style={{ cursor: 'pointer' }}>Systems Manager details not available</summary>
-          <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 11, wordBreak: 'break-word' }}>
+          <div style={{ marginTop: 6, fontFamily: 'var(--font-mono)', fontSize: 12, wordBreak: 'break-word' }}>
             {selected.retrieval_errors.map((e, i) => <div key={i}>{e.code}{e.message ? `: ${e.message}` : ''}</div>)}
           </div>
           <div style={{ marginTop: 4 }}>This doesn't affect the execution or its result.</div>
