@@ -60,6 +60,7 @@ function useViewState() {
     from: params.get('from') || '',
     to: params.get('to') || '',
     automation: params.get('automation') || '',
+    name: params.get('name') || '',
     account: params.get('account') || '',
     environment: params.get('env') || '',
     sort: params.get('sort') || 'started_desc',
@@ -199,7 +200,7 @@ function DetailDrawer({ jobId, row, onClose, onUpdate }) {
           <button type="button" onClick={() => nav(`/jobs/${encodeURIComponent(jobId)}`)} style={{
             background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)', color: '#E2E8F0', borderRadius: 6,
             padding: '5px 10px', fontSize: 11.5, cursor: 'pointer', fontFamily: 'inherit',
-          }}>Open full page</button>
+          }}>Open execution details</button>
           <button ref={closeRef} type="button" onClick={onClose} aria-label="Close details" style={{
             background: 'none', border: 'none', color: '#E2E8F0', fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: 4,
           }}>×</button>
@@ -245,9 +246,9 @@ export default function Jobs() {
   }, [searchText]); // eslint-disable-line
 
   // Everything that defines "the result set" (not the open job or the page).
-  const queryKey = JSON.stringify([view.status, view.q, view.automation, view.account, view.environment, view.sort, view.range, view.from, view.to]);
+  const queryKey = JSON.stringify([view.status, view.q, view.automation, view.name, view.account, view.environment, view.sort, view.range, view.from, view.to]);
   const buildQuery = useCallback(() => ({
-    status: view.status, q: view.q, automation: view.automation, account: view.account,
+    status: view.status, q: view.q, automation: view.automation, name: view.name, account: view.account,
     environment: view.environment, sort: view.sort, ...rangeToQuery(view.range, view.from, view.to),
   }), [queryKey]); // eslint-disable-line
 
@@ -329,7 +330,10 @@ export default function Jobs() {
   const auto = useAutoRefresh(softRefresh, { intervalMs: REFRESH_MS, enabled: !rowsState.loading && !!pageMeta });
   usePageRefresh(auto.refresh);
 
-  const openJob = (id) => setView({ job: id }, { replace: false });
+  // Selecting an execution opens Execution Details (per-server status and
+  // output). The ?job= side panel still opens for existing links.
+  const nav = useNavigate();
+  const openJob = (id) => nav(`/jobs/${encodeURIComponent(id)}`, { state: { row: rows.find((j) => j.job_id === id) || null } });
   const closeJob = useCallback(() => setView({ job: '' }, { replace: false }), [setView]);
   const patchRow = useCallback((d) => {
     setRows((prev) => prev.map((j) => (j.job_id === d.job_id
@@ -369,7 +373,7 @@ export default function Jobs() {
   const counts = countsMeta?.status_counts || {};
   const total = countsMeta?.total_matching;
   const countsComplete = countsMeta?.counts_complete !== false;
-  const filtersActive = !!(view.q || view.automation || view.account || view.environment || view.range !== '7d' || view.status !== 'ALL');
+  const filtersActive = !!(view.q || view.automation || view.name || view.account || view.environment || view.range !== '7d' || view.status !== 'ALL');
   const openRow = rows.find((j) => j.job_id === view.job) || (lastOpenRow.current?.job_id === view.job ? lastOpenRow.current : undefined);
   if (openRow) lastOpenRow.current = openRow;
   const rangeLabel = DATE_PRESETS.find((p) => p.value === view.range)?.label || 'Custom range';
@@ -468,7 +472,7 @@ export default function Jobs() {
               </>
             )}
             <span style={{ fontSize: 11.5, color: '#64748B', marginLeft: 'auto' }}>
-              {rangeLabel}{windowStart ? ` (since ${windowStart})` : ''}{view.automation || view.account || view.environment || view.q ? ' · with your filters' : ''}
+              {rangeLabel}{windowStart ? ` (since ${windowStart})` : ''}{view.automation || view.name || view.account || view.environment || view.q ? ' · with your filters' : ''}
             </span>
           </div>
 
@@ -510,6 +514,15 @@ export default function Jobs() {
                 {(facets.automations || []).map((f) => <option key={f.value} value={f.value}>{f.value} ({n(f.count)})</option>)}
                 {view.automation && !(facets.automations || []).some((f) => f.value === view.automation) && <option value={view.automation}>{view.automation}</option>}
               </FilterSelect>
+              {/* Name given when the job was submitted (e.g. a schedule's
+                  automation_name). Only jobs that have a name are listed. */}
+              {((facets.names || []).length > 0 || view.name) && (
+                <FilterSelect label="Automation name" value={view.name} onChange={(v) => setView({ name: v })} width={220}>
+                  <option value="">All automation names</option>
+                  {(facets.names || []).map((f) => <option key={f.value} value={f.value}>{f.value} ({n(f.count)})</option>)}
+                  {view.name && !(facets.names || []).some((f) => f.value === view.name) && <option value={view.name}>{view.name}</option>}
+                </FilterSelect>
+              )}
               <FilterSelect label="Account" value={view.account} onChange={(v) => setView({ account: v })} width={160}>
                 <option value="">All accounts</option>
                 {(facets.accounts || []).map((f) => <option key={f.value} value={f.value}>{f.value} ({n(f.count)})</option>)}
@@ -525,7 +538,7 @@ export default function Jobs() {
                 {SORTS.map((s) => <option key={s.value} value={s.value === 'started_desc' ? '' : s.value}>{s.label}</option>)}
               </FilterSelect>
               {filtersActive && (
-                <Btn variant="ghost" size="sm" onClick={() => { setSearchText(''); setView({ status: 'ALL', q: '', automation: '', account: '', environment: '', range: '7d', from: '', to: '' }); }}>
+                <Btn variant="ghost" size="sm" onClick={() => { setSearchText(''); setView({ status: 'ALL', q: '', automation: '', name: '', account: '', environment: '', range: '7d', from: '', to: '' }); }}>
                   Clear filters
                 </Btn>
               )}

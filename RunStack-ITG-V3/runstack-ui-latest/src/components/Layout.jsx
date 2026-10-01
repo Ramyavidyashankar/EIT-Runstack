@@ -3,7 +3,7 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
-import { canAccess, DR_SWITCHOVER_ACCESS } from '../auth/access';
+import { canAccess, DR_SWITCHOVER_ACCESS, SQL_HEALTHCHECK_ACCESS } from '../auth/access';
 import { requestPageRefresh } from '../hooks/usePageRefresh';
 import { getUnsavedChangesMessage } from '../hooks/useNavigation';
 import { getApiActivity, subscribeApiActivity } from '../api/client';
@@ -23,11 +23,10 @@ const NAV = [
     { to: '/schedules', label: 'Triggers & Schedules',  icon: IconClock, minRole: 'operator' },
     { to: '/accounts',  label: 'Registered Targets',    icon: IconCloud },
   ]},
-  // Database-level operations. Only features that exist are listed —
-  // e.g. add { to: '/database/health-checks', label: 'Database Health
-  // Checks', ... } here once that page and its backend ship.
+  // Database-level operations. Only features that exist are listed.
   { group: 'Database Operations', items: [
-    { to: '/database/dr-switchover', label: 'DR Switchover', icon: IconSwitch, ...DR_SWITCHOVER_ACCESS },
+    { to: '/database/sql-health-check', label: 'SQL Health Check', icon: IconPulse, ...SQL_HEALTHCHECK_ACCESS },
+    { to: '/database/dr-switchover', label: 'SQL DR Switchover', icon: IconSwitch, ...DR_SWITCHOVER_ACCESS },
   ]},
   { group: 'Config', items: [
     { to: '/docs',      label: 'SSM Documents',         icon: IconDoc   },
@@ -403,6 +402,12 @@ function IconClock({ size, color }) {
   return <Icon size={size} color={color}>
     <circle cx="8" cy="8" r="6"/>
     <path d="M8 5v3.5l2.5 1.5"/>
+  </Icon>;
+}
+// Pulse line — a health check.
+function IconPulse({ size, color }) {
+  return <Icon size={size} color={color}>
+    <path d="M1.5 8.5h3l1.5-4 3 7 1.5-3h4"/>
   </Icon>;
 }
 // Two opposing arrows — a planned role swap between replicas.

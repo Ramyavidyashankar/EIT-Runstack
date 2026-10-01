@@ -149,6 +149,53 @@ export async function fetchJob(jobId) {
   return apiFetch(`/jobs/${jobId}`);
 }
 
+// ─── SQL Health Check (Database Operations) ──────────────────────────────────
+
+/** GET /batch-healthcheck/options — targets the caller may check (GDBA list
+ *  resolved to the instance catalog, scoped server-side) and the available
+ *  checks read from the SSM documents. */
+export async function fetchSqlHealthcheckOptions() {
+  return apiFetch('/batch-healthcheck/options');
+}
+
+/** POST /batch-healthcheck — start one check on one server.
+ *  Returns { jobs: [{ job_id, ... }], deduplicated? }. A check already
+ *  running for the same server comes back as an error whose body.jobs
+ *  holds the running job. */
+export async function runSqlHealthcheck({ instanceId, checkType, parameters } = {}) {
+  return apiFetch('/batch-healthcheck', {
+    method: 'POST',
+    body: JSON.stringify({ instance_id: instanceId, check_type: checkType, parameters: parameters || {} }),
+  });
+}
+
+// ─── Execution Details ───────────────────────────────────────────────────────
+
+function qsOf(params) {
+  const qs = new URLSearchParams();
+  Object.entries(params || {}).forEach(([k, v]) => {
+    if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+  });
+  const s = qs.toString();
+  return s ? `?${s}` : '';
+}
+
+/** GET /jobs/{jobId}/execution — header, per-status counts and one page of
+ *  targets (servers) for the job, or for its whole execution group.
+ *  params: { limit, cursor, q, status, target, scope }. `target` is a key
+ *  from a previous response; the backend resolves every AWS location
+ *  itself. Pass { signal } to cancel on navigation. */
+export async function fetchExecution(jobId, params = {}, { signal } = {}) {
+  return apiFetch(`/jobs/${encodeURIComponent(jobId)}/execution${qsOf(params)}`, { signal });
+}
+
+/** GET /jobs/{jobId}/logs — incremental stdout/stderr for one target.
+ *  params: { target, cursor, direction: 'forward' | 'backward' }.
+ *  Cursors are opaque; send back exactly what the API returned. */
+export async function fetchExecutionLogs(jobId, params = {}, { signal } = {}) {
+  return apiFetch(`/jobs/${encodeURIComponent(jobId)}/logs${qsOf(params)}`, { signal });
+}
+
 
 
 export async function fetchSSMDocuments({ type = 'Command', owner = 'Self' } = {}) {

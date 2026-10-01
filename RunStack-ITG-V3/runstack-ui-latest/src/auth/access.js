@@ -31,3 +31,13 @@ export function canAccess({ role, groups }, { minRole, orGroups } = {}) {
   const list = Array.isArray(orGroups) ? orGroups : orGroups ? [orGroups] : [];
   return list.some(g => groups?.includes(g));
 }
+
+// SQL Health Check: same audience as DR Switchover — operators/admins, or
+// GDBA SQL team members. The backend (authorize_action "sql_healthcheck")
+// additionally requires the gdba-sql / sql-db-healthcheck capability to be
+// enabled and scoped to the chosen server; this only decides whether the
+// sidebar link and page are shown.
+export const SQL_HEALTHCHECK_ACCESS = {
+  minRole: 'operator',
+  orGroups: ['runstack-team-gdba-sql', 'runstack-team-gdba'],
+};

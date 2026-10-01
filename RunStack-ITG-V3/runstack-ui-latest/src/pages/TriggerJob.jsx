@@ -75,6 +75,14 @@ const DEFAULT_PARAMS = {
   },
 };
 
+// One-click "just run a command" choices for SSM-RunCommand. These are
+// AWS-owned documents (same names in every account and region), so they
+// work regardless of the Document source selected.
+const QUICK_COMMAND_DOCS = [
+  { doc: 'AWS-RunShellScript', label: 'Run a shell command (Linux)' },
+  { doc: 'AWS-RunPowerShellScript', label: 'Run a PowerShell command (Windows)' },
+];
+
 function getDefaultParams(type, doc) {
   return DEFAULT_PARAMS[type]?.[doc] || DEFAULT_PARAMS[type]?.default || '{}';
 }
@@ -523,14 +531,13 @@ export default function TriggerJob() {
       .then(data => {
         const list = data.documents || [];
         setDocs(list);
+        // Never pre-select a document: picking the first one in the list
+        // (e.g. "C Drive Cleanup") made it easy to run the wrong automation.
+        // Keep the current choice if it's still available, or a quick
+        // command document (AWS-Run*Script), otherwise start empty.
         setForm(prev => {
-          const stillValid = list.some(d => d.name === prev.docName);
-          if (stillValid) return prev;
-          const first = list[0];
-          const nextParams = first ? getDefaultParams(prev.automation_type, first.name) : prev.params;
-          return first
-            ? { ...prev, docName: first.name, docArn: first.arn || '', params: injectInstanceId(nextParams, prev.resource_id) }
-            : { ...prev, docName: '', docArn: '' };
+          const stillValid = list.some(d => d.name === prev.docName) || QUICK_COMMAND_DOCS.some(q => q.doc === prev.docName);
+          return stillValid ? prev : { ...prev, docName: '', docArn: '' };
         });
       })
       .catch(e => setDocsError(e.message))
@@ -541,7 +548,14 @@ export default function TriggerJob() {
     const val = e.target.value;
     setForm(prev => {
       const next = { ...prev, [k]: val };
-      if (k === 'automation_type') next.params = getDefaultParams(val, '');
+      if (k === 'automation_type') {
+        next.params = getDefaultParams(val, '');
+        // Instance IDs are only auto-filled when a server is picked while the
+        // type is already SSM-RunCommand. Picking the server first and the
+        // type second left them empty, which kept the review / Run Automation
+        // section hidden. Fill them from the selected server here too.
+        if (val === 'SSM-RunCommand' && !prev.instances && prev.resource_id) next.instances = prev.resource_id;
+      }
       return next;
     });
   };
@@ -830,10 +844,30 @@ export default function TriggerJob() {
                   <label style={{ fontSize: 13, fontWeight: 700, color: '#0F172A', display: 'block', marginBottom: 6 }}>
                     Automation
                   </label>
+                  {isRunCommand && (
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8, alignItems: 'center' }}>
+                      <span style={{ fontSize: 11.5, color: '#64748B' }}>Quick command:</span>
+                      {QUICK_COMMAND_DOCS.map(q => (
+                        <Btn key={q.doc} size="sm" variant={form.docName === q.doc ? 'primary' : 'default'}
+                          onClick={() => setForm(prev => ({
+                            ...prev, docName: q.doc, docArn: '',
+                            params: injectInstanceId(getDefaultParams(prev.automation_type, q.doc), prev.resource_id),
+                          }))}>
+                          {q.label}
+                        </Btn>
+                      ))}
+                    </div>
+                  )}
                   <SearchablePicker
                     value={form.docName} onChange={setDoc} options={docPickerOptions}
-                    placeholder="Search documents…" disabled={docsLoading || docs.length === 0}
+                    placeholder={isRunCommand ? 'Or choose a document…' : 'Choose an automation…'}
+                    disabled={docsLoading || docs.length === 0}
                   />
+                  {!form.docName && !docsLoading && (
+                    <div style={{ fontSize: 11.5, color: '#64748B', marginTop: 4 }}>
+                      Nothing is selected yet — choose {isRunCommand ? 'a quick command or ' : ''}an automation to continue.
+                    </div>
+                  )}
                   <div style={{ fontSize: 11, color: '#94A3B8', marginTop: 4, minHeight: 14 }}>
                     {docsLoading ? 'Loading documents…'
                       : docsError ? `Could not load documents: ${docsError}`
@@ -947,6 +981,13 @@ export default function TriggerJob() {
               </div>
             )}
           </Card>
+
+            {/* Say why the Run step isn't shown yet, instead of hiding it silently. */}
+            {step2Complete && !step3Complete && (
+              <div style={{ fontSize: 11.5, color: '#92400E', background: '#FDF3E4', border: '1px solid #F3D9AE', borderRadius: 8, padding: '8px 12px' }}>
+                To continue, fix: {[!paramsValid && 'Parameters JSON (invalid)', isRunCommand && !form.instances.trim() && 'Instance IDs'].filter(Boolean).join(', ')}
+              </div>
+            )}
 
             {/* ── Review before you run — reveals once parameters are valid ── */}
             {step3Complete && (

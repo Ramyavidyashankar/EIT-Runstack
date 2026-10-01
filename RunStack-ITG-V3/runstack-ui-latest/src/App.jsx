@@ -2,7 +2,8 @@ import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import Layout from './components/Layout';
 import Dashboard from './pages/Dashboard';
-import Jobs, { JobDetail } from './pages/Jobs';
+import Jobs from './pages/Jobs';
+import ExecutionDetails from './pages/ExecutionDetails';
 import TriggerJob from './pages/TriggerJob';
 import { DLQ, Settings } from './pages/Schedules';
 import SSMDocuments from './pages/SSMDocuments';
@@ -11,12 +12,13 @@ import TriggersSchedules from './pages/TriggersSchedules';
 import Uploads from './pages/Uploads';
 import UsersRoles from './pages/UsersRoles';
 import DRSwitchover from './pages/DRSwitchover';
+import SQLHealthCheck from './pages/SQLHealthCheck';
 import { isConfigured } from './api/client';
 import { AuthProvider, useAuth } from './auth/AuthContext';
 import Login from './auth/Login';
 import AuthCallback from './auth/AuthCallback';
 import RequireRole from './auth/RequireRole';
-import { DR_SWITCHOVER_ACCESS } from './auth/access';
+import { DR_SWITCHOVER_ACCESS, SQL_HEALTHCHECK_ACCESS } from './auth/access';
 import { Spinner } from './components/ui';
 
 function ConfigWarning() {
@@ -59,11 +61,14 @@ function AppRoutes() {
       <Routes>
         <Route path="/"            element={<Dashboard/>}/>
         <Route path="/jobs"        element={<Jobs/>}/>
-        <Route path="/jobs/:jobId" element={<JobDetail/>}/>
+        <Route path="/jobs/:jobId" element={<ExecutionDetails/>}/>
         <Route path="/trigger"     element={<TriggerJob/>}/>
         <Route path="/schedules"   element={<RequireRole minRole="operator"><TriggersSchedules/></RequireRole>}/>
         <Route path="/dlq"         element={<RequireRole minRole="operator"><DLQ/></RequireRole>}/>
         <Route path="/accounts"    element={<RegisteredTargets/>}/>
+        <Route path="/database/sql-health-check" element={
+          <RequireRole minRole={SQL_HEALTHCHECK_ACCESS.minRole} orGroup={SQL_HEALTHCHECK_ACCESS.orGroups}><SQLHealthCheck/></RequireRole>
+        }/>
         <Route path="/database/dr-switchover" element={
           <RequireRole minRole={DR_SWITCHOVER_ACCESS.minRole} orGroup={DR_SWITCHOVER_ACCESS.orGroups}><DRSwitchover/></RequireRole>
         }/>
