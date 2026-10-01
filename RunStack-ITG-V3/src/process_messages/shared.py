@@ -271,6 +271,21 @@ def normalize_runcommand_data(
         data.pop("TargetDocumentName", None)
         data.pop("TargetLocations", None)
 
+        # Running output for the Execution Details view: ask the SSM Agent
+        # to stream stdout/stderr to CloudWatch Logs in the target
+        # account/region. Only added when the caller did not supply its
+        # own CloudWatchOutputConfig. If the managed node cannot write to
+        # CloudWatch the command still runs; only the live output is
+        # missing. Kill switch: SSM_CLOUDWATCH_OUTPUT_ENABLED=false.
+        # (Cross-region commands run through RunStack-Generic-RunCommand-
+        # Wrapper, whose aws:runCommand step must carry the same setting.)
+        if (os.getenv("SSM_CLOUDWATCH_OUTPUT_ENABLED", "false").lower() == "true"
+                and not data.get("CloudWatchOutputConfig")):
+            data["CloudWatchOutputConfig"] = {
+                "CloudWatchLogGroupName": os.getenv("SSM_OUTPUT_LOG_GROUP", "/aws/ssm/runstack"),
+                "CloudWatchOutputEnabled": True,
+            }
+
         # Cross-account SendCommand (ExecuteSSMRunCommand assumes a role
         # IN account_id) requires the fully-qualified document ARN even
         # when region == primary_region — a bare name only resolves
@@ -401,7 +416,14 @@ def transform_message_data(payload: Dict[str, Any], job_id: str) -> Dict[str, An
             "server_name",
             "environment",
             "OS",
-            "app_name"
+            "app_name",
+            # Execution Details: who started the job (set server-side from
+            # the caller's token by /notify, or by the scheduler) and the
+            # explicit bulk-run group it belongs to (set only by RunStack's
+            # own bulk producers — never taken from an API caller).
+            "initiated_by",
+            "execution_group_id",
+            "execution_group_label",
         ]
 
         for field in optional_fields:
@@ -419,6 +441,33 @@ def transform_message_data(payload: Dict[str, Any], job_id: str) -> Dict[str, An
             f"Error transforming message data: {str(e)}"
         )
         raise
+
+
+# ── Job origin (Execution Details) ─────────────────────────────────────────
+JOB_ORIGIN_FIELDS = ("initiated_by", "execution_group_id", "execution_group_label")
+
+
+def job_initiator(event: Dict[str, Any]) -> str:
+    """Who started a job, from the verified Cognito claims only: the user's
+    e-mail for people, client:<id> for machine (client-credentials) callers."""
+    claims = (event or {}).get("requestContext", {}).get("authorizer", {}).get("claims", {}) or {}
+    username = claims.get("username") or ""
+    if username:
+        email = username.replace("AzureAD_", "") if username.startswith("AzureAD_") else (claims.get("email") or username)
+        return email.strip().lower()
+    if claims.get("client_id"):
+        return f"client:{claims['client_id']}"
+    return "unknown"
+
+
+def stamp_job_origin(body: Dict[str, Any], event: Dict[str, Any]) -> Dict[str, Any]:
+    """For API-submitted jobs: drop any origin/group fields the caller sent
+    (they must not be able to impersonate someone or join another run's
+    group) and record the real initiator."""
+    for k in JOB_ORIGIN_FIELDS:
+        body.pop(k, None)
+    body["initiated_by"] = job_initiator(event)
+    return body
 
 
 def validate_message_payload(payload: Dict[str, Any]) -> bool:

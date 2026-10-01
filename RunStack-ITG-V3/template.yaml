@@ -507,6 +507,10 @@ Resources:
       - rCsaApiInstancesStatusOptionsMethod
       - rCsaApiGetAssessCheckMethod
       - rCsaApiAssessCheckIdOptionsMethod
+      - rCsaApiGetJobExecutionMethod
+      - rCsaApiJobExecutionOptionsMethod
+      - rCsaApiGetJobLogsMethod
+      - rCsaApiJobLogsOptionsMethod
     Properties:
       RestApiId: !Ref rCsaApi
 
@@ -689,6 +693,126 @@ Resources:
     Properties:
       RestApiId: !Ref rCsaApi
       ResourceId: !Ref rCsaApiJobIdResourceV2
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # ── Execution Details: GET /jobs/{jobId}/execution ──────────────────────────
+  # Per-server status, counts, steps and details for one execution.
+  # Read-only; process_messages checks access to the job and its targets
+  # before any SSM / CloudWatch read. Covered by the wildcard
+  # rCsaProcessMessagesApiPermissionAll Lambda permission. After deploying,
+  # redeploy the API stage so the new route is live.
+  rCsaApiJobExecutionResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiJobIdResourceV2
+      PathPart: execution
+
+  rCsaApiGetJobExecutionMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiJobExecutionResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 404
+        - StatusCode: 429
+        - StatusCode: 503
+
+  rCsaApiJobExecutionOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiJobExecutionResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        Type: MOCK
+        RequestTemplates:
+          application/json: '{"statusCode": 200}'
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
+            ResponseTemplates:
+              application/json: ''
+      MethodResponses:
+        - StatusCode: 200
+          ResponseParameters:
+            method.response.header.Access-Control-Allow-Origin: true
+            method.response.header.Access-Control-Allow-Methods: true
+            method.response.header.Access-Control-Allow-Headers: true
+
+  # ── Execution Details: GET /jobs/{jobId}/logs ──────────────────────────
+  # Incremental stdout/stderr for one target from CloudWatch Logs.
+  # Read-only; process_messages checks access to the job and its targets
+  # before any SSM / CloudWatch read. Covered by the wildcard
+  # rCsaProcessMessagesApiPermissionAll Lambda permission. After deploying,
+  # redeploy the API stage so the new route is live.
+  rCsaApiJobLogsResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ParentId: !Ref rCsaApiJobIdResourceV2
+      PathPart: logs
+
+  rCsaApiGetJobLogsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiJobLogsResource
+      HttpMethod: GET
+      AuthorizationType: COGNITO_USER_POOLS
+      AuthorizerId: !Ref rCsaApiAuthorizer
+      AuthorizationScopes:
+        - !Sub '${pSolutionName}-api/notify'
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
+      MethodResponses:
+        - StatusCode: 200
+        - StatusCode: 400
+        - StatusCode: 404
+        - StatusCode: 429
+        - StatusCode: 503
+
+  rCsaApiJobLogsOptionsMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref rCsaApi
+      ResourceId: !Ref rCsaApiJobLogsResource
       HttpMethod: OPTIONS
       AuthorizationType: NONE
       Integration:
@@ -2959,6 +3083,12 @@ Resources:
           AttributeType: S
         - AttributeName: notification_id
           AttributeType: S
+        # Execution Details: explicit bulk-run grouping (sparse — only jobs
+        # created by RunStack's bulk producers carry execution_group_id).
+        - AttributeName: execution_group_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
       KeySchema:
         - AttributeName: job_id
           KeyType: HASH
@@ -2969,6 +3099,27 @@ Resources:
               KeyType: HASH
           Projection:
             ProjectionType: ALL
+        - IndexName: execution-group-index
+          KeySchema:
+            - AttributeName: execution_group_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: INCLUDE
+            NonKeyAttributes:
+              - status
+              - resource_id
+              - server_name
+              - account_id
+              - region
+              - updated_at
+              - automation_type
+              - exec_outcome
+              - initiated_by
+              - notification_id
+              - app_id
+              - environment
 
 # ========================================================================
 # REMOVED: Security Groups and VPC Endpoints
@@ -3167,6 +3318,13 @@ Resources:
           DR_TOKENS_TABLE: !Ref rCsaDrTokensTable
           GDBA_ACCESS_TABLE: !Ref rCsaGdbaAccessTable
           TEAM_CAPABILITIES_TABLE: !Ref rCsaTeamCapabilitiesTable
+          # Execution Details (execution_details.py)
+          WORKFLOW_ARN: !Ref rCsaWorkflow
+          EXECUTION_GROUP_INDEX: execution-group-index
+          RUNSTACK_EXECUTION_REGIONS: 'us-east-1,us-west-2'
+          RUNSTACK_CENTRAL_ACCOUNT_ID: !Ref AWS::AccountId
+          SSM_OUTPUT_LOG_GROUP: /aws/ssm/runstack
+          SSM_CLOUDWATCH_OUTPUT_ENABLED: 'false'
           # Same thresholds for every AG — deploy-time parameters, not a
           # per-AG DynamoDB table. See pDrMaxLogQueueKB etc. in Parameters.
           DR_MAX_LOG_QUEUE_KB: !Ref pDrMaxLogQueueKB

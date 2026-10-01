@@ -30,8 +30,10 @@ Modular layout (split from a single ~4,300-line file):
 - instances.py     — /agent/instances, /app-instances
 - tidal.py         — /tidal/apps/{AppId}/agents
 - healthcheck.py   — /batch-healthcheck, /instances/status, /assess/{checkId}
+- sql_healthcheck.py — /batch-healthcheck/options, typed POST /batch-healthcheck (check_type)
 - dynatrace.py     — /dynatrace/ags(/{AGName}/servers|roles(/{JobId}))
 - dr_failover.py   — /dr-failover/{AGName}/config, plan, execute, approve, status, plans(/{PlanId}), runs
+- execution_details.py — /jobs/{jobId}/execution, /jobs/{jobId}/logs (Execution Details view)
 This file (app.py) stays the Lambda entry point: SQS message processing
 (process_single_message) and the top-level API Gateway dispatcher
 (handle_api_gateway_request), which now just routes to the modules above.
@@ -54,6 +56,8 @@ import tidal
 import healthcheck
 import dynatrace
 import dr_failover
+import execution_details
+import sql_healthcheck
 
 
 def handle_api_gateway_request(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -165,6 +169,12 @@ def handle_api_gateway_request(event: Dict[str, Any]) -> Dict[str, Any]:
             return jobs.handle_jobs_query(event, http_method, path, path_parameters, query_params)
         elif path.endswith("/recent"):
             return jobs.handle_jobs_recent(event, http_method, path, path_parameters, query_params)
+        # Execution Details (read-only). Must be before the bare {jobId}
+        # branch, which would otherwise swallow /jobs/{jobId}/execution.
+        elif "jobId" in path_parameters and path.endswith("/execution") and http_method == "GET":
+            return execution_details.handle_execution_details(event, http_method, path, path_parameters, query_params)
+        elif "jobId" in path_parameters and path.endswith("/logs") and http_method == "GET":
+            return execution_details.handle_execution_logs(event, http_method, path, path_parameters, query_params)
         elif "jobId" in path_parameters:
             return jobs.handle_job_detail(event, http_method, path, path_parameters, query_params)
         elif path.endswith("/auth/callback") and http_method == "GET":
@@ -177,6 +187,9 @@ def handle_api_gateway_request(event: Dict[str, Any]) -> Dict[str, Any]:
             return auth.handle_ui_login(event, http_method, path, path_parameters, query_params)
         elif "/tidal/apps/" in path and path.endswith("/agents") and http_method == "GET":
             return tidal.handle_tidal_agents(event, http_method, path, path_parameters, query_params)
+        # SQL Health Check page (Database Operations): options for the form.
+        elif path.endswith("/batch-healthcheck/options") and http_method == "GET":
+            return sql_healthcheck.handle_healthcheck_options(event, http_method, path, path_parameters, query_params)
         elif path.endswith("/batch-healthcheck") and http_method == "POST":
             return healthcheck.handle_batch_healthcheck(event, http_method, path, path_parameters, query_params)
         elif "/instances/status" in path and http_method == "POST":

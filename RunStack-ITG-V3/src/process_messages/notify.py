@@ -109,6 +109,10 @@ def handle_notify(event, http_method, path, path_parameters, query_params):
                 })
             }
 
+    # Execution Details: record who started the job (from the verified
+    # token) and drop any origin/group fields the caller supplied.
+    stamp_job_origin(body, event)
+
     logger.info(f"DEBUG about to send to SQS: {json.dumps(body)}")
 
     sqs.send_message(

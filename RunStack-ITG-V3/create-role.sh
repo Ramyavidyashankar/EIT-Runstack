@@ -139,6 +139,18 @@ PERMISSIONS_POLICY=$(cat << EOF
       "Resource": "*"
     },
     {
+      "Sid": "RunStackExecutionDetailsLogsRead",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogStreams",
+        "logs:GetLogEvents"
+      ],
+      "Resource": [
+        "arn:aws:logs:*:${CURRENT_ACCOUNT_ID}:log-group:/aws/ssm/runstack",
+        "arn:aws:logs:*:${CURRENT_ACCOUNT_ID}:log-group:/aws/ssm/runstack:*"
+      ]
+    },
+    {
       "Sid": "AllowSSMOutputsToS3",
       "Effect": "Allow",
       "Action": [

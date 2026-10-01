@@ -24,7 +24,7 @@ from shared import *
 from shared import _fetch_sharepoint_server_list
 
 
-def _dispatch_one_healthcheck(server, inst):
+def _dispatch_one_healthcheck(server, inst, origin=None):
     """
     Build, validate, and dispatch a single healthcheck job for one already-
     resolved instance (or None if unresolved). Shared by both the bulk
@@ -54,6 +54,9 @@ def _dispatch_one_healthcheck(server, inst):
         },
         "server_name": server,
     }
+    # Execution Details: initiator + explicit group for this sweep (set
+    # server-side here, never from the request body).
+    notify_payload.update({k: v for k, v in (origin or {}).items() if v})
 
     if not validate_message_payload(notify_payload):
         return {
@@ -83,6 +86,17 @@ def _dispatch_one_healthcheck(server, inst):
 
 
 def handle_batch_healthcheck(event, http_method, path, path_parameters, query_params):
+    # SQL Health Check page: one target + one check ("check_type" in the
+    # body). Its own authorization/validation lives in sql_healthcheck.py.
+    # Without check_type this route is unchanged (AQS SQL agent sweep).
+    try:
+        _peek = json.loads(event.get("body") or "{}")
+    except (TypeError, ValueError):
+        _peek = {}
+    if isinstance(_peek, dict) and _peek.get("check_type"):
+        import sql_healthcheck
+        return sql_healthcheck.handle_typed_healthcheck(event, _peek)
+
     denied = authorize_action(event, "sql_healthcheck")
     if denied:
         return denied
@@ -99,6 +113,7 @@ def handle_batch_healthcheck(event, http_method, path, path_parameters, query_pa
                 "body": json.dumps({"error": "HEALTHCHECK_DOCUMENT_NAME is not configured"})
             }
 
+        initiator = job_initiator(event)
         instances = get_instances_for_apps(["ALL"])
         by_name = {}
         for inst in instances:
@@ -118,7 +133,7 @@ def handle_batch_healthcheck(event, http_method, path, path_parameters, query_pa
         # single named server.
         if server_name:
             inst = by_name.get(server_name.strip().lower())
-            job = _dispatch_one_healthcheck(server_name, inst)
+            job = _dispatch_one_healthcheck(server_name, inst, {"initiated_by": initiator})
             return {
                 "statusCode": 200,
                 "headers": CORS_HEADERS,
@@ -130,16 +145,24 @@ def handle_batch_healthcheck(event, http_method, path, path_parameters, query_pa
 
         servers = _fetch_sharepoint_server_list(folder_override, file_override)
 
+        # One explicit group per sweep, so Execution Details can show every
+        # server in this run together (never grouped by name or time).
+        origin = {
+            "initiated_by": initiator,
+            "execution_group_id": f"grp-hc-{uuid.uuid4()}",
+            "execution_group_label": f"SQL Database Health Check ({len(servers)} servers)",
+        }
         jobs = []
         for server in servers:
             inst = by_name.get(server.strip().lower())
-            jobs.append(_dispatch_one_healthcheck(server, inst))
+            jobs.append(_dispatch_one_healthcheck(server, inst, origin))
 
         return {
             "statusCode": 200,
             "headers": CORS_HEADERS,
             "body": json.dumps({
                 "total_servers": len(servers),
+                "execution_group_id": origin["execution_group_id"],
                 "jobs": jobs,
             })
         }

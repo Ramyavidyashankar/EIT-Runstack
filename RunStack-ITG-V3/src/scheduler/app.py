@@ -241,6 +241,19 @@ def process_scheduled_event(event: Dict[str, Any]) -> Dict[str, Any]:
                 "failed_sends": 0
             }
         
+        # One explicit execution group per scheduled run, so Execution
+        # Details shows this run's servers together. Never inferred from
+        # names or timing.
+        execution_group_id = f"grp-sch-{uuid.uuid4()}"
+        # The schedule's automation_name may sit inside automation_data in
+        # the payload template; promote it so every view can show it.
+        automation_name = (payload_template.get("automation_name")
+                           or (payload_template.get("automation_data") or {}).get("automation_name"))
+        if rule_name and rule_name != "unknown":
+            execution_group_label = f"{automation_name} (schedule {rule_name})" if automation_name else f"Schedule {rule_name}"
+        else:
+            execution_group_label = automation_name or f"Scheduled {payload_template['automation_data'].get('DocumentName', 'run')}"
+
         # Process each account_id,instance_id pair
         successful_sends = 0
         failed_sends = 0
@@ -255,6 +268,11 @@ def process_scheduled_event(event: Dict[str, Any]) -> Dict[str, Any]:
                 processed_payload["account_id"] = account_id
                 processed_payload["region"] = current_region
                 processed_payload["resource_id"] = instance_id
+                processed_payload["initiated_by"] = f"schedule:{rule_name}" if rule_name and rule_name != "unknown" else "schedule"
+                if automation_name and not processed_payload.get("automation_name"):
+                    processed_payload["automation_name"] = automation_name
+                processed_payload["execution_group_id"] = execution_group_id
+                processed_payload["execution_group_label"] = execution_group_label
                 
                 # Send message to SQS
                 if send_message_to_sqs(processed_payload):
@@ -269,6 +287,7 @@ def process_scheduled_event(event: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(f"Processing complete. Successful: {successful_sends}, Failed: {failed_sends}")
         
         return {
+            "execution_group_id": execution_group_id,
             "processed_pairs": len(account_instance_pairs),
             "successful_sends": successful_sends,
             "failed_sends": failed_sends

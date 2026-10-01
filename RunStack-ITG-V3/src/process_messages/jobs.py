@@ -334,6 +334,15 @@ def document_short_name(job: dict) -> str:
     return doc.split(":document/", 1)[1] if ":document/" in doc else doc
 
 
+def automation_name_key(job: dict):
+    """Normalised automation_name (top-level, or inside automation_data for
+    older scheduled jobs) — what the "Automation name" filter matches.
+    Must match job_stats.automation_name_of()."""
+    name = job.get("automation_name_key") or job.get("automation_name") or (job.get("automation_data") or {}).get("automation_name")
+    name = " ".join(str(name).split()) if name else ""
+    return name[:200] or None
+
+
 def automation_label(job: dict) -> str:
     if job.get("automation_type") == "EC2-Action":
         return "EC2 Status Check"
@@ -382,7 +391,9 @@ def _scan_all_jobs(force: bool = False):
     names = {f"#a{i}": a for i, a in enumerate(_LIST_ATTRS)}
     names["#ad"] = "automation_data"
     names["#dn"] = "DocumentName"
-    projection = ", ".join(list(names.keys())[:len(_LIST_ATTRS)]) + ", #ad.#dn"
+    names["#an"] = "automation_name"
+    names["#nk"] = "automation_name_key"
+    projection = ", ".join(list(names.keys())[:len(_LIST_ATTRS)]) + ", #ad.#dn, #ad.#an, #nk"
     kwargs = {"ProjectionExpression": projection, "ExpressionAttributeNames": names}
     items, truncated = [], False
     while True:
@@ -398,6 +409,7 @@ def _scan_all_jobs(force: bool = False):
         j["automation_label"] = automation_label(j)
         j["document_name"] = document_short_name(j)
         j["status_group"] = status_group(j.get("status"))
+        j["automation_name_key"] = automation_name_key(j)
     cache.update(items=items, fetched=now, truncated=truncated)
     return items, truncated, now
 
@@ -476,6 +488,13 @@ def _list_row(j):
     j.setdefault("automation_label", automation_label(j))
     j.setdefault("document_name", document_short_name(j))
     j["status_group"] = status_group(j.get("status"))
+    # Older scheduled jobs carry automation_name inside automation_data
+    # (the schedule's payload template); show it like a top-level one.
+    if not j.get("automation_name"):
+        nested = (j.get("automation_data") or {}).get("automation_name") or j.get("automation_name_key")
+        if nested:
+            j["automation_name"] = nested
+    j.pop("automation_name_key", None)
     j.pop("search_text", None)
     j.pop("automation_data", None)
     return j
@@ -491,7 +510,8 @@ def _filters(qp):
     if any(qp.get(k) and v is None for k, v in (("from", date_from), ("to", date_to))):
         return None, "from and to must be ISO-8601 timestamps"
     return {"status": status, "from": date_from, "to": date_to, "sort": qp.get("sort") or "started_desc",
-            "automation": qp.get("automation") or None, "account": qp.get("account") or None,
+            "automation": qp.get("automation") or None, "name": (" ".join((qp.get("name") or "").split()) or None),
+            "account": qp.get("account") or None,
             "environment": qp.get("environment") or None, "region": qp.get("region") or None,
             "q": (qp.get("q") or "").strip().lower() or None}, None
 
@@ -650,6 +670,7 @@ def _legacy_query(qp):
         snapshot = [j for j in items if not as_of or str(j.get("created_at", "")) <= as_of]
 
         automation = qp.get("automation")
+        name_filter = " ".join((qp.get("name") or "").split()) or None
         account = qp.get("account")
         environment = qp.get("environment")
         region = qp.get("region")
@@ -662,6 +683,8 @@ def _legacy_query(qp):
             if date_to and created > date_to:
                 return False
             if automation and j.get("automation_label") != automation:
+                return False
+            if name_filter and j.get("automation_name_key") != name_filter:
                 return False
             if account and str(j.get("account_id", "")) != account:
                 return False
@@ -720,6 +743,7 @@ def _legacy_query(qp):
                 "as_of": as_of or max((str(j.get("created_at", "")) for j in items), default=None),
                 "facets": {
                     "automations": facet("automation_label"),
+                    "names": facet("automation_name_key"),
                     "accounts": facet("account_id"),
                     "environments": facet("environment"),
                     "regions": facet("region"),

@@ -67,6 +67,7 @@ def handle_notify_sync(event, http_method, path, path_parameters, query_params):
             "body": json.dumps({"error": "Invalid payload"})
         }
 
+    stamp_job_origin(body, event)   # initiator from the token; caller can't set origin/group fields
     transformed = transform_message_data(body, job_id)
     if not store_message_in_dynamodb(transformed):
         return {

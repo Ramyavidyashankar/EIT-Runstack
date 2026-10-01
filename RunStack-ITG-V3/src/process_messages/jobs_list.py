@@ -240,7 +240,7 @@ def _filter_expr(f, include_status=True):
         else:  # PENDING = anything not in the other groups; ACTIVE = pending + running
             excluded = _RAW["COMPLETED"] + _RAW["FAILED"] + ([] if status == "ACTIVE" else _RAW["RUNNING"])
             AND(Attr("status").not_exists() | ~Attr("status").is_in(_variants(excluded)))
-    for param, attr in (("automation", "automation_label"), ("account", "account_id"),
+    for param, attr in (("automation", "automation_label"), ("name", "automation_name_key"), ("account", "account_id"),
                         ("environment", "environment"), ("region", "region")):
         if f.get(param):
             AND(Attr(attr).eq(f[param]))
@@ -404,12 +404,12 @@ def _group(status):
 def counts(f, force=False):
     """(status_counts, source, complete). status_counts ignore the status
     filter so the status tabs can show every group's number."""
-    only_time = not any(f.get(k) for k in ("automation", "account", "environment", "region", "q"))
+    only_time = not any(f.get(k) for k in ("automation", "name", "account", "environment", "region", "q"))
     if only_time and _hour_aligned(f.get("from")) and _hour_aligned(f.get("to")):
         c = _counts_from_counters(f)
         if c is not None:
             return c, "counters", True
-    cache_key = hashlib.sha1(json.dumps({k: f.get(k) for k in ("from", "to", "automation", "account", "environment",
+    cache_key = hashlib.sha1(json.dumps({k: f.get(k) for k in ("from", "to", "automation", "name", "account", "environment",
                                                                 "region", "q")}, sort_keys=True).encode()).hexdigest()
     hit = _count_cache.get(cache_key)
     if hit and not force and time.time() - hit[0] < COUNT_CACHE_SECONDS:
@@ -424,8 +424,9 @@ def counts(f, force=False):
 
 def facets():
     """Filter choices with all-time counts from FACET counters."""
-    out = {"automations": [], "accounts": [], "environments": [], "regions": []}
-    names = {"automation": "automations", "account": "accounts", "environment": "environments", "region": "regions"}
+    out = {"automations": [], "names": [], "accounts": [], "environments": [], "regions": []}
+    names = {"automation": "automations", "name": "names", "account": "accounts", "environment": "environments",
+             "region": "regions"}
     kwargs = {"KeyConditionExpression": Key("pk").eq("FACET")}
     while True:
         resp = _stats().query(**kwargs)

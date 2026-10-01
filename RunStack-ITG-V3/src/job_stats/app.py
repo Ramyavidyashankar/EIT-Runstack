@@ -35,6 +35,8 @@ For every job insert / status change / delete it:
 Manual actions (aws lambda invoke --payload '{"action": …}'):
    backfill   process every existing job (safe to re-run, resumable with
               the returned start_key); run once after deploying
+   backfill_names  add the "Automation name" facet to existing jobs (once,
+              after deploying that filter; idempotent and resumable)
    verify     recount from the jobs table and report any difference
 """
 
@@ -140,15 +142,29 @@ def utc_created(value):
     return dt.isoformat()
 
 
+def automation_name_of(job):
+    """Name given when the job was submitted. Older scheduled jobs carry it
+    inside automation_data (the schedule's payload template)."""
+    name = job.get("automation_name") or (job.get("automation_data") or {}).get("automation_name")
+    name = " ".join(str(name).split()) if name else ""
+    return name[:200] or None
+
+
 def list_fields(job):
     created = utc_created(job.get("created_at"))
     if not created:
         return {}
     label = automation_label(job)
     doc = document_short_name(job)
-    probe = {**job, "automation_label": label, "document_name": doc}
+    name = automation_name_of(job)
+    probe = {**job, "automation_label": label, "document_name": doc, "automation_name": name}
     text = " | ".join(str(probe.get(f) or "") for f in SEARCH_FIELDS if probe.get(f)).lower()[:2000]
-    return {"list_month": created[:7], "automation_label": label, "document_name": doc, "search_text": text}
+    out = {"list_month": created[:7], "automation_label": label, "document_name": doc, "search_text": text}
+    if name:
+        # automation_name_key: normalised name the "Automation name" filter
+        # matches on (also covers names stored inside automation_data).
+        out["automation_name_key"] = name
+    return out
 
 
 FACET_FIELDS = (("account", "account_id"), ("environment", "environment"), ("region", "region"))
@@ -161,6 +177,9 @@ def facet_keys(job, label=None):
     label = label or automation_label(job)
     if label:
         keys.insert(1, f"automation#{label}")
+    name = automation_name_of(job)
+    if name:
+        keys.append(f"name#{name}")
     return keys
 
 
@@ -401,6 +420,54 @@ def verify():
     return {"jobs_checked": n, "total_matches": not diffs, "total_diffs": diffs, "day_diffs": day_diffs[:50]}
 
 
+def backfill_names(start_key=None, context=None):
+    """One-off, after deploying the "Automation name" filter: give existing
+    jobs their automation_name_key list field and count them under their
+    name facet. Idempotent — a job whose marker already lists the name
+    facet is skipped — and resumable with the returned start_key."""
+    table = _resource().Table(JOBS_TABLE)
+    kwargs = {}
+    if start_key:
+        kwargs["ExclusiveStartKey"] = start_key
+    seen = named = added = 0
+    while True:
+        page = table.scan(**kwargs)
+        for job in page.get("Items", []):
+            seen += 1
+            name = automation_name_of(job)
+            if not name:
+                continue
+            named += 1
+            write_list_fields(job)
+            facet = f"name#{name}"
+            try:
+                _dynamo().transact_write_items(TransactItems=[
+                    {"Update": {
+                        "TableName": STATS_TABLE,
+                        "Key": {"pk": {"S": f"JOB#{job['job_id']}"}, "sk": {"S": "M"}},
+                        "UpdateExpression": "SET facets = list_append(if_not_exists(facets, :empty), :f)",
+                        "ConditionExpression": "attribute_exists(pk) AND NOT contains(facets, :fs)",
+                        "ExpressionAttributeValues": {":f": {"L": [{"S": facet}]}, ":fs": {"S": facet},
+                                                      ":empty": {"L": []}},
+                    }},
+                    _counter_update("FACET", facet, {"count": 1}),
+                ])
+                added += 1
+            except ClientError as e:
+                if e.response.get("Error", {}).get("Code") != "TransactionCanceledException":
+                    raise
+                # Already counted, or not counted at all yet (no marker) —
+                # the stream / main backfill will count it with its facets.
+        next_key = page.get("LastEvaluatedKey")
+        if not next_key:
+            return {"done": True, "jobs_seen": seen, "jobs_with_name": named, "name_facets_added": added}
+        if context is not None and context.get_remaining_time_in_millis() < 60_000:
+            return {"done": False, "jobs_seen": seen, "jobs_with_name": named, "name_facets_added": added,
+                    "start_key": json.loads(json.dumps(next_key, default=str)),
+                    "next": "invoke again with action backfill_names and this start_key"}
+        kwargs["ExclusiveStartKey"] = next_key
+
+
 def _plain(o):
     if isinstance(o, Decimal):
         return int(o) if o % 1 == 0 else float(o)
@@ -411,6 +478,8 @@ def lambda_handler(event, context):
     action = (event or {}).get("action")
     if action == "backfill":
         return json.loads(json.dumps(backfill(event.get("start_key"), context), default=_plain))
+    if action == "backfill_names":
+        return json.loads(json.dumps(backfill_names(event.get("start_key"), context), default=_plain))
     if action == "verify":
         return json.loads(json.dumps(verify(), default=_plain))
     records = (event or {}).get("Records", [])

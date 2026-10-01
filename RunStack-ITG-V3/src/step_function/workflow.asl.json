@@ -180,13 +180,13 @@
                 "RoleArn.$": "States.Format('arn:aws:iam::{}:role/runstack-cross-account-role', $.account_id)"
               },
               "ResultPath": "$.command_result",
-              "Next": "WaitForAutomationCommand",
+              "Next": "RecordAutomationDispatch",
               "Catch": [
                 {
                   "ErrorEquals": [
                     "States.ALL"
                   ],
-                  "Next": "CheckAutomationRetry",
+                  "Next": "RecordAutomationDispatchError",
                   "ResultPath": "$.error"
                 }
               ]
@@ -218,13 +218,13 @@
                 "RoleArn": "arn:aws:iam::246314649749:role/runstack-cross-account-role"
               },
               "ResultPath": "$.command_result",
-              "Next": "WaitForAutomationCommand",
+              "Next": "RecordAutomationTargetLocationsDispatch",
               "Catch": [
                 {
                   "ErrorEquals": [
                     "States.ALL"
                   ],
-                  "Next": "CheckAutomationRetry",
+                  "Next": "RecordAutomationDispatchError",
                   "ResultPath": "$.error"
                 }
               ]
@@ -546,6 +546,147 @@
                 "automation_data.$": "$.automation_data"
               },
               "Next": "CheckAutomationRegion"
+            },
+            "RecordAutomationDispatch": {
+              "Type": "Task",
+              "Comment": "Execution Details: records the SSM ID on the job so per-server status and logs can be found. Best effort - a failed write continues to the same next state.",
+              "Resource": "arn:aws:states:::dynamodb:updateItem",
+              "Parameters": {
+                "TableName": "runstack-jobs-table",
+                "Key": {
+                  "job_id": {
+                    "S.$": "$.job_id"
+                  }
+                },
+                "UpdateExpression": "SET ssm_dispatch = :d",
+                "ConditionExpression": "attribute_exists(job_id)",
+                "ExpressionAttributeValues": {
+                  ":d": {
+                    "M": {
+                      "kind": {
+                        "S": "automation"
+                      },
+                      "automation_execution_id": {
+                        "S.$": "$.command_result.AutomationExecutionId"
+                      },
+                      "dispatch_account": {
+                        "S.$": "$.account_id"
+                      },
+                      "dispatch_region": {
+                        "S.$": "$.region"
+                      },
+                      "dispatched_at": {
+                        "S.$": "$$.State.EnteredTime"
+                      },
+                      "attempt": {
+                        "N.$": "States.Format('{}', $.retry)"
+                      }
+                    }
+                  }
+                }
+              },
+              "ResultPath": null,
+              "Next": "WaitForAutomationCommand",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "WaitForAutomationCommand",
+                  "ResultPath": "$.record_dispatch_error"
+                }
+              ]
+            },
+            "RecordAutomationTargetLocationsDispatch": {
+              "Type": "Task",
+              "Comment": "Execution Details: records the SSM ID on the job so per-server status and logs can be found. Best effort - a failed write continues to the same next state.",
+              "Resource": "arn:aws:states:::dynamodb:updateItem",
+              "Parameters": {
+                "TableName": "runstack-jobs-table",
+                "Key": {
+                  "job_id": {
+                    "S.$": "$.job_id"
+                  }
+                },
+                "UpdateExpression": "SET ssm_dispatch = :d",
+                "ConditionExpression": "attribute_exists(job_id)",
+                "ExpressionAttributeValues": {
+                  ":d": {
+                    "M": {
+                      "kind": {
+                        "S": "automation_target_locations"
+                      },
+                      "automation_execution_id": {
+                        "S.$": "$.command_result.AutomationExecutionId"
+                      },
+                      "dispatch_account": {
+                        "S": "246314649749"
+                      },
+                      "dispatch_region": {
+                        "S": "us-east-1"
+                      },
+                      "dispatched_at": {
+                        "S.$": "$$.State.EnteredTime"
+                      },
+                      "attempt": {
+                        "N.$": "States.Format('{}', $.retry)"
+                      }
+                    }
+                  }
+                }
+              },
+              "ResultPath": null,
+              "Next": "WaitForAutomationCommand",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "WaitForAutomationCommand",
+                  "ResultPath": "$.record_dispatch_error"
+                }
+              ]
+            },
+            "RecordAutomationDispatchError": {
+              "Type": "Task",
+              "Comment": "Execution Details: saves why Systems Manager rejected the dispatch (error + cause) on the job. Best effort - a failed write continues to the same retry check.",
+              "Resource": "arn:aws:states:::dynamodb:updateItem",
+              "Parameters": {
+                "TableName": "runstack-jobs-table",
+                "Key": {
+                  "job_id": {
+                    "S.$": "$.job_id"
+                  }
+                },
+                "UpdateExpression": "SET dispatch_error = :e",
+                "ConditionExpression": "attribute_exists(job_id)",
+                "ExpressionAttributeValues": {
+                  ":e": {
+                    "M": {
+                      "detail": {
+                        "S.$": "States.JsonToString($.error)"
+                      },
+                      "step": {
+                        "S.$": "$$.State.Name"
+                      },
+                      "at": {
+                        "S.$": "$$.State.EnteredTime"
+                      }
+                    }
+                  }
+                }
+              },
+              "ResultPath": null,
+              "Next": "CheckAutomationRetry",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "CheckAutomationRetry",
+                  "ResultPath": "$.record_dispatch_error_failed"
+                }
+              ]
             }
           }
         }
@@ -619,13 +760,13 @@
                 "RoleArn.$": "States.Format('arn:aws:iam::{}:role/runstack-cross-account-role', $.account_id)"
               },
               "ResultPath": "$.command_result",
-              "Next": "WaitForCommand",
+              "Next": "RecordRunCommandDispatch",
               "Catch": [
                 {
                   "ErrorEquals": [
                     "States.ALL"
                   ],
-                  "Next": "CheckCommandRetry",
+                  "Next": "RecordRunCommandDispatchError",
                   "ResultPath": "$.error"
                 }
               ]
@@ -650,13 +791,13 @@
                 "RoleArn": "arn:aws:iam::246314649749:role/runstack-cross-account-role"
               },
               "ResultPath": "$.command_result",
-              "Next": "WaitForCommand",
+              "Next": "RecordRunCommandWrapperDispatch",
               "Catch": [
                 {
                   "ErrorEquals": [
                     "States.ALL"
                   ],
-                  "Next": "CheckCommandRetry",
+                  "Next": "RecordRunCommandDispatchError",
                   "ResultPath": "$.error"
                 }
               ]
@@ -981,6 +1122,147 @@
               },
               "ResultPath": "$",
               "Next": "CommandFailed"
+            },
+            "RecordRunCommandDispatch": {
+              "Type": "Task",
+              "Comment": "Execution Details: records the SSM ID on the job so per-server status and logs can be found. Best effort - a failed write continues to the same next state.",
+              "Resource": "arn:aws:states:::dynamodb:updateItem",
+              "Parameters": {
+                "TableName": "runstack-jobs-table",
+                "Key": {
+                  "job_id": {
+                    "S.$": "$.job_id"
+                  }
+                },
+                "UpdateExpression": "SET ssm_dispatch = :d",
+                "ConditionExpression": "attribute_exists(job_id)",
+                "ExpressionAttributeValues": {
+                  ":d": {
+                    "M": {
+                      "kind": {
+                        "S": "run_command"
+                      },
+                      "command_id": {
+                        "S.$": "$.command_result.Command.CommandId"
+                      },
+                      "dispatch_account": {
+                        "S.$": "$.account_id"
+                      },
+                      "dispatch_region": {
+                        "S.$": "$.region"
+                      },
+                      "dispatched_at": {
+                        "S.$": "$$.State.EnteredTime"
+                      },
+                      "attempt": {
+                        "N.$": "States.Format('{}', $.retry)"
+                      }
+                    }
+                  }
+                }
+              },
+              "ResultPath": null,
+              "Next": "WaitForCommand",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "WaitForCommand",
+                  "ResultPath": "$.record_dispatch_error"
+                }
+              ]
+            },
+            "RecordRunCommandWrapperDispatch": {
+              "Type": "Task",
+              "Comment": "Execution Details: records the SSM ID on the job so per-server status and logs can be found. Best effort - a failed write continues to the same next state.",
+              "Resource": "arn:aws:states:::dynamodb:updateItem",
+              "Parameters": {
+                "TableName": "runstack-jobs-table",
+                "Key": {
+                  "job_id": {
+                    "S.$": "$.job_id"
+                  }
+                },
+                "UpdateExpression": "SET ssm_dispatch = :d",
+                "ConditionExpression": "attribute_exists(job_id)",
+                "ExpressionAttributeValues": {
+                  ":d": {
+                    "M": {
+                      "kind": {
+                        "S": "run_command_wrapper"
+                      },
+                      "automation_execution_id": {
+                        "S.$": "$.command_result.AutomationExecutionId"
+                      },
+                      "dispatch_account": {
+                        "S": "246314649749"
+                      },
+                      "dispatch_region": {
+                        "S": "us-east-1"
+                      },
+                      "dispatched_at": {
+                        "S.$": "$$.State.EnteredTime"
+                      },
+                      "attempt": {
+                        "N.$": "States.Format('{}', $.retry)"
+                      }
+                    }
+                  }
+                }
+              },
+              "ResultPath": null,
+              "Next": "WaitForCommand",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "WaitForCommand",
+                  "ResultPath": "$.record_dispatch_error"
+                }
+              ]
+            },
+            "RecordRunCommandDispatchError": {
+              "Type": "Task",
+              "Comment": "Execution Details: saves why Systems Manager rejected the dispatch (error + cause) on the job. Best effort - a failed write continues to the same retry check.",
+              "Resource": "arn:aws:states:::dynamodb:updateItem",
+              "Parameters": {
+                "TableName": "runstack-jobs-table",
+                "Key": {
+                  "job_id": {
+                    "S.$": "$.job_id"
+                  }
+                },
+                "UpdateExpression": "SET dispatch_error = :e",
+                "ConditionExpression": "attribute_exists(job_id)",
+                "ExpressionAttributeValues": {
+                  ":e": {
+                    "M": {
+                      "detail": {
+                        "S.$": "States.JsonToString($.error)"
+                      },
+                      "step": {
+                        "S.$": "$$.State.Name"
+                      },
+                      "at": {
+                        "S.$": "$$.State.EnteredTime"
+                      }
+                    }
+                  }
+                }
+              },
+              "ResultPath": null,
+              "Next": "CheckCommandRetry",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "CheckCommandRetry",
+                  "ResultPath": "$.record_dispatch_error_failed"
+                }
+              ]
             }
           }
         }
