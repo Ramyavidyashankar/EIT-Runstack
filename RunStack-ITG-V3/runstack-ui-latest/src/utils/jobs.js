@@ -104,8 +104,21 @@ export function rangeToQuery(range, fromLocal, toLocal, now = Date.now()) {
   return {};
 }
 
+/** "1 completed · 1 failed" for a run row's per-server status counts. */
+export function runBreakdown(counts) {
+  const c = counts || {};
+  const parts = [
+    [c.RUNNING, 'running'], [c.PENDING, 'pending'], [c.COMPLETED, 'completed'], [c.FAILED, 'failed'],
+  ].filter(([v]) => v > 0).map(([v, l]) => `${v.toLocaleString('en-GB')} ${l}`);
+  return parts.join(' · ') || '—';
+}
+
 const CSV_COLUMNS = [
   ['job_id', (j) => j.job_id],
+  ['row_type', (j) => (j.is_run ? 'run' : 'job')],
+  ['execution_group_id', (j) => j.execution_group_id],
+  ['servers', (j) => (j.is_run ? j.server_count : 1)],
+  ['server_breakdown', (j) => (j.is_run ? runBreakdown(j.run_counts) : '')],
   ['automation', (j) => j.automation_label],
   ['document_name', (j) => j.document_name],
   ['automation_type', (j) => j.automation_type],

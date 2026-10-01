@@ -26,7 +26,7 @@ import JobDetailContent, { CopyButton } from '../components/JobDetail';
 import { queryJobs } from '../api/client';
 import { useAutoRefresh, usePageRefresh } from '../hooks/usePageRefresh';
 import {
-  DATE_PRESETS, downloadText, fmtFull, fmtStarted, jobDuration, jobsToCsv, pageRangeLabel, rangeToQuery, statusGroup,
+  DATE_PRESETS, downloadText, fmtFull, fmtStarted, jobDuration, jobsToCsv, pageRangeLabel, rangeToQuery, runBreakdown, statusGroup,
 } from '../utils/jobs';
 
 const PAGE_SIZE = 50;
@@ -125,8 +125,25 @@ function Th({ children, width, align }) {
   );
 }
 
+function RunTarget({ job }) {
+  const many = (job.server_count || 0) > 1;
+  return (
+    <>
+      <div style={{ fontWeight: 600, color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {many ? `${n(job.server_count)} servers` : (job.server_name || job.resource_id || '1 server')}
+        {job.app_name && <span style={{ fontWeight: 400, color: '#64748B' }}> · {job.app_name}</span>}
+        {!job.app_name && job.app_count > 1 && <span style={{ fontWeight: 400, color: '#64748B' }}> · {job.app_count} applications</span>}
+      </div>
+      <div style={{ fontSize: 11, color: '#64748B', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {runBreakdown(job.run_counts)}
+      </div>
+    </>
+  );
+}
+
 function JobRow({ job, selected, onOpen, now }) {
   const group = statusGroup(job.status);
+  const isRun = !!job.is_run;
   const dur = jobDuration(job, now);
   const hasName = job.server_name || job.app_name;
   const td = { padding: '8px 12px', borderBottom: '1px solid #F1F5F9', verticalAlign: 'middle', fontSize: 12.5 };
@@ -143,6 +160,7 @@ function JobRow({ job, selected, onOpen, now }) {
         </div>
       </td>
       <td style={{ ...td, maxWidth: 240 }}>
+        {isRun ? <RunTarget job={job} /> : (<>
         {hasName && (
           <div style={{ fontWeight: 600, color: '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {job.server_name || job.app_name}
@@ -152,13 +170,22 @@ function JobRow({ job, selected, onOpen, now }) {
         <div style={{ fontFamily: 'var(--font-mono)', fontSize: hasName ? 11 : 12, color: hasName ? '#64748B' : '#0F172A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {job.resource_id || '—'}
         </div>
+        </>)}
       </td>
       <td style={td}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: '#334155' }}>{job.account_id || '—'}</div>
-        <div style={{ fontSize: 11, color: '#64748B' }}>{job.region || '—'}{job.environment ? ` · ${job.environment}` : ''}</div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: '#334155' }}>
+          {job.account_id || (isRun && job.account_count > 1 ? <span style={{ fontFamily: 'var(--font-sans)' }}>{job.account_count} accounts</span> : '—')}
+        </div>
+        <div style={{ fontSize: 11, color: '#64748B' }}>
+          {job.region || (isRun && job.region_count > 1 ? `${job.region_count} regions` : '—')}
+          {job.environment ? ` · ${job.environment}` : (isRun && job.environment_count > 1 ? ` · ${job.environment_count} environments` : '')}
+        </div>
       </td>
       <td style={td}>
         <StatusBadge status={job.status} />
+        {isRun && job.run_outcome === 'partial' && (
+          <div style={{ fontSize: 10.5, color: '#9A3412', marginTop: 3 }}>Finished with failures</div>
+        )}
       </td>
       <td style={{ ...td, whiteSpace: 'nowrap', color: '#334155' }} title={fmtFull(job.created_at)}>{fmtStarted(job.created_at)}</td>
       <td style={{ ...td, whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: 12, color: dur.live ? '#B45309' : '#334155' }}>
@@ -166,8 +193,20 @@ function JobRow({ job, selected, onOpen, now }) {
       </td>
       <td style={{ ...td, whiteSpace: 'nowrap' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--nav-blue-text)' }} title={job.job_id}>{(job.job_id || '').slice(0, 8)}</span>
-          <CopyButton value={job.job_id} label="Copy job ID" />
+          {isRun ? (
+            <>
+              <span style={{ fontSize: 10, fontWeight: 700, color: '#475569', background: '#F1F5F9', border: '1px solid #E2E8F0', borderRadius: 999, padding: '0 6px' }}>RUN</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--nav-blue-text)' }} title={job.execution_group_id}>
+                {String(job.execution_group_id || '').replace(/^grp-[a-z]+-/, '').slice(0, 8)}
+              </span>
+              <CopyButton value={job.execution_group_id} label="Copy run (execution group) ID" />
+            </>
+          ) : (
+            <>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, color: 'var(--nav-blue-text)' }} title={job.job_id}>{(job.job_id || '').slice(0, 8)}</span>
+              <CopyButton value={job.job_id} label="Copy job ID" />
+            </>
+          )}
         </span>
       </td>
     </tr>
@@ -248,6 +287,9 @@ export default function Jobs() {
   // Everything that defines "the result set" (not the open job or the page).
   const queryKey = JSON.stringify([view.status, view.q, view.automation, view.name, view.account, view.environment, view.sort, view.range, view.from, view.to]);
   const buildQuery = useCallback(() => ({
+    // One row per run: servers started together (an execution group) are
+    // listed once; the run opens Execution Details with every server.
+    group: 'runs',
     status: view.status, q: view.q, automation: view.automation, name: view.name, account: view.account,
     environment: view.environment, sort: view.sort, ...rangeToQuery(view.range, view.from, view.to),
   }), [queryKey]); // eslint-disable-line
@@ -568,7 +610,7 @@ export default function Jobs() {
                   <thead>
                     <tr>
                       <Th>Automation</Th><Th>Target</Th><Th width={170}>Account / Region</Th><Th width={130}>Status</Th>
-                      <Th width={130}>Started</Th><Th width={110}>Duration</Th><Th width={130}>Job ID</Th>
+                      <Th width={130}>Started</Th><Th width={110}>Duration</Th><Th width={150}>Job / Run ID</Th>
                     </tr>
                   </thead>
                   <tbody>

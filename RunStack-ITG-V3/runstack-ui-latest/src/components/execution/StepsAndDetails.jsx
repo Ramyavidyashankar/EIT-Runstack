@@ -10,7 +10,7 @@ import React, { useState } from 'react';
 import { Callout } from '../sections';
 import JobDetailContent, { CopyButton } from '../JobDetail';
 import { Btn } from '../ui';
-import { TargetStatusChip } from './ServerList';
+import TargetStatusBadge from './TargetStatusBadge';
 import { fmtElapsed } from '../../utils/executionLogs';
 import { fmtFull } from '../../utils/jobs';
 
@@ -35,7 +35,7 @@ function StepRow({ s, kind }) {
           <div style={{ fontWeight: 600, color: '#0F172A' }}>{s.name || '—'}</div>
           {s.action && <div style={{ fontSize: 11, color: '#64748B', fontFamily: 'var(--font-mono)' }}>{s.action}</div>}
         </td>
-        <td style={td}><TargetStatusChip status={s.status} detail={s.status_detail} />
+        <td style={td}><TargetStatusBadge status={s.status} detail={s.status_detail} />
           {s.status_detail && !['Success', 'InProgress', 'Pending'].includes(s.status_detail) && (
             <div style={{ fontSize: 11, color: '#64748B', marginTop: 3 }}>{s.status_detail}</div>
           )}

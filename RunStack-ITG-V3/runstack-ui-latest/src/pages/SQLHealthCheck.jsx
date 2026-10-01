@@ -13,7 +13,10 @@
 //                        unavailable with the reason
 //   Review and run       POST /batch-healthcheck { instance_id, check_type,
 //                        parameters } → job → Step Functions → SSM RunCommand
-//                        in the server's own account/region
+//                        in the server's own account/region.
+//                        Several servers: ONE POST with instance_ids — the
+//                        backend creates one execution group (one run in
+//                        Automation Executions) with one job per server.
 //   Progress / results   GET /jobs/{jobId}, refreshed in place while active
 //
 // The job ID lives in the URL (?job=…), so refreshing, reopening or sharing
@@ -30,7 +33,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { Topbar } from '../components/Layout';
 import { Btn, Empty, FormRow, Input, MonoField, Select, Spinner, StatusBadge, Textarea } from '../components/ui';
 import { Callout, Chip, Eyebrow, RefreshControl, ReviewRow, SectionCard, SummaryTile } from '../components/sections';
-import { fetchJob, fetchSqlHealthcheckOptions, runSqlHealthcheck } from '../api/client';
+import { fetchJob, fetchSqlHealthcheckOptions, runSqlHealthcheck, runSqlHealthcheckBatch } from '../api/client';
 import { useAutoRefresh, usePageRefresh } from '../hooks/usePageRefresh';
 import { copyText, fmtFull, isActive, jobDuration, statusGroup } from '../utils/jobs';
 import {
@@ -40,7 +43,7 @@ import {
 const JOB_POLL_MS = 4000;
 const BATCH_POLL_MS = 6000;
 const MAX_BATCH = 50;            // servers per run
-const DISPATCH_CONCURRENCY = 4;  // POSTs in flight at once
+const DISPATCH_CHUNK = 100;      // servers per POST (backend SQL_HEALTHCHECK_MAX_TARGETS_PER_REQUEST)
 const FETCH_CONCURRENCY = 6;     // job polls in flight at once
 const BATCH_STORE = 'runstack.sqlHealthcheck.batch.';
 
@@ -236,24 +239,34 @@ export default function SQLHealthCheck() {
     }));
     setDispatchProgress({ done: 0, total: runnable.length });
     try {
-      let done = 0;
-      const started = await mapLimit(runnable, DISPATCH_CONCURRENCY, async (t) => {
-        let row;
+      // One run: the backend creates the execution group on the first call;
+      // later chunks (only for selections above DISPATCH_CHUNK) join it.
+      const nameOf = Object.fromEntries(runnable.map((t) => [t.instance_id, t.server_name]));
+      const started = [];
+      let groupId = null;
+      for (let i = 0; i < runnable.length; i += DISPATCH_CHUNK) {
+        const chunk = runnable.slice(i, i + DISPATCH_CHUNK);
+        let res;
         try {
-          const res = await runSqlHealthcheck({ instanceId: t.instance_id, checkType: check.id, parameters: params });
-          row = { server_name: t.server_name, instance_id: t.instance_id, job_id: res?.jobs?.[0]?.job_id || null,
-            deduplicated: !!res?.deduplicated, error: res?.jobs?.[0]?.job_id ? null : 'No job ID returned.' };
+          // eslint-disable-next-line no-await-in-loop
+          res = await runSqlHealthcheckBatch({
+            instanceIds: chunk.map((t) => t.instance_id), checkType: check.id, parameters: params, executionGroupId: groupId,
+          });
         } catch (e) {
+          if (!started.length) throw e;          // nothing started — show the error below
           const info = errorInfo(e);
-          const running = e?.body?.jobs?.[0]?.job_id;
-          row = running
-            ? { server_name: t.server_name, instance_id: t.instance_id, job_id: running, deduplicated: true, error: null }
-            : { server_name: t.server_name, instance_id: t.instance_id, job_id: null, error: info.detail ? `${info.text} ${info.detail}` : info.text };
+          chunk.forEach((t) => started.push({ server_name: t.server_name, instance_id: t.instance_id, job_id: null,
+            error: info.detail ? `${info.text} ${info.detail}` : info.text }));
+          continue;
         }
-        done += 1;
-        setDispatchProgress({ done, total: runnable.length });
-        return row;
-      });
+        groupId = res?.execution_group_id || groupId;
+        (res?.jobs || []).forEach((r) => started.push({
+          server_name: r.server_name || nameOf[r.instance_id] || r.instance_id, instance_id: r.instance_id,
+          job_id: r.job_id || null, deduplicated: !!r.deduplicated,
+          error: r.job_id ? null : (r.message || r.error || 'Not started.'),
+        }));
+        setDispatchProgress({ done: Math.min(i + chunk.length, runnable.length), total: runnable.length });
+      }
       const rows = [...started, ...skipped];
       const ids = [...new Set(rows.filter((r) => r.job_id).map((r) => r.job_id))];
       if (!ids.length) {
@@ -261,8 +274,18 @@ export default function SQLHealthCheck() {
         return;
       }
       const key = ids.join(',');
-      try { sessionStorage.setItem(BATCH_STORE + key, JSON.stringify({ rows, check: check.label, started_at: Date.now() })); } catch { /* optional */ }
+      const runJobId = rows.find((r) => r.job_id && !r.deduplicated)?.job_id || null;
+      try {
+        sessionStorage.setItem(BATCH_STORE + key, JSON.stringify({
+          rows, check: check.label, started_at: Date.now(), execution_group_id: groupId, run_job_id: runJobId,
+        }));
+      } catch { /* optional */ }
       setSearchParams({ jobs: key });
+    } catch (e) {
+      // The whole request was refused (e.g. invalid parameters) — nothing started.
+      const info = errorInfo(e);
+      setSubmitError(info);
+      if (info.fieldErrors) setTouched(Object.fromEntries(Object.keys(info.fieldErrors).map((k) => [k, true])));
     } finally {
       submitGuard.current = false;
       setSubmitting(false);
@@ -943,6 +966,14 @@ function BatchView({ batchKey, jobIds, checks }) {
         right={<RefreshControl onRefresh={poll.refresh} refreshing={poll.refreshing} lastUpdated={poll.lastUpdated}
           autoEverySec={anyActive ? BATCH_POLL_MS / 1000 : undefined} error={poll.error} />}>
         <Callout tone={overall.tone} title={overall.title}>{overall.text}</Callout>
+        {record?.execution_group_id && record?.run_job_id && (
+          <div style={{ fontSize: 12.5 }}>
+            <Link to={`/jobs/${encodeURIComponent(record.run_job_id)}`} style={{ color: '#0F766E', fontWeight: 600 }}>
+              Open as one run in Automation Executions →
+            </Link>
+            <span style={{ color: '#94A3B8', marginLeft: 8 }}>Live status and output for every server in this run</span>
+          </div>
+        )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12 }}>
           <SummaryTile label="Healthy" value={count(['healthy', 'passed'])} tone="green" />
           <SummaryTile label="Unhealthy" value={count(['unhealthy'])} tone={count(['unhealthy']) ? 'red' : 'gray'} />

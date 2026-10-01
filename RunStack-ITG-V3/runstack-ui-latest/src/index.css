@@ -42,6 +42,12 @@
   --danger-bg:      #FDECEC;
   --danger-border:  #F7B9B9;
 
+  /* Running (blue) — execution views; same values as utils/executionStatus.js */
+  --running:        #2563EB;
+  --running-text:   #1D4ED8;
+  --running-bg:     #EFF6FF;
+  --running-border: #BFDBFE;
+
   --info:           #0E9BB4;
   --info-bg:        #E4F7FA;
   --info-border:    #A9E4EC;
@@ -127,6 +133,13 @@ code { font-family: var(--font-mono); }
 @keyframes pulse   { 0%,100% { opacity:1; } 50% { opacity:0.35; } }
 @keyframes fadeIn  { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
 @keyframes slideIn { from { transform:translateX(-8px); opacity:0; } to { transform:none; opacity:1; } }
+@keyframes rsDrawerIn { from { transform:translateX(16px); opacity:0; } to { transform:none; opacity:1; } }
+
+/* Execution Details target table */
+.rs-target-row:hover td { background: var(--bg-tint); }
+.rs-target-row[aria-selected="true"]:hover td { background: var(--brand-bg); }
+.rs-target-row:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+@media (max-width: 640px) { .rs-hide-narrow { display: none !important; } }
 
 .animate-fade  { animation: fadeIn 0.25s ease both; }
 .animate-slide { animation: slideIn 0.2s ease both; }

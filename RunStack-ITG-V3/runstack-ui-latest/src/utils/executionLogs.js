@@ -8,29 +8,13 @@
 //     prepended, and the buffer never grows past MAX_CONSOLE_LINES
 //   • plain-text formatting for copy / download
 
+import { isActiveTarget } from './executionStatus';
+
 export const MAX_CONSOLE_LINES = 5000;
 
-export const TARGET_STATUS = {
-  pending:   { label: 'Pending',   color: '#B45309', bg: '#FEF3E2', dot: '#F59E0B' },
-  running:   { label: 'Running',   color: '#B45309', bg: '#FEF3E2', dot: '#D97706', pulse: true },
-  success:   { label: 'Succeeded', color: '#0B6E4C', bg: '#E4F8F0', dot: '#0F9D6D' },
-  failed:    { label: 'Failed',    color: '#B91C1C', bg: '#FDECEC', dot: '#DC2626' },
-  cancelled: { label: 'Cancelled', color: '#475569', bg: '#F1F5F9', dot: '#64748B' },
-  timed_out: { label: 'Timed out', color: '#9A3412', bg: '#FFEDD5', dot: '#EA580C' },
-};
-
-export const OVERALL_STATUS = {
-  pending:   { label: 'Pending', color: '#B45309', bg: '#FEF3E2' },
-  running:   { label: 'Running', color: '#B45309', bg: '#FEF3E2', pulse: true },
-  success:   { label: 'Succeeded', color: '#0B6E4C', bg: '#E4F8F0' },
-  partial:   { label: 'Finished with failures', color: '#9A3412', bg: '#FFEDD5' },
-  failed:    { label: 'Failed', color: '#B91C1C', bg: '#FDECEC' },
-  cancelled: { label: 'Cancelled', color: '#475569', bg: '#F1F5F9' },
-  timed_out: { label: 'Timed out', color: '#9A3412', bg: '#FFEDD5' },
-  unknown:   { label: 'Unknown', color: '#475569', bg: '#F1F5F9' },
-};
-
-export const isActiveTarget = (s) => s === 'pending' || s === 'running';
+// Status labels/colours live in executionStatus.js (one place for every
+// execution view); re-exported here so existing imports keep working.
+export { TARGET_STATUS, OVERALL_STATUS, isActiveTarget } from './executionStatus';
 
 /** Progress counts every finished target — failures, cancellations and
  *  timeouts included — so "finished" and "successful" are different numbers. */

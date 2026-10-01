@@ -169,6 +169,21 @@ export async function runSqlHealthcheck({ instanceId, checkType, parameters } = 
   });
 }
 
+/** POST /batch-healthcheck with several servers — one run.
+ *  The backend creates the execution group on the first call and returns
+ *  { execution_group_id, total_servers, started, jobs: [{ instance_id,
+ *  server_name, job_id, deduplicated, error, reason, message }] }. Later
+ *  chunks of the same run pass that executionGroupId back. */
+export async function runSqlHealthcheckBatch({ instanceIds, checkType, parameters, executionGroupId } = {}) {
+  return apiFetch('/batch-healthcheck', {
+    method: 'POST',
+    body: JSON.stringify({
+      instance_ids: instanceIds, check_type: checkType, parameters: parameters || {},
+      ...(executionGroupId ? { execution_group_id: executionGroupId } : {}),
+    }),
+  });
+}
+
 // ─── Execution Details ───────────────────────────────────────────────────────
 
 function qsOf(params) {
