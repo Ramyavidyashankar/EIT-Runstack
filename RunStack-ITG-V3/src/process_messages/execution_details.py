@@ -987,6 +987,40 @@ def _counts(targets):
     return c
 
 
+def _with_queued_targets(event, group_id, all_targets, now):
+    try:
+        import runs
+        header = runs.get_run_header(group_id)
+    except Exception as e:  # informational only
+        logger.warning(f"run header read failed for {group_id}: {e}")
+        return all_targets, None
+    if not header:
+        return all_targets, None
+    _claims, role, email = _caller(event)
+    info = {"target_count": int(header.get("target_count") or 0), "wave_size": int(header.get("wave_size") or 0),
+            "wave_seconds": int(header.get("wave_seconds") or 0), "kind": header.get("kind"),
+            "document": header.get("document")}
+    if role != "admin" and email != str(header.get("locked_by") or "").lower():
+        return all_targets, info
+    have = {t.get("job_id") for t in all_targets}
+    queued = []
+    for q in header.get("targets") or []:
+        if q.get("job_id") in have:
+            continue
+        due = _parse_ts(q.get("dispatch_at"))
+        waiting = due and due > now
+        queued.append({
+            "key": make_target_key(q.get("job_id"), q.get("instance_id")), "job_id": q.get("job_id"),
+            "instance_id": q.get("instance_id"), "server_name": q.get("server_name"),
+            "account_id": q.get("account_id"), "region": q.get("region"), "status": "pending",
+            "status_detail": (f"Queued — wave {q.get('wave')}, starts about {due.strftime('%H:%M:%S')} UTC" if waiting
+                              else "Queued — waiting for RunStack to create the job"),
+            "status_source": "runstack", "current_step": None, "started_at": None, "ended_at": None,
+            "output_mode": "none", "queued": True,
+        })
+    return all_targets + queued, info
+
+
 def _overall(counts):
     if counts["total"] == 0:
         return "unknown", "No targets"
@@ -1159,6 +1193,14 @@ def handle_execution_details(event, http_method, path, path_parameters, query_pa
     order = {m["job_id"]: i for i, m in enumerate(allowed)}
     all_targets.sort(key=lambda t: (order.get(t["job_id"], 0), t.get("instance_id") or ""))
 
+    # Multi-target runs release servers in waves: list the ones still
+    # queued (no job yet) so the run's totals are right from the start.
+    # Only the person who started the run (or an admin) sees these
+    # placeholders — they were authorized for every one at submission.
+    run_header = None
+    if scope == "group" and str(group_id or "").startswith("grp-run-"):
+        all_targets, run_header = _with_queued_targets(event, group_id, all_targets, now)
+
     counts = _counts(all_targets)
     matching = [t for t in all_targets if matches(t)]
     page = matching[offset:offset + limit]
@@ -1210,6 +1252,7 @@ def handle_execution_details(event, http_method, path, path_parameters, query_pa
         "next_cursor": _encode_cursor({"o": offset + limit}) if offset + limit < len(matching) else None,
         "prev_cursor": _encode_cursor({"o": max(0, offset - limit)}) if offset > 0 else None,
         "hidden_jobs": hidden,
+        "run": run_header,
         "live_status_deferred": max(0, live_skipped),
         "members_truncated": truncated,
         "retrieval_errors": errors[:20],

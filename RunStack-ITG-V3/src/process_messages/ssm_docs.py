@@ -249,6 +249,12 @@ def _list_region(region, doc_type, owner):
 
 def handle_ssm_documents_list(event, http_method, path, path_parameters, query_params):
     qp = query_params or {}
+    # Run Automations page: only documents approved for RunStack runs
+    # (APPROVED_AUTOMATION_DOCUMENTS), each with its type, the parameters a
+    # caller may set, and the regions it can run in.
+    if str(qp.get("approved") or "").lower() == "true":
+        import runs
+        return runs.list_approved_documents_response()
     doc_type = qp.get("type", "Command")
     owner = qp.get("owner", "Self")
     regions_param = qp.get("regions")

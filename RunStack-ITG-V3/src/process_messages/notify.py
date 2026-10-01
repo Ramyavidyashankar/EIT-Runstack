@@ -62,6 +62,19 @@ def handle_notify(event, http_method, path, path_parameters, query_params):
     QUEUE_URL = os.getenv("QUEUE_URL")
 
     body = json.loads(event.get("body", "{}"))
+
+    # One automation on several servers → one grouped run (runs.py). A body
+    # without "targets" continues below exactly as before.
+    if isinstance(body, dict) and "targets" in body:
+        import runs
+        return runs.handle_run_submission(event, body)
+
+    # Document allowlist (single server, incl. Advanced Run and agents).
+    import runs
+    refused = runs.check_single_target_document(event, body, "/notify")
+    if refused:
+        return refused
+
     job_id = str(uuid.uuid4())
     body["job_id"] = job_id
     body["id"] = job_id
@@ -96,6 +109,23 @@ def handle_notify(event, http_method, path, path_parameters, query_params):
         claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
         logger.warning(f"User {claims.get('username', 'unknown')} denied for /notify: {denied.get('body')}")
         return denied
+
+    # Every other instance named in the payload gets the same check as
+    # resource_id. Before this, extra InstanceIds (Run Command) or extra
+    # InstanceId values (Automation) were sent to SSM without being checked
+    # against the caller's app access.
+    if not is_status_check:
+        data = body.get("automation_data") or {}
+        named = list(data.get("InstanceIds") or [])
+        param_ids = (data.get("Parameters") or {}).get("InstanceId")
+        named += param_ids if isinstance(param_ids, list) else ([param_ids] if param_ids else [])
+        for extra in dict.fromkeys(str(i).strip() for i in named if i):
+            if extra == resource_id:
+                continue
+            denied = authorize_action(event, "ec2_stop_start", resource_id=extra)
+            if denied:
+                logger.warning(f"/notify denied: extra instance {extra} not authorized for this caller")
+                return denied
 
     if resource_id and not is_status_check:
         lock_conflict = check_and_acquire_lock(event, f"ec2:{resource_id}", job_id=job_id)

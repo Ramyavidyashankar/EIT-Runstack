@@ -161,6 +161,28 @@ def handle_agent_instances(event, http_method, path, path_parameters, query_para
 
 def handle_app_instances(event, http_method, path, path_parameters, query_params):
     try:
+        # ?for_document=<approved document>: Run Automations asks which servers
+        # it may offer for that automation. A document approved with a team
+        # action (SQL/SAP/Tidal capability) lists the servers in the caller's
+        # team scope; any other document falls through to app access below,
+        # exactly as without the parameter. The run itself re-checks each server.
+        for_document = (query_params or {}).get("for_document")
+        if for_document:
+            import runs
+            if for_document not in runs.approved_config():
+                return {"statusCode": 400, "headers": CORS_HEADERS,
+                        "body": json.dumps({"error": "bad_request", "reason": "document_not_approved",
+                                            "message": f"'{for_document}' is not an approved automation."})}
+            team_instances, denied = runs.instances_for_document(event, for_document)
+            if denied:
+                return denied
+            if team_instances is not None:
+                if query_params.get("app_id"):
+                    team_instances = [i for i in team_instances if str(i.get("app_id")) == str(query_params["app_id"])]
+                return {"statusCode": 200, "headers": CORS_HEADERS,
+                        "body": json.dumps({"instances": team_instances, "count": len(team_instances),
+                                            "scope": "team"}, default=decimal_default)}
+
         # allow_team_visibility=False: this is the endpoint the EC2 agent's OpenAPI
         # spec calls (GET /app-instances) — team membership in an
         # unrelated domain (SQL/SAP/Tidal) must never expand EC2 scope.
@@ -202,13 +224,19 @@ def handle_app_instances(event, http_method, path, path_parameters, query_params
                     })
                 }
 
+        state_errors = []
+        if str((query_params or {}).get("include_state") or "").lower() == "true":
+            instances = [dict(i) for i in instances]
+            state_errors = attach_live_states(instances)
+
         return {
             "statusCode": 200,
             "headers": CORS_HEADERS,
             "body": json.dumps({
                 "instances": instances,
                 "count": len(instances),
-                "apps": app_ids
+                "apps": app_ids,
+                **({"state_errors": state_errors} if state_errors else {}),
             }, default=decimal_default)
         }
 
@@ -219,3 +247,104 @@ def handle_app_instances(event, http_method, path, path_parameters, query_params
             "headers": CORS_HEADERS,
             "body": json.dumps({"error": "Failed to list instances", "detail": str(e)})
         }
+
+
+# ── Live EC2 state (EC2 Start/Stop page) ──────────────────────────────────
+# GET /app-instances?include_state=true adds each instance's current state,
+# read with ec2:DescribeInstances through the existing runstack-cross-account-
+# role (the same role get_instance_platform already uses for describe_instances).
+# One call per account/region per 100 instances; no jobs are created. A read
+# failure leaves state empty with state_error — it never blocks the list.
+
+_STATE_CACHE = {}
+_STATE_CACHE_SECONDS = 15
+# API Gateway gives up at 29 s. State is read within this budget; whatever
+# isn't back by then is returned as unknown (state_error "timeout") rather
+# than failing the whole list. Very large lists aren't read at all — the UI
+# asks per application.
+EC2_STATE_TIME_BUDGET_SEC = float(os.getenv("EC2_STATE_TIME_BUDGET_SEC", "12"))
+EC2_STATE_MAX_INSTANCES = int(os.getenv("EC2_STATE_MAX_INSTANCES", "500"))
+
+
+def _aws_config():
+    from botocore.config import Config
+    return Config(connect_timeout=3, read_timeout=6, retries={"max_attempts": 2, "mode": "standard"})
+
+
+def _ec2_client_for(account_id, region):
+    import boto3 as _b
+    role = os.environ.get("CROSS_ACCOUNT_ROLE_NAME", "runstack-cross-account-role")
+    creds = _b.client("sts", config=_aws_config()).assume_role(
+        RoleArn=f"arn:aws:iam::{account_id}:role/{role}", RoleSessionName="runstack-ec2-state")["Credentials"]
+    return _b.client("ec2", region_name=region, aws_access_key_id=creds["AccessKeyId"], config=_aws_config(),
+                     aws_secret_access_key=creds["SecretAccessKey"], aws_session_token=creds["SessionToken"])
+
+
+def _read_states(account_id, region, ids):
+    key = (account_id, region, tuple(sorted(ids)))
+    hit = _STATE_CACHE.get(key)
+    if hit and time.time() - hit[0] < _STATE_CACHE_SECONDS:
+        return hit[1]
+    ec2 = _ec2_client_for(account_id, region)
+    states = {}
+    for i in range(0, len(ids), 100):
+        batch = ids[i:i + 100]
+        kw = {"Filters": [{"Name": "instance-id", "Values": batch}]}
+        while True:
+            page = ec2.describe_instances(**kw)
+            for r in page.get("Reservations", []):
+                for inst in r.get("Instances", []):
+                    states[inst["InstanceId"]] = (inst.get("State") or {}).get("Name")
+            if not page.get("NextToken"):
+                break
+            kw["NextToken"] = page["NextToken"]
+    _STATE_CACHE[key] = (time.time(), states)
+    return states
+
+
+def attach_live_states(instances):
+    from concurrent.futures import ThreadPoolExecutor, wait
+    checked_at = datetime.utcnow().isoformat() + "Z"
+    if len(instances) > EC2_STATE_MAX_INSTANCES:
+        for i in instances:
+            i.update(state=None, state_error="too_many_instances", state_checked_at=checked_at)
+        return [{"account_id": "*", "region": "*", "code": "too_many_instances",
+                 "message": f"Live state is read for up to {EC2_STATE_MAX_INSTANCES} instances; choose an application."}]
+    groups = {}
+    for i in instances:
+        if i.get("instance_id") and i.get("account_id") and i.get("region"):
+            groups.setdefault((str(i["account_id"]), i["region"]), []).append(i["instance_id"])
+    errors, results = [], {}
+
+    def work(item):
+        (acct, region), ids = item
+        try:
+            return (acct, region), _read_states(acct, region, ids), None
+        except Exception as e:
+            code = getattr(e, "response", {}).get("Error", {}).get("Code") if hasattr(e, "response") else type(e).__name__
+            return (acct, region), None, code or "error"
+
+    pool = ThreadPoolExecutor(max_workers=min(16, max(1, len(groups))))
+    futures = {pool.submit(work, item): item[0] for item in groups.items()}
+    done, pending = wait(futures, timeout=EC2_STATE_TIME_BUDGET_SEC)
+    for fut in done:
+        k, states, err = fut.result()
+        results[k] = (states, err)
+        if err:
+            errors.append({"account_id": k[0], "region": k[1], "code": err})
+            logger.warning(f"app-instances: EC2 state read failed for {k[0]}/{k[1]}: {err}")
+    for fut in pending:
+        k = futures[fut]
+        results[k] = (None, "timeout")
+        errors.append({"account_id": k[0], "region": k[1], "code": "timeout"})
+        logger.warning(f"app-instances: EC2 state read for {k[0]}/{k[1]} exceeded {EC2_STATE_TIME_BUDGET_SEC}s")
+    pool.shutdown(wait=False, cancel_futures=True)
+    for i in instances:
+        states, err = results.get((str(i.get("account_id")), i.get("region")), (None, "not_checked"))
+        if states is not None and i.get("instance_id") in states:
+            i["state"] = states[i["instance_id"]]
+        else:
+            i["state"] = None
+            i["state_error"] = err or "not_found"
+        i["state_checked_at"] = checked_at
+    return errors

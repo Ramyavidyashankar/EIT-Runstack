@@ -37,6 +37,13 @@ def handle_notify_sync(event, http_method, path, path_parameters, query_params):
         return handle_sap_action(event, http_method, path, path_parameters, query_params)
 
     body = json.loads(event.get("body", "{}"))
+
+    # Document allowlist (same rule as /notify; SAP bodies are handled above).
+    import runs
+    refused = runs.check_single_target_document(event, body, "/notify-sync")
+    if refused:
+        return refused
+
     job_id = str(uuid.uuid4())
     body["job_id"] = job_id
     body["id"] = job_id
