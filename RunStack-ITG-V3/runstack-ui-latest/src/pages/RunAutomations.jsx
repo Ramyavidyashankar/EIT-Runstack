@@ -3,8 +3,13 @@
 // Run one approved SSM document (Command or Automation, e.g. /var Cleanup)
 // on servers from one or more applications as ONE RunStack run.
 //
-//   Automation    GET /ssm/documents?approved=true   (APPROVED_AUTOMATION_DOCUMENTS,
-//                 with friendly names: "Automation-var-cleanup=/var Cleanup")
+//   Automation    chosen in the Category → Automation bar above the page
+//                 (components/run/AutomationHub.jsx) and carried in the URL:
+//                 /automations?category=<id>&doc=<name>. The list is
+//                 GET /ssm/documents?approved=true (APPROVED_AUTOMATION_DOCUMENTS,
+//                 with friendly names: "Automation-var-cleanup=/var Cleanup").
+//                 Changing the automation clears applications, servers and
+//                 settings — every selection below depends on it.
 //   Applications  from the server list below — app access, or for a
 //                 team-capability automation (SQL/SAP/Tidal) the team scope
 //   Servers       GET /app-instances[?for_document=<doc>]; catalog rows are
@@ -22,20 +27,24 @@
 // Anything hidden or disabled here is a convenience; the backend decides.
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Page, RunLayout, RunSummary } from '../components/PageLayout';
 import { Btn, ErrorBanner, Spinner } from '../components/ui';
 import { Callout, SectionCard } from '../components/sections';
 import ParamField from '../components/ParamField';
 import TargetPicker from '../components/run/TargetPicker';
-import AutomationSelect, { docTechName, docTitle } from '../components/run/AutomationSelect';
+import { docTechName, docTitle } from '../components/run/AutomationSelect';
 import AppMultiSelect from '../components/run/AppMultiSelect';
 import RunResult from '../components/run/RunResult';
-import { fetchApprovedAutomations, fetchAppInstances, submitRun } from '../api/client';
+import { fetchAppInstances, submitRun } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
+import { useAppNavigate } from '../components/nav/navigationContext';
+import { categoryForAuth, loadApprovedAutomations, loadAppAccess } from '../utils/automationCatalog';
+import { useAutomationEntries } from '../components/run/AutomationHub';
 import { usePageRefresh } from '../hooks/usePageRefresh';
 import { toRequestParameters } from '../utils/sqlHealthcheck';
 import {
-  appSummaries, appsLabel, carryParameters, documentBlockReason, inApps, keepSelectedCompatible, keepSelectedInApps,
+  appSummaries, appsLabel, documentBlockReason, inApps, keepSelectedCompatible, keepSelectedInApps,
   locationSummary, mergeTargets, paramErrors, selectionSummary, serverLabel, waveSummary,
 } from '../utils/runTargets';
 import { v4 as uuidv4 } from '../utils/uuid';
@@ -55,10 +64,14 @@ const Help = ({ children }) => <div className="rs-help">{children}</div>;
 
 export default function RunAutomations() {
   const nav = useNavigate();
+  const go = useAppNavigate();
+  const { email } = useAuth();
+  const [params] = useSearchParams();
+  const docName = params.get('doc') || '';
+  const categoryParam = params.get('category') || '';
   const [catalog, setCatalog] = useState({ loading: true, error: null, documents: [], limits: null, configured: true });
   const [appInv, setAppInv] = useState({ ...EMPTY_INV, loading: true });
   const [teamInv, setTeamInv] = useState({ doc: null, ...EMPTY_INV });
-  const [docName, setDocName] = useState('');
   const [appIds, setAppIds] = useState([]);
   const [selected, setSelected] = useState([]);
   const [form, setForm] = useState({});
@@ -80,23 +93,32 @@ export default function RunAutomations() {
       .catch((e) => setTeamInv((t) => (t.doc === name ? { doc: name, loading: false, error: errText(e), loaded: true, instances: [] } : t)));
   };
 
-  const load = () => {
+  const load = (force = false) => {
     setCatalog((c) => ({ ...c, loading: true, error: null }));
-    fetchApprovedAutomations()
-      .then((r) => setCatalog({ loading: false, error: null, documents: r.documents || [], limits: r.limits, configured: r.configured !== false }))
+    loadApprovedAutomations(email, { force })
+      .then((r) => setCatalog({ loading: false, error: null, documents: r.documents, limits: r.limits, configured: r.configured }))
       .catch((e) => setCatalog({ loading: false, error: errText(e), documents: [], limits: null, configured: true }));
     setAppInv((x) => ({ ...x, loading: true, error: null }));
-    fetchAppInstances()
-      .then((r) => setAppInv({ loading: false, error: null, loaded: true, instances: mergeTargets(r.instances) }))
+    loadAppAccess(email, { force })
+      .then((r) => setAppInv({ loading: false, error: null, loaded: true, instances: r.instances }))
       .catch((e) => setAppInv({ loading: false, error: errText(e), loaded: true, instances: [] }));
     if (teamInv.doc) loadTeam(teamInv.doc);
   };
-  useEffect(load, []); // eslint-disable-line
-  usePageRefresh(load);
+  useEffect(() => { load(false); }, []); // eslint-disable-line
+  usePageRefresh(() => load(true));
 
-  const doc = catalog.documents.find((d) => d.name === docName) || null;
+  // Same authorized list as the Automation dropdown, so a document typed into
+  // the URL that the user can't run isn't offered as a form either (the
+  // backend refuses it regardless).
+  const hub = useAutomationEntries();
+  const allowed = useMemo(() => {
+    const names = new Set(hub.entries.filter((e) => e.kind === 'document').map((e) => e.doc.name));
+    return { settled: hub.settled, has: (n) => names.has(n) };
+  }, [hub.entries, hub.settled]);
+  const listedDoc = catalog.documents.find((d) => d.name === docName) || null;
+  const doc = listedDoc && allowed.settled && allowed.has(docName) ? listedDoc : null;
   const teamDoc = !!doc && doc.auth && doc.auth !== 'app';
-  useEffect(() => { if (teamDoc && teamInv.doc !== doc.name) loadTeam(doc.name); }, [docName]); // eslint-disable-line
+  useEffect(() => { if (teamDoc && teamInv.doc !== doc.name) loadTeam(doc.name); }, [doc?.name]); // eslint-disable-line
   const inv = teamDoc ? (teamInv.doc === doc.name ? teamInv : { ...EMPTY_INV, loading: true }) : appInv;
 
   const apps = useMemo(() => appSummaries(inv.instances), [inv.instances]);
@@ -127,25 +149,14 @@ export default function RunAutomations() {
     if (inList.dropped.length || compatible.dropped.length) setSelected(compatible.kept);
   }, [inv.instances, inv.loading]); // eslint-disable-line
 
-  const chooseDoc = (name) => {
-    if (name === docName) return;
-    const next = catalog.documents.find((d) => d.name === name);
-    setDocName(name); setSubmitError(null);
-    // Parameters: keep values the new automation also takes, revalidated below.
-    const carried = carryParameters(form, next?.parameters);
-    setForm(carried.form);
-    setTouched(Object.fromEntries(Object.keys(carried.form).map((k) => [k, true])));
-    if (docName && carried.dropped.length) {
-      notify('info', 'Parameters cleared', `${docTitle(next)} doesn't take ${listNames(carried.dropped)}, so ${carried.dropped.length === 1 ? 'that value was' : 'those values were'} cleared.`);
-    }
-    // Servers: drop those the new automation can't run on (region/OS).
-    const { kept, dropped } = keepSelectedCompatible(inv.instances, selected, next);
-    if (dropped.length && !(next?.auth && next.auth !== 'app')) {
-      setSelected(kept);
-      notify('warning', `${plural(dropped.length, 'server')} deselected`,
-        `${docTitle(next)} can't run on ${listNames(dropped.map((d) => `${d.server} (${d.reason})`), 3)}.`);
-    }
-  };
+  // A different automation (or category) starts from scratch: applications,
+  // servers, settings, messages and any previous result all depend on it.
+  const firstDoc = useRef(true);
+  useEffect(() => {
+    if (firstDoc.current) { firstDoc.current = false; return; }
+    setAppIds([]); setSelected([]); setForm({}); setTouched({});
+    setNotices([]); setSubmitError(null); setResult(null);
+  }, [docName]);
 
   const changeApps = (ids) => {
     const removed = appIds.filter((id) => !ids.includes(id));
@@ -253,24 +264,31 @@ export default function RunAutomations() {
   );
 
   return (
-    <Page title="Run Automations" subtitle="Run an approved automation on servers from one or more applications as a single run.">
+    <Page title="Run Automations" subtitle="Select an automation and configure its targets.">
       {result ? (
         <SectionCard tone={4} title={`${result.label || 'Automation'} — submitted`}>
           <RunResult result={result} onStartAnother={startAnother} />
         </SectionCard>
+      ) : !docName ? (
+        <div className="rs-run-empty" role="status">
+          {categoryParam ? 'Select an automation to configure its targets.' : 'Select a category, then an automation, to configure its targets.'}
+        </div>
+      ) : !doc ? (
+        (catalog.loading || !allowed.settled) && !catalog.error ? <Loading>Loading automation…</Loading>
+          : catalog.error ? <ErrorBanner message={`Could not load automations: ${catalog.error}`} />
+            : (
+              <Callout tone="warning" title="This automation isn’t available to you"
+                action={<Btn size="sm" variant="default" onClick={() => go(`/automations${categoryParam ? `?category=${categoryParam}` : ''}`)}>Choose another</Btn>}>
+                <span className="rs-mono">{docName}</span> is not an approved automation you are authorized to run.
+              </Callout>
+            )
+      ) : !doc.available ? (
+        <Callout tone="warning" title={`${docTitle(doc)} can’t be run right now`}
+          action={<Btn size="sm" variant="default" onClick={() => go(`/automations?category=${categoryForAuth(doc.auth)}`)}>Choose another</Btn>}>
+          {doc.reason}
+        </Callout>
       ) : (
         <RunLayout summary={summaryPanel}>
-          <SectionCard tone={1} open title="Choose automation" helper="Only automations approved for RunStack are listed.">
-            {catalog.loading && <Loading>Loading automations…</Loading>}
-            {catalog.error && <ErrorBanner message={`Could not load automations: ${catalog.error}`} />}
-            {!catalog.loading && !catalog.error && !catalog.documents.length && (
-              <Callout tone="info" title="No automations are approved yet">
-                {catalog.configured ? 'None of the approved automations could be read.' : 'A RunStack administrator approves automations for this page.'}
-              </Callout>
-            )}
-            {catalog.documents.length > 0 && <AutomationSelect documents={catalog.documents} value={docName} onChange={chooseDoc} />}
-          </SectionCard>
-
           <SectionCard tone={2} open title="Choose applications"
             helper={teamDoc ? 'Applications with servers in your team’s scope for this automation.' : 'Pick one or more applications you have access to.'}>
             {!doc ? <Help>Choose an automation first.</Help>

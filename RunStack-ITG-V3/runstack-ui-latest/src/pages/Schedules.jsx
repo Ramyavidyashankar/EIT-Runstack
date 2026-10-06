@@ -2,7 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { Topbar } from '../components/Layout';
 import { Card, CardHead, Spinner, ErrorBanner, Empty, Btn, TypeTag } from '../components/ui';
 import { useAuth } from '../auth/AuthContext';
-import { fetchSchedules, createSchedule, updateSchedule, deleteSchedule } from '../api/client';
+import { fetchSchedules, createSchedule, updateSchedule, deleteSchedule, fetchDlqMessages } from '../api/client';
+import { usePageRefresh } from '../hooks/usePageRefresh';
+import { fmtClock } from '../components/sections';
+import { setDlqStatus } from '../utils/dlqStatus';
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 const td = { fontSize: 14, padding:'10px 14px', borderBottom:'1px solid var(--border)', verticalAlign:'middle' };
@@ -494,56 +497,101 @@ export default function Schedules() {
 
 
 // ─── DLQ Page ─────────────────────────────────────────────────────────────────
+// ─── Dead Letter Queue ────────────────────────────────────────────────────────
+// Real data from GET /jobs/dlq (operator+). This page previously showed three
+// hard-coded sample messages with Purge / Reprocess / Delete buttons that did
+// nothing; those are gone. The backend reads with SQS receive_message and a
+// 30-second visibility timeout, so:
+//   • the page loads once when opened and on Refresh — it never polls;
+//   • Refresh is held for 30 s after a read, because the messages just read
+//     are hidden from every reader (including this page) until then;
+//   • the count is reported to the header and Dashboard (utils/dlqStatus.js).
+const DLQ_HOLD_SECONDS = 30;
+
+function fmtEpochMs(v) {
+  const n = Number(v);
+  if (!n) return '—';
+  return new Date(n).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
 export function DLQ() {
-  const { role } = useAuth();
-  const isAdmin = role === 'admin';
-  const [messages] = React.useState([
-    { id:'msg-abc123', body:'{"id":"notif-9901","account_id":"123456789012","region":"us-east-1","automation_type":"SSM-Automation"}', received:'14 min ago', reason:'Lambda timeout after 3 retries' },
-    { id:'msg-def456', body:'{"id":"notif-9887","account_id":"987654321098","region":"eu-west-1","automation_type":"SSM-RunCommand"}', received:'2h ago', reason:'DynamoDB write capacity exceeded' },
-    { id:'msg-ghi789', body:'{"id":"notif-9851","account_id":"234567890123","region":"ap-southeast-1","automation_type":"SSM-Automation"}', received:'6h ago', reason:'Invalid resource_id format' },
-  ]);
+  const [state, setState] = useState({ loading: true, error: null, data: null, readAt: null });
+  const [now, setNow] = useState(Date.now());
+
+  const load = React.useCallback(() => {
+    setState((st) => ({ ...st, loading: true, error: null }));
+    fetchDlqMessages()
+      .then((data) => {
+        const visible = Number(data.total_visible || 0);
+        const inFlight = Number(data.total_in_flight || 0);
+        // Messages this read just received are counted as in flight.
+        setDlqStatus({ visible: visible + inFlight, inFlight });
+        setState({ loading: false, error: null, data, readAt: Date.now() });
+      })
+      .catch((e) => setState((st) => ({ ...st, loading: false, error: e?.body?.error || e?.body?.message || e.message || String(e) })));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+  usePageRefresh(() => { if (!state.readAt || Date.now() - state.readAt >= DLQ_HOLD_SECONDS * 1000) load(); });
+
+  const holdLeft = state.readAt ? Math.max(0, DLQ_HOLD_SECONDS - Math.floor((now - state.readAt) / 1000)) : 0;
+  useEffect(() => {
+    if (!holdLeft) return undefined;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [holdLeft]);
+
+  const d = state.data;
+  const messages = d?.messages || [];
+  const total = d ? Number(d.total_visible || 0) + Number(d.total_in_flight || 0) : null;
 
   return (
     <div className="rs-page">
       <Topbar title="Dead Letter Queue"
-        subtitle="Failed messages from SQS — manual review required"
-        actions={isAdmin ? <Btn variant="danger" size="sm">Purge queue</Btn> : undefined}
+        subtitle="Messages RunStack could not process after retries — read-only view"
+        actions={(
+          <Btn variant="default" size="sm" onClick={load} disabled={state.loading || holdLeft > 0}>
+            {state.loading ? <Spinner size={13} /> : '↻'} {holdLeft > 0 ? `Refresh in ${holdLeft}s` : 'Refresh'}
+          </Btn>
+        )}
       />
       <div className="rs-page-body">
-        <div style={{ marginBottom:16, padding:'10px 16px', borderRadius:'var(--radius-md)',
-          background:'var(--red-bg)', border:'1px solid var(--red-border)',
-          color:'var(--red)', fontSize:14 }}>
-          ⚠ {messages.length} message{messages.length !== 1 ? 's' : ''} in DLQ — investigate and reprocess or discard
-        </div>
-        <div style={{ display:'flex', flexDirection:'column', gap:12 }}>
-          {messages.map(m => (
+        <div className="rs-page-content">
+          {state.error && <ErrorBanner message={`Could not read the dead letter queue: ${state.error}`} />}
+          {state.loading && !d && <div style={{ padding: 40, display: 'flex', justifyContent: 'center' }}><Spinner /></div>}
+          {d && (
+            <div role="status" style={{
+              padding: '10px 16px', borderRadius: 'var(--radius-md)', fontSize: 14,
+              background: total ? 'var(--red-bg)' : 'var(--success-bg)', border: `1px solid ${total ? 'var(--red-border)' : 'var(--success-border)'}`,
+              color: total ? '#9A1E1E' : '#0B6E4C',
+            }}>
+              {total
+                ? <>About <strong>{total}</strong> message{total === 1 ? '' : 's'} in the queue (SQS approximate count). Showing up to 10. Investigate the cause in the related execution before anything is resubmitted.</>
+                : 'The dead letter queue is empty.'}
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 4 }}>
+                Read at {fmtClock(new Date(state.readAt))}. Messages shown here stay hidden from other readers for {DLQ_HOLD_SECONDS} seconds after each read.
+              </div>
+            </div>
+          )}
+          {d && !messages.length && total > 0 && (
+            <Empty message="No messages were returned on this read — they may be held by another reader for up to 30 seconds. Try Refresh shortly." />
+          )}
+          {messages.map((m) => (
             <Card key={m.id}>
               <CardHead>
-                <div>
-                  <code style={{ fontFamily:'var(--font-mono)', fontSize:13, color:'var(--red)' }}>{m.id}</code>
-                  <span style={{ fontSize:12, color:'var(--text-tertiary)', marginLeft:12 }}>Received {m.received}</span>
-                </div>
-                <div style={{ display:'flex', gap:8 }}>
-                  {isAdmin && <Btn variant="default" size="sm">Reprocess</Btn>}
-                  {isAdmin && <Btn variant="danger" size="sm">Delete</Btn>}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'baseline' }}>
+                  <code style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: '#9A1E1E', overflowWrap: 'anywhere' }}>{m.id}</code>
+                  <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Sent {fmtEpochMs(m.sent_at)} · received {m.receive_count}×</span>
                 </div>
               </CardHead>
-              <div style={{ padding:'14px 18px', display:'grid', gap:10 }}>
-                <div>
-                  <div style={{ fontSize: 13, color:'var(--red)', fontWeight:600, marginBottom:5 }}>Failure reason</div>
-                  <div style={{ fontSize:13, color:'var(--text-secondary)' }}>{m.reason}</div>
-                </div>
-                <div>
-                  <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight:600, marginBottom:5 }}>Message body</div>
-                  <pre style={{
-                    fontFamily:'var(--font-mono)', fontSize:12,
-                    background:'var(--bg-surface)', padding:12,
-                    borderRadius:'var(--radius-md)', border:'1px solid var(--border)',
-                    overflow:'auto', margin:0, color:'var(--text-secondary)',
-                  }}>
-                    {JSON.stringify(JSON.parse(m.body), null, 2)}
-                  </pre>
-                </div>
+              <div style={{ padding: '14px 18px' }}>
+                <div style={{ fontSize: 13, color: 'var(--text-primary)', fontWeight: 600, marginBottom: 5 }}>Message body</div>
+                <pre style={{
+                  fontFamily: 'var(--font-mono)', fontSize: 12, background: 'var(--bg-tint)', padding: 12,
+                  borderRadius: 'var(--radius-md)', border: '1px solid var(--border)', overflow: 'auto', margin: 0,
+                  color: 'var(--slate-700)', maxHeight: 360,
+                }}>
+                  {typeof m.body === 'string' ? m.body : JSON.stringify(m.body, null, 2)}
+                </pre>
               </div>
             </Card>
           ))}
@@ -562,6 +610,7 @@ export function Settings() {
     ['Cognito client ID',    process.env.REACT_APP_COGNITO_CLIENT_ID || '(not set)'],
     ['OAuth scope',          process.env.REACT_APP_COGNITO_SCOPE || '(not set)'],
     ['Solution name',        process.env.REACT_APP_SOLUTION_NAME || 'runstack'],
+    ['Environment badge',    process.env.REACT_APP_RUNSTACK_ENV || 'ITG (default)'],
   ];
   return (
     <div className="rs-page">

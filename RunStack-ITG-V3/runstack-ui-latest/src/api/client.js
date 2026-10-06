@@ -150,6 +150,14 @@ export async function fetchRecentExecutions(limit = 10) {
   return apiFetch(`/jobs/query?view=recent&limit=${limit}`);
 }
 
+/** GET /jobs/dlq — up to 10 dead-letter messages plus approximate queue
+ *  counts (operator+; jobs.handle_jobs_dlq_list). Note: the backend reads
+ *  with SQS receive_message (30 s visibility timeout), so each call hides the
+ *  returned messages from other readers for 30 s — never poll it. */
+export async function fetchDlqMessages() {
+  return apiFetch('/jobs/dlq');
+}
+
 /** GET /jobs/{jobId} */
 export async function fetchJob(jobId) {
   return apiFetch(`/jobs/${jobId}`);

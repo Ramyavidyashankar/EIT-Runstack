@@ -27,24 +27,24 @@ import { usePageRefresh } from '../hooks/usePageRefresh';
 import { usePersistentState } from '../hooks/useNavigation';
 import { applyFilters, filterOptions, groupByApplication, isAccountId, normalizeRecords, totals } from '../utils/targets';
 
-const TEAL = '#365D9D';
+const TEAL = '#365FA3';
 const mono = { fontFamily: 'var(--font-mono)', fontSize: 13 };
 const EMPTY_FILTERS = { search: '', account: '', region: '', environment: '', app: '' };
 
 function InstanceList({ row }) {
-  const th = { textAlign: 'left', padding: '6px 10px', fontSize: 13, fontWeight: 600, color: '#3B4658', borderBottom: '1px solid #DCE2EA' };
-  const td = { padding: '6px 10px', fontSize: 14, borderBottom: '1px solid #F5F6F8', verticalAlign: 'top' };
+  const th = { textAlign: 'left', padding: '6px 10px', fontSize: 13, fontWeight: 600, color: '#2F4258', borderBottom: '1px solid #D7E0EB' };
+  const td = { padding: '6px 10px', fontSize: 14, borderBottom: '1px solid #F4F6FA', verticalAlign: 'top' };
   return (
-    <div style={{ padding: '10px 16px 14px 44px', background: '#FAFBFC', borderTop: '1px solid #DCE2EA' }}>
-      <div style={{ background: '#FFFFFF', border: '1px solid #DCE2EA', borderRadius: 8, overflow: 'hidden' }}>
+    <div style={{ padding: '10px 16px 14px 44px', background: '#F8FAFD', borderTop: '1px solid #D7E0EB' }}>
+      <div style={{ background: '#FFFFFF', border: '1px solid #D7E0EB', borderRadius: 8, overflow: 'hidden' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr><th style={th}>Server name</th><th style={th}>Instance ID</th><th style={th}>Environment</th></tr></thead>
           <tbody>
             {row.instances.map((i) => (
               <tr key={i.instanceId}>
-                <td style={td}>{i.serverName || <span style={{ color: '#657185' }}>—</span>}</td>
+                <td style={td}>{i.serverName || <span style={{ color: '#52647A' }}>—</span>}</td>
                 <td style={{ ...td, ...mono }}>{i.instanceId}</td>
-                <td style={td}>{i.environment || <span style={{ color: '#657185' }}>—</span>}</td>
+                <td style={td}>{i.environment || <span style={{ color: '#52647A' }}>—</span>}</td>
               </tr>
             ))}
           </tbody>
@@ -89,8 +89,8 @@ export default function RegisteredTargets() {
   const set = (k) => (e) => setFilters((f) => ({ ...f, [k]: e.target.value }));
   const toggle = (key) => setOpen((s) => { const n = new Set(s); if (n.has(key)) n.delete(key); else n.add(key); return n; });
 
-  const th = { textAlign: 'left', padding: '9px 12px', fontSize: 13, fontWeight: 600, color: '#3B4658', background: '#FAFBFC', borderBottom: '1px solid #DCE2EA', whiteSpace: 'nowrap' };
-  const td = { padding: '10px 12px', borderBottom: '1px solid #F5F6F8', verticalAlign: 'middle', fontSize: 14 };
+  const th = { textAlign: 'left', padding: '9px 12px', fontSize: 13, fontWeight: 600, color: '#2F4258', background: '#F8FAFD', borderBottom: '1px solid #D7E0EB', whiteSpace: 'nowrap' };
+  const td = { padding: '10px 12px', borderBottom: '1px solid #F4F6FA', verticalAlign: 'middle', fontSize: 14 };
   const num = { ...td, textAlign: 'right', fontVariantNumeric: 'tabular-nums', fontWeight: 600 };
 
   return (
@@ -102,7 +102,7 @@ export default function RegisteredTargets() {
       />
       <div className="rs-page-body">
         <div className="rs-page-content">
-          {!isAdmin && <div style={{ fontSize: 13, color: '#4F5B6E' }}>You're seeing targets for the applications assigned to you.</div>}
+          {!isAdmin && <div style={{ fontSize: 13, color: '#52647A' }}>You're seeing targets for the applications assigned to you.</div>}
 
           {error && !records && <ErrorBanner message={error} />}
 
@@ -151,9 +151,9 @@ export default function RegisteredTargets() {
           )}
 
           <Card>
-            <div style={{ padding: '10px 14px', borderBottom: '1px solid #DCE2EA', display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ fontSize: 14, fontWeight: 600, color: '#202938' }}>Registered targets</span>
-              {records && <span style={{ fontSize: 12, color: '#657185' }}>One row per application in each account and region · {groups.length} row{groups.length === 1 ? '' : 's'}</span>}
+            <div style={{ padding: '10px 14px', borderBottom: '1px solid #D7E0EB', display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: '#172B4D' }}>Registered targets</span>
+              {records && <span style={{ fontSize: 12, color: '#52647A' }}>One row per application in each account and region · {groups.length} row{groups.length === 1 ? '' : 's'}</span>}
             </div>
             {!records ? (
               loading ? <div style={{ padding: 40, display: 'flex', justifyContent: 'center' }}><Spinner /></div> : <Empty message="Couldn't load registered targets." />
@@ -182,22 +182,22 @@ export default function RegisteredTargets() {
                               onClick={(e) => { e.stopPropagation(); toggle(g.key); }}
                               style={{ background: 'none', border: 'none', cursor: 'pointer', color: TEAL, fontSize: 13, padding: 2 }}>{isOpen ? '▾' : '▸'}</button>
                           </td>
-                          <td style={{ ...td, fontWeight: 600, color: '#202938' }}>{g.appName || <span style={{ color: '#657185', fontWeight: 400 }}>No name in catalog</span>}</td>
+                          <td style={{ ...td, fontWeight: 600, color: '#172B4D' }}>{g.appName || <span style={{ color: '#52647A', fontWeight: 400 }}>No name in catalog</span>}</td>
                           <td style={{ ...td, ...mono }}>{g.appId || '—'}</td>
                           <td style={td}>
-                            <span style={{ ...mono, color: '#202938' }}>{g.accountId || '—'}</span>
+                            <span style={{ ...mono, color: '#172B4D' }}>{g.accountId || '—'}</span>
                             {g.accountId && !isAccountId(g.accountId) && (
                               <span style={{ marginLeft: 8 }}><Chip tone="red" title="AWS account IDs are 12 digits. This value was damaged in a spreadsheet, so RunStack can't reach these instances.">Invalid account ID</Chip></span>
                             )}
                           </td>
-                          <td style={td}>{g.accountName || <span style={{ color: '#657185' }}>—</span>}</td>
+                          <td style={td}>{g.accountName || <span style={{ color: '#52647A' }}>—</span>}</td>
                           <td style={num}>{g.instanceCount}</td>
                           <td style={td}>
                             <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                              {g.environments.length ? g.environments.map((e) => <Chip key={e} tone="gray">{e}</Chip>) : <span style={{ color: '#657185' }}>Not set</span>}
+                              {g.environments.length ? g.environments.map((e) => <Chip key={e} tone="gray">{e}</Chip>) : <span style={{ color: '#52647A' }}>Not set</span>}
                             </div>
                           </td>
-                          <td style={td}>{g.region || <span style={{ color: '#657185' }}>—</span>}</td>
+                          <td style={td}>{g.region || <span style={{ color: '#52647A' }}>—</span>}</td>
                         </tr>
                         {isOpen && <tr><td colSpan={8} style={{ padding: 0 }}><InstanceList row={g} /></td></tr>}
                       </tbody>
@@ -208,7 +208,7 @@ export default function RegisteredTargets() {
             )}
           </Card>
           {records && (
-            <div style={{ fontSize: 12, color: '#657185', lineHeight: 1.6 }}>
+            <div style={{ fontSize: 12, color: '#52647A', lineHeight: 1.6 }}>
               Source: <span style={mono}>runstack-instance-catalog</span>. Only accounts with at least one registered instance are listed.
               Totals count distinct application and instance IDs, so an instance under two applications counts once. Account name comes from the catalog's AccountName column.
               A registered target isn't proof that RunStack's cross-account role works in that account.

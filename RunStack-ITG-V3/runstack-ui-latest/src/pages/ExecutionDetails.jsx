@@ -33,6 +33,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { Topbar } from '../components/Layout';
+import Tabs from '../components/Tabs';
 import { Btn, Card, ErrorBanner, Spinner } from '../components/ui';
 import { Callout, fmtClock } from '../components/sections';
 import { useLogBuffers } from '../components/execution/OutputPanel';
@@ -230,18 +231,10 @@ export default function ExecutionDetails() {
 
         {/* ── Tabs ── */}
         <Card style={{ padding: 0, display: 'flex', flexDirection: 'column', minWidth: 0, flexShrink: 0 }}>
-          <div role="tablist" aria-label="Execution views" style={{ display: 'flex', gap: 2, padding: '0 14px', borderBottom: '1px solid var(--border)' }}>
-            {tabs.map((t) => (
-              <button key={t.k} type="button" role="tab" aria-selected={tab === t.k} onClick={() => setTab(t.k)}
-                style={{
-                  padding: '11px 12px', fontSize: 14, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', background: 'none', border: 'none',
-                  color: tab === t.k ? 'var(--brand-hover)' : 'var(--text-tertiary)',
-                  borderBottom: `2px solid ${tab === t.k ? 'var(--brand)' : 'transparent'}`, marginBottom: -1,
-                }}>{t.l}</button>
-            ))}
-          </div>
+          <Tabs label="Execution views" idPrefix="rs-exec" withPanels active={tab} onChange={setTab} className="rs-tabs--inset"
+            tabs={tabs.map((t) => ({ value: t.k, label: t.l }))} />
 
-          <div role="tabpanel" style={{ padding: 14, display: 'grid', gap: 12, minWidth: 0 }}>
+          <div role="tabpanel" id={`rs-exec-panel-${tab}`} aria-labelledby={`rs-exec-tab-${tab}`} style={{ padding: 14, display: 'grid', gap: 12, minWidth: 0 }}>
             {tab === 'targets' && (
               <>
                 <TargetFilters

@@ -20,6 +20,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Topbar } from '../components/Layout';
+import Tabs from '../components/Tabs';
 import { Btn, Card, Empty, ErrorBanner, Input, Spinner, StatusBadge } from '../components/ui';
 import { Callout, RefreshControl } from '../components/sections';
 import JobDetailContent, { CopyButton } from '../components/JobDetail';
@@ -87,8 +88,8 @@ function FilterSelect({ label, value, onChange, children, width = 180 }) {
     <label style={{ display: 'grid', gap: 4, fontSize: 13, color: 'var(--text-primary)', fontWeight: 600 }}>
       {label}
       <select className="rs-input" value={value} onChange={(e) => onChange(e.target.value)} style={{
-        width, padding: '7px 10px', borderRadius: 8, border: `1px solid ${value ? 'var(--nav-blue)' : '#C9D1DC'}`,
-        background: value ? 'var(--nav-blue-bg)' : '#FFFFFF', color: '#202938', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer',
+        width, padding: '7px 10px', borderRadius: 8, border: `1px solid ${value ? 'var(--nav-blue)' : '#C3CFDD'}`,
+        background: value ? 'var(--nav-blue-bg)' : '#FFFFFF', color: '#172B4D', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer',
       }}>
         {children}
       </select>
@@ -96,29 +97,10 @@ function FilterSelect({ label, value, onChange, children, width = 180 }) {
   );
 }
 
-function StatusTab({ tab, count, active, onClick }) {
-  return (
-    <button type="button" role="tab" aria-selected={active} onClick={onClick} title={tab.hint}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 7, padding: '6px 12px', borderRadius: 8, cursor: 'pointer',
-        fontFamily: 'inherit', fontSize: 13, fontWeight: 600, transition: 'all 0.12s',
-        border: `1px solid ${active ? 'var(--nav-navy)' : '#DCE2EA'}`,
-        background: active ? 'var(--nav-navy)' : '#FFFFFF',
-        color: active ? '#FFFFFF' : '#3B4658',
-      }}>
-      {tab.label}
-      <span style={{
-        fontSize: 12, fontWeight: 600, padding: '0 6px', borderRadius: 999, fontFamily: 'var(--font-mono)',
-        background: active ? 'rgba(255,255,255,0.22)' : '#F5F6F8', color: active ? '#FFFFFF' : '#4F5B6E',
-      }}>{n(count)}</span>
-    </button>
-  );
-}
-
 function Th({ children, width, align }) {
   return (
     <th style={{
-      textAlign: align || 'left', padding: '9px 12px', fontSize: 12, fontWeight: 600, color: '#657185', background: '#FAFBFC', borderBottom: '1px solid #DCE2EA', whiteSpace: 'nowrap', width,
+      textAlign: align || 'left', padding: '9px 12px', fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', background: 'var(--table-head-bg)', borderBottom: '1px solid var(--border)', whiteSpace: 'nowrap', width,
       position: 'sticky', top: 0, zIndex: 1,
     }}>{children}</th>
   );
@@ -128,12 +110,12 @@ function RunTarget({ job }) {
   const many = (job.server_count || 0) > 1;
   return (
     <>
-      <div style={{ fontWeight: 600, color: '#202938', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div style={{ fontWeight: 600, color: '#172B4D', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {many ? `${n(job.server_count)} servers` : (job.server_name || job.resource_id || '1 server')}
-        {job.app_name && <span style={{ fontWeight: 400, color: '#657185' }}> · {job.app_name}</span>}
-        {!job.app_name && job.app_count > 1 && <span style={{ fontWeight: 400, color: '#657185' }}> · {job.app_count} applications</span>}
+        {job.app_name && <span style={{ fontWeight: 400, color: '#52647A' }}> · {job.app_name}</span>}
+        {!job.app_name && job.app_count > 1 && <span style={{ fontWeight: 400, color: '#52647A' }}> · {job.app_count} applications</span>}
       </div>
-      <div style={{ fontSize: 12, color: '#657185', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      <div style={{ fontSize: 12, color: '#52647A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {runBreakdown(job.run_counts)}
       </div>
     </>
@@ -145,37 +127,37 @@ function JobRow({ job, selected, onOpen, now }) {
   const isRun = !!job.is_run;
   const dur = jobDuration(job, now);
   const hasName = job.server_name || job.app_name;
-  const td = { padding: '8px 12px', borderBottom: '1px solid #F5F6F8', verticalAlign: 'middle', fontSize: 14 };
+  const td = { padding: '8px 12px', borderBottom: '1px solid #F4F6FA', verticalAlign: 'middle', fontSize: 14 };
   const onKey = (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(); } };
   return (
     <tr className="rs-exec-row" tabIndex={0} aria-selected={selected} onClick={onOpen} onKeyDown={onKey}
       style={{ cursor: 'pointer' }}>
       <td style={{ ...td, borderLeft: `3px solid ${GROUP_EDGE[group]}`, maxWidth: 280 }}>
-        <div style={{ fontWeight: 600, color: '#202938', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={job.document_name}>
+        <div style={{ fontWeight: 600, color: '#172B4D', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={job.document_name}>
           {job.automation_label || job.document_name || job.automation_type || '—'}
         </div>
-        <div style={{ fontSize: 12, color: '#657185', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontSize: 12, color: '#52647A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {job.automation_name && job.automation_name !== job.automation_label ? job.automation_name : job.automation_type}
         </div>
       </td>
       <td style={{ ...td, maxWidth: 240 }}>
         {isRun ? <RunTarget job={job} /> : (<>
         {hasName && (
-          <div style={{ fontWeight: 600, color: '#202938', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ fontWeight: 600, color: '#172B4D', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {job.server_name || job.app_name}
-            {job.server_name && job.app_name && <span style={{ fontWeight: 400, color: '#657185' }}> · {job.app_name}</span>}
+            {job.server_name && job.app_name && <span style={{ fontWeight: 400, color: '#52647A' }}> · {job.app_name}</span>}
           </div>
         )}
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: hasName ? 11 : 12, color: hasName ? '#657185' : '#202938', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: hasName ? 11 : 12, color: hasName ? '#52647A' : '#172B4D', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {job.resource_id || '—'}
         </div>
         </>)}
       </td>
       <td style={td}>
-        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#3B4658' }}>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: '#2F4258' }}>
           {job.account_id || (isRun && job.account_count > 1 ? <span style={{ fontFamily: 'var(--font-sans)' }}>{job.account_count} accounts</span> : '—')}
         </div>
-        <div style={{ fontSize: 12, color: '#657185' }}>
+        <div style={{ fontSize: 12, color: '#52647A' }}>
           {job.region || (isRun && job.region_count > 1 ? `${job.region_count} regions` : '—')}
           {job.environment ? ` · ${job.environment}` : (isRun && job.environment_count > 1 ? ` · ${job.environment_count} environments` : '')}
         </div>
@@ -186,15 +168,15 @@ function JobRow({ job, selected, onOpen, now }) {
           <div style={{ fontSize: 12, color: '#9A3412', marginTop: 3 }}>Finished with failures</div>
         )}
       </td>
-      <td style={{ ...td, whiteSpace: 'nowrap', color: '#3B4658' }} title={fmtFull(job.created_at)}>{fmtStarted(job.created_at)}</td>
-      <td style={{ ...td, whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: 13, color: dur.live ? '#B45309' : '#3B4658' }}>
+      <td style={{ ...td, whiteSpace: 'nowrap', color: '#2F4258' }} title={fmtFull(job.created_at)}>{fmtStarted(job.created_at)}</td>
+      <td style={{ ...td, whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)', fontSize: 13, color: dur.live ? '#B45309' : '#2F4258' }}>
         {dur.text}{dur.live && <span style={{ fontFamily: 'var(--font-sans)', fontSize: 12 }}> so far</span>}
       </td>
       <td style={{ ...td, whiteSpace: 'nowrap' }}>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
           {isRun ? (
             <>
-              <span style={{ fontSize: 12, fontWeight: 600, color: '#4F5B6E', background: '#F5F6F8', border: '1px solid #DCE2EA', borderRadius: 999, padding: '0 6px' }}>RUN</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: '#52647A', background: '#F4F6FA', border: '1px solid #D7E0EB', borderRadius: 999, padding: '0 6px' }}>RUN</span>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: 12, color: 'var(--nav-blue-text)' }} title={job.execution_group_id}>
                 {String(job.execution_group_id || '').replace(/^grp-[a-z]+-/, '').slice(0, 8)}
               </span>
@@ -225,22 +207,22 @@ function DetailDrawer({ jobId, row, onClose, onUpdate }) {
     <>
       <div onClick={onClose} aria-hidden style={{ position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.18)', zIndex: 30 }} />
       <aside role="dialog" aria-modal="true" aria-label="Execution details" style={{
-        position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(620px, 100vw)', background: '#FAFBFC', zIndex: 31,
+        position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(620px, 100vw)', background: '#F8FAFD', zIndex: 31,
         boxShadow: '-12px 0 32px rgba(15,23,42,0.18)', display: 'flex', flexDirection: 'column', animation: 'slideIn 0.18s ease both',
       }}>
         <div style={{ padding: '14px 18px', background: 'var(--brand-hover)', color: '#FFFFFF', display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ minWidth: 0, flex: 1 }}>
-            <div style={{ fontSize: 13, color: '#C5D3E8', fontWeight: 600,}}>Execution details</div>
+            <div style={{ fontSize: 13, color: '#C4D4EC', fontWeight: 600,}}>Execution details</div>
             <div style={{ fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {row?.automation_label || 'Job'} {row?.server_name ? `· ${row.server_name}` : ''}
             </div>
           </div>
           <button type="button" onClick={() => nav(`/jobs/${encodeURIComponent(jobId)}`)} style={{
-            background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)', color: '#DCE2EA', borderRadius: 6,
+            background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)', color: '#D7E0EB', borderRadius: 6,
             padding: '5px 10px', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
           }}>Open execution details</button>
           <button ref={closeRef} type="button" onClick={onClose} aria-label="Close details" style={{
-            background: 'none', border: 'none', color: '#DCE2EA', fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: 4,
+            background: 'none', border: 'none', color: '#D7E0EB', fontSize: 20, cursor: 'pointer', lineHeight: 1, padding: 4,
           }}>×</button>
         </div>
         <div style={{ flex: 1, overflowY: 'auto', padding: 16 }}>
@@ -445,7 +427,7 @@ export default function Jobs() {
             {exportMenu && (
               <div role="menu" style={{
                 position: 'absolute', right: 0, top: 'calc(100% + 6px)', zIndex: 40, width: 300, background: '#FFFFFF',
-                border: '1px solid #DCE2EA', borderRadius: 10, boxShadow: 'var(--shadow-lg)', padding: 6,
+                border: '1px solid #D7E0EB', borderRadius: 10, boxShadow: 'var(--shadow-lg)', padding: 6,
               }}>
                 <ExportChoice title={`This page (${n(rows.length)} rows)`} sub={showing || ''} onClick={exportPage} />
                 <ExportChoice
@@ -480,7 +462,7 @@ export default function Jobs() {
           {/* ── Attention: running + failed within the current filters ── */}
           <div style={{
             display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', padding: '10px 14px', borderRadius: 10,
-            background: '#FFFFFF', border: '1px solid #DCE2EA', boxShadow: 'var(--shadow-sm)', minHeight: 44,
+            background: '#FFFFFF', border: '1px solid #D7E0EB', boxShadow: 'var(--shadow-sm)', minHeight: 44,
           }}>
             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)',}}>Needs a look</span>
             {countsState.loading && (
@@ -489,7 +471,7 @@ export default function Jobs() {
             {!countsMeta ? (
               countsState.error
                 ? <span style={{ fontSize: 13, color: '#B91C1C' }}>Couldn't load totals: {countsState.error} <Btn variant="ghost" size="sm" onClick={() => loadCounts(activeQuery.current)}>Retry</Btn></span>
-                : <span style={{ fontSize: 13, color: '#657185', display: 'inline-flex', gap: 8, alignItems: 'center' }}><Spinner size={12} /> Counting…</span>
+                : <span style={{ fontSize: 13, color: '#52647A', display: 'inline-flex', gap: 8, alignItems: 'center' }}><Spinner size={12} /> Counting…</span>
             ) : (
               <>
                 {counts.FAILED > 0 && (
@@ -512,21 +494,16 @@ export default function Jobs() {
                 )}
               </>
             )}
-            <span style={{ fontSize: 12, color: '#657185', marginLeft: 'auto' }}>
+            <span style={{ fontSize: 12, color: '#52647A', marginLeft: 'auto' }}>
               {rangeLabel}{windowStart ? ` (since ${windowStart})` : ''}{view.automation || view.name || view.account || view.environment || view.q ? ' · with your filters' : ''}
             </span>
           </div>
 
           {/* ── Filters ── */}
           <Card style={{ padding: 14, display: 'grid', gap: 12, overflow: 'visible' }}>
-            <div role="tablist" aria-label="Status" style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-              {STATUS_TABS.map((t) => (
-                <StatusTab key={t.key} tab={t} count={counts[t.key]} active={view.status === t.key} onClick={() => setView({ status: t.key })} />
-              ))}
-              <span style={{ fontSize: 12, color: '#657185', marginLeft: 6 }}>
-                Counts cover every execution matching the filters, not just this page.
-              </span>
-            </div>
+            <Tabs label="Status" idPrefix="rs-jobs-status" size="sm" active={view.status} onChange={(v) => setView({ status: v })}
+              tabs={STATUS_TABS.map((t) => ({ value: t.key, label: t.label, hint: t.hint, count: typeof counts[t.key] === 'number' ? counts[t.key] : '—' }))}
+              after={<span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Counts cover every execution matching the filters, not just this page.</span>} />
 
             <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <label style={{ display: 'grid', gap: 4, fontSize: 13, color: 'var(--text-primary)', fontWeight: 600, flex: '1 1 220px', maxWidth: 420 }}>
@@ -584,7 +561,7 @@ export default function Jobs() {
                 </Btn>
               )}
             </div>
-            <div id="exec-search-help" style={{ fontSize: 12, color: '#657185', marginTop: -4 }}>
+            <div id="exec-search-help" style={{ fontSize: 12, color: '#52647A', marginTop: -4 }}>
               {SEARCH_HELP} Numbers in the filter lists are all-time counts. Environment is only available for jobs submitted with it.
             </div>
           </Card>
@@ -593,7 +570,7 @@ export default function Jobs() {
           <Card style={{ overflow: 'hidden' }}>
             <div ref={tableTop} />
             {rowsState.loading && rows.length === 0 ? (
-              <div style={{ padding: 56, display: 'flex', justifyContent: 'center', gap: 10, alignItems: 'center', color: '#657185', fontSize: 13 }}>
+              <div style={{ padding: 56, display: 'flex', justifyContent: 'center', gap: 10, alignItems: 'center', color: '#52647A', fontSize: 13 }}>
                 <Spinner /> Loading executions…
               </div>
             ) : rowsState.error && rows.length === 0 ? (
@@ -623,10 +600,10 @@ export default function Jobs() {
 
             {(rows.length > 0 || pageIndex > 0) && (
               <div style={{
-                display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderTop: '1px solid #DCE2EA', background: '#FAFBFC',
-                fontSize: 13, color: '#4F5B6E', flexWrap: 'wrap',
+                display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px', borderTop: '1px solid #D7E0EB', background: '#F8FAFD',
+                fontSize: 13, color: '#52647A', flexWrap: 'wrap',
               }}>
-                <span aria-live="polite"><strong>{showing}</strong>{countsMeta?.count_source && <span style={{ color: '#657185' }} title={countsMeta.count_source === 'counters' ? 'Total from the hourly job counters' : countsMeta.count_source === 'index' ? 'Total counted from the time index for these filters' : 'Total from a table scan'}> · page {pageIndex + 1}</span>}</span>
+                <span aria-live="polite"><strong>{showing}</strong>{countsMeta?.count_source && <span style={{ color: '#52647A' }} title={countsMeta.count_source === 'counters' ? 'Total from the hourly job counters' : countsMeta.count_source === 'index' ? 'Total counted from the time index for these filters' : 'Total from a table scan'}> · page {pageIndex + 1}</span>}</span>
                 {rowsState.error && rows.length > 0 && (
                   <span style={{ color: '#B91C1C' }}>Couldn't load that page: {rowsState.error} — showing the previous rows.</span>
                 )}
@@ -647,11 +624,11 @@ export default function Jobs() {
         <div role="alert" style={{
           position: 'fixed', left: 'calc(var(--sidebar-w) + 24px)', bottom: 20, zIndex: 20, maxWidth: 520,
           display: 'flex', gap: 12, alignItems: 'flex-start', padding: '10px 14px', borderRadius: 10,
-          background: '#FFFFFF', border: '1px solid #F3D9AE', borderLeft: '4px solid #B45309', boxShadow: 'var(--shadow-lg)', fontSize: 13, color: '#202938',
+          background: '#FFFFFF', border: '1px solid #F3D9AE', borderLeft: '4px solid #B45309', boxShadow: 'var(--shadow-lg)', fontSize: 13, color: '#172B4D',
         }}>
           <div>
             <div style={{ fontWeight: 600, color: '#92400E' }}>Couldn't refresh</div>
-            <div style={{ color: '#4F5B6E', marginTop: 2 }}>
+            <div style={{ color: '#52647A', marginTop: 2 }}>
               {refreshError}. Showing data from {lastUpdated ? lastUpdated.toLocaleTimeString('en-GB') : 'the last successful load'}; retrying every {REFRESH_MS / 1000}s.
             </div>
           </div>
@@ -670,9 +647,9 @@ function ExportChoice({ title, sub, onClick, disabled }) {
       display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 8, border: 'none',
       background: 'transparent', cursor: disabled ? 'not-allowed' : 'pointer', fontFamily: 'inherit', opacity: disabled ? 0.5 : 1,
     }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = '#F5F6F8'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
-      <div style={{ fontSize: 13, fontWeight: 600, color: '#202938' }}>{title}</div>
-      <div style={{ fontSize: 12, color: '#657185', marginTop: 2 }}>{sub}</div>
+      onMouseEnter={(e) => { e.currentTarget.style.background = '#F4F6FA'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}>
+      <div style={{ fontSize: 13, fontWeight: 600, color: '#172B4D' }}>{title}</div>
+      <div style={{ fontSize: 12, color: '#52647A', marginTop: 2 }}>{sub}</div>
     </button>
   );
 }
@@ -681,7 +658,7 @@ const dot = (c) => ({ width: 8, height: 8, borderRadius: '50%', background: c, d
 const attnBtn = (c, active) => ({
   display: 'inline-flex', alignItems: 'center', gap: 7, padding: '4px 10px', borderRadius: 999, cursor: 'pointer',
   fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: c,
-  background: active ? 'var(--nav-blue-bg)' : '#FFFFFF', border: `1px solid ${active ? 'var(--nav-blue)' : '#DCE2EA'}`,
+  background: active ? 'var(--nav-blue-bg)' : '#FFFFFF', border: `1px solid ${active ? 'var(--nav-blue)' : '#D7E0EB'}`,
 });
 
 // ─── Full-page detail (/jobs/:jobId — linked from the Dashboard) ─────────────

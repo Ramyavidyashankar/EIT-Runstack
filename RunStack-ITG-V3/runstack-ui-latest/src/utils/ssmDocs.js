@@ -2,10 +2,10 @@
 // Rows come from GET /ssm/documents?regions=all: one row per document per region.
 
 export const REGION_STYLE = {
-  'us-east-1': { label: 'us-east-1', fg: '#2C4D84', bg: '#EEF3FA', border: '#C5D3E8', dot: '#365D9D' },
+  'us-east-1': { label: 'us-east-1', fg: '#2B4D86', bg: '#E8F0FC', border: '#C4D4EC', dot: '#365FA3' },
   'us-west-2': { label: 'us-west-2', fg: '#3730A3', bg: '#EEF0FB', border: '#C9CDF2', dot: '#4F46E5' },
 };
-export const regionStyle = (r) => REGION_STYLE[r] || { label: r, fg: '#3B4658', bg: '#F5F6F8', border: '#DCE2EA', dot: '#657185' };
+export const regionStyle = (r) => REGION_STYLE[r] || { label: r, fg: '#2F4258', bg: '#F4F6FA', border: '#D7E0EB', dot: '#52647A' };
 
 export function statusTone(status) {
   if (!status) return 'gray';

@@ -1,49 +1,28 @@
 // src/components/Layout.jsx
+//
+// App shell: the dark navy header (components/nav/AppHeader.jsx) above one
+// scrolling content area. The vertical sidebar this file used to render has
+// been replaced by the header; the navigation behaviour below is unchanged.
 import React from 'react';
 import ReactDOM from 'react-dom';
-import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { useAuth } from '../auth/AuthContext';
-import { canAccess, DR_SWITCHOVER_ACCESS, SQL_HEALTHCHECK_ACCESS } from '../auth/access';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { requestPageRefresh } from '../hooks/usePageRefresh';
 import { getUnsavedChangesMessage } from '../hooks/useNavigation';
 import { getApiActivity, subscribeApiActivity } from '../api/client';
 import { Btn } from './ui';
+import AppHeader from './nav/AppHeader';
+import { useRunHub } from './run/runHubContext';
+import AutomationHub from './run/AutomationHub';
 
-// Sidebar sections. Each item's visibility rule is { minRole, orGroups } —
-// see auth/access.js. Visibility is a convenience, not authorization: the
-// backend authorizes every API call on these pages independently.
-const NAV = [
-  { group: 'Monitor', items: [
-    { to: '/',          label: 'Dashboard',             icon: IconGrid  },
-    { to: '/jobs',      label: 'Automation Executions', icon: IconList  },
-    { to: '/dlq',       label: 'Dead Letter Queue',     icon: IconAlert, badge: '!', badgeColor: '#DC2626', minRole: 'operator' },
-  ]},
-  { group: 'Automate', items: [
-    { to: '/automations', label: 'Run Automations',     icon: IconPlay  },
-    { to: '/ec2',       label: 'EC2 Start/Stop',        icon: IconPower },
-    // Original single-target page (manual targets, raw JSON) — admins only.
-    { to: '/trigger',   label: 'Advanced Run',          icon: IconCode, minRole: 'admin' },
-    { to: '/schedules', label: 'Triggers & Schedules',  icon: IconClock, minRole: 'operator' },
-    { to: '/accounts',  label: 'Registered Targets',    icon: IconCloud },
-  ]},
-  // Database-level operations. Only features that exist are listed.
-  { group: 'Database Operations', items: [
-    { to: '/database/sql-health-check', label: 'SQL Health Check', icon: IconPulse, ...SQL_HEALTHCHECK_ACCESS },
-    { to: '/database/dr-switchover', label: 'SQL DR Switchover', icon: IconSwitch, ...DR_SWITCHOVER_ACCESS },
-  ]},
-  { group: 'Config', items: [
-    { to: '/docs',      label: 'SSM Documents',         icon: IconDoc   },
-    { to: '/uploads',   label: 'Uploads',               icon: IconUpload, minRole: 'admin' },
-    { to: '/users',     label: 'Users & Access',         icon: IconUsers, minRole: 'admin' },
-    { to: '/settings',  label: 'Settings',              icon: IconGear  },
-  ]},
-];
+import { NavigationContext } from './nav/navigationContext';
+
+export { useAppNavigate } from './nav/navigationContext';
 
 // ── Navigation behaviour ─────────────────────────────────────────────────────
-// • Sidebar item for another page: navigate in-app (no browser reload); the
+// • Header item for another page: navigate in-app (no browser reload); the
 //   page fetches its latest data when it mounts. The page's last query
 //   string (e.g. Automation Executions filters) is restored.
-// • Sidebar item for the page already open: that page refreshes its data in
+// • Header item for the page already open: that page refreshes its data in
 //   place (usePageRefresh) — filters, selections and scroll are kept.
 // • Either way a thin teal bar shows while the resulting API calls run.
 // • If the open page has work that leaving would discard (useUnsavedChanges),
@@ -128,32 +107,38 @@ export default function Layout({ children }) {
     return () => clearInterval(id);
   }, [pathname]);
 
+  // `to` may carry its own query (e.g. the Run Automations chooser's
+  // /automations?category=database); then the remembered query isn't added.
+  const target = (to) => (to.includes('?') ? to : `${to}${lastSearch.get(to) || ''}`);
+
   const go = React.useCallback((to) => {
-    if (to === pathname) {
+    if (to === pathname || to === `${pathname}${search}`) {
       startBusy();
-      requestPageRefresh(to);
+      requestPageRefresh(pathname);
       return;
     }
     const message = getUnsavedChangesMessage();
     if (message) { setPendingLeave({ to, message }); return; }
     startBusy();
-    navigate(`${to}${lastSearch.get(to) || ''}`);
-  }, [pathname, navigate, startBusy]);
+    navigate(target(to));
+  }, [pathname, search, navigate, startBusy]); // eslint-disable-line
 
   const leaveAnyway = () => {
     const to = pendingLeave.to;
     setPendingLeave(null);
     startBusy();
-    navigate(`${to}${lastSearch.get(to) || ''}`);
+    navigate(target(to));
   };
 
   return (
-    <div style={{ display:'flex', height:'100vh', overflow:'hidden' }}>
-      <Sidebar onNavigate={go} />
-      <div ref={contentRef} style={{ flex:1, display:'flex', flexDirection:'column', overflowY:'auto', overflowX:'hidden', position:'relative' }}>
+    <NavigationContext.Provider value={go}>
+    <div className="rs-shell">
+      <a href="#rs-main" className="rs-skip-link">Skip to content</a>
+      <AppHeader onNavigate={go} />
+      <main id="rs-main" ref={contentRef} tabIndex={-1} className="rs-shell-main">
         <div className={`rs-nav-progress${busy ? ' is-busy' : ''}`} role="progressbar" aria-hidden={!busy} aria-label="Loading" />
         {children}
-      </div>
+      </main>
       {pendingLeave && ReactDOM.createPortal(
         <>
           <div onClick={() => setPendingLeave(null)} aria-hidden style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.28)', zIndex:60 }} />
@@ -161,8 +146,8 @@ export default function Layout({ children }) {
             position:'fixed', top:'22vh', left:'50%', transform:'translateX(-50%)', width:'min(440px, 92vw)', zIndex:61,
             background:'#FFFFFF', borderRadius:12, padding:18, boxShadow:'var(--shadow-lg)', display:'grid', gap:12,
           }}>
-            <div id="rs-leave-title" style={{ fontSize:15, fontWeight:700, color:'#202938' }}>Leave this page?</div>
-            <div style={{ fontSize:13, color:'#3B4658', lineHeight:1.55 }}>{pendingLeave.message}</div>
+            <div id="rs-leave-title" style={{ fontSize:15, fontWeight:700, color:'#172B4D' }}>Leave this page?</div>
+            <div style={{ fontSize:13, color:'#2F4258', lineHeight:1.55 }}>{pendingLeave.message}</div>
             <div style={{ display:'flex', gap:10, justifyContent:'flex-end' }}>
               <Btn variant="default" onClick={leaveAnyway}>Leave page</Btn>
               <Btn variant="primary" onClick={() => setPendingLeave(null)}>Stay on this page</Btn>
@@ -172,299 +157,39 @@ export default function Layout({ children }) {
         document.body,
       )}
     </div>
-  );
-}
-
-function Sidebar({ onNavigate }) {
-  const { role, email, groups, logout } = useAuth();
-  const { pathname } = useLocation();
-
-  const visibleNav = NAV
-    .map(group => ({
-      ...group,
-      items: group.items.filter(item => canAccess({ role, groups }, item)),
-    }))
-    .filter(group => group.items.length > 0);
-
-  // Plain left clicks are handled by Layout (refresh / in-app navigation /
-  // unsaved-work prompt). Modified clicks open a new tab as usual — the new
-  // tab picks up the session from this one (auth/tokenStorage.js).
-  const onNavClick = (e, to) => {
-    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    e.preventDefault();
-    onNavigate(to);
-  };
-
-  return (
-    <aside className="rs-sidebar" style={{
-      width:'var(--sidebar-w)', minWidth:'var(--sidebar-w)',
-      background:'linear-gradient(180deg, var(--slate-950) 0%, #0D1526 100%)',
-      borderRight:'1px solid rgba(255,255,255,0.06)',
-      display:'flex', flexDirection:'column', overflow:'hidden',
-    }}>
-
-      {/* ── Logo + Product name ── */}
-      <div className="rs-sidebar-brand" style={{
-        padding:'20px 18px 16px',
-        borderBottom:'1px solid rgba(255,255,255,0.06)',
-      }}>
-        <img
-          src="/dxc-logo-color.svg"
-          alt="DXC"
-          style={{ width:85, height:'auto', display:'block', marginBottom:10 }}
-        />
-        {/* Divider line */}
-        <div className="rs-sidebar-brand-text" style={{
-          height:1, background:'rgba(148,163,184,0.18)', marginBottom:10,
-        }}/>
-        {/* Product name */}
-        <div className="rs-sidebar-brand-text" style={{
-          fontSize:12, fontWeight:700, color:'#7FA8FF',
-          letterSpacing:1.4, textTransform:'uppercase',
-        }}>
-          RunStack ITG
-        </div>
-        <div className="rs-sidebar-brand-text" style={{ fontSize:10, color:'rgba(148,163,184,0.6)', marginTop:2 }}>
-          Automation Platform
-        </div>
-      </div>
-
-      {/* ── Navigation ── */}
-      <nav style={{ flex:1, overflowY:'auto', padding:'8px 8px' }}>
-        {visibleNav.map(group => (
-          <div key={group.group} style={{ marginBottom:4 }}>
-            {/* Group label */}
-            <div className="rs-nav-group" style={{
-              fontSize:10, fontWeight:600,
-              color:'rgba(148,163,184,0.4)',
-              letterSpacing:1, textTransform:'uppercase',
-              padding:'10px 10px 4px',
-            }}>
-              {group.group}
-            </div>
-
-            {group.items.map(item => (
-              <NavLink key={item.to} to={item.to} end={item.to === '/'} className="rs-navlink"
-                onClick={(e) => onNavClick(e, item.to)}
-                title={pathname === item.to ? `Refresh ${item.label}` : item.label}
-                aria-label={item.label}
-                style={({ isActive }) => ({
-                display:'flex', alignItems:'center', gap:9,
-                padding:'7px 10px', borderRadius:'var(--radius-md)',
-                fontSize:13, fontWeight: isActive ? 600 : 400,
-                color: isActive ? '#7FA8FF' : 'rgba(226,232,240,0.75)',
-                background: isActive ? 'rgba(37,84,224,0.22)' : 'transparent',
-                textDecoration:'none', transition:'all 0.12s',
-                marginBottom:1,
-                borderLeft: isActive ? '2px solid #5C87F2' : '2px solid transparent',
-              })}>
-                {({ isActive }) => (
-                  <>
-                    <item.icon
-                      size={15}
-                      color={isActive ? '#7FA8FF' : 'rgba(226,232,240,0.45)'}
-                    />
-                    <span className="rs-nav-text" style={{ flex:1 }}>{item.label}</span>
-                    {item.badge && (
-                      <span className="rs-nav-text" style={{
-                        fontSize:10, fontWeight:700, padding:'1px 5px',
-                        borderRadius:10,
-                        background: item.badgeColor || '#DC2626',
-                        color:'#fff', lineHeight:1.4,
-                      }}>
-                        {item.badge}
-                      </span>
-                    )}
-                  </>
-                )}
-              </NavLink>
-            ))}
-          </div>
-        ))}
-      </nav>
-
-      {/* ── Footer ── */}
-      <div className="rs-sidebar-foot" style={{
-        padding:'12px 18px',
-        borderTop:'1px solid rgba(255,255,255,0.06)',
-      }}>
-        <div className="rs-sidebar-user" style={{
-          display:'flex', alignItems:'center', justifyContent:'space-between',
-          marginBottom:8, paddingBottom:8, borderBottom:'1px solid rgba(255,255,255,0.06)',
-        }}>
-          <div style={{ display:'flex', alignItems:'center', gap:9, minWidth:0 }}>
-            <div style={{
-              width:26, height:26, borderRadius:'50%', flexShrink:0,
-              background:'rgba(37,84,224,0.22)', color:'#7FA8FF',
-              display:'flex', alignItems:'center', justifyContent:'center',
-              fontSize:11, fontWeight:700, border:'1px solid rgba(37,84,224,0.4)',
-            }}>
-              {(email || '?').trim().charAt(0).toUpperCase()}
-            </div>
-            <div className="rs-sidebar-meta" style={{ minWidth:0 }}>
-              <div style={{
-                fontSize:11, color:'rgba(226,232,240,0.85)', fontWeight:500,
-                overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
-              }}>
-                {email || 'Signed in'}
-              </div>
-              <div style={{ fontSize:10, color:'rgba(148,163,184,0.5)', marginTop:1, textTransform:'capitalize' }}>
-                {role}
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={logout}
-            style={{
-              fontSize:11, color:'rgba(148,163,184,0.7)', background:'none',
-              border:'none', cursor:'pointer', padding:'4px 6px', flexShrink:0,
-            }}
-          >
-            Sign out
-          </button>
-        </div>
-        <div className="rs-sidebar-meta" style={{ fontSize:11, color:'rgba(148,163,184,0.5)', lineHeight:1.6 }}>
-          {process.env.REACT_APP_SOLUTION_NAME || 'runstack-custom-automation'}
-        </div>
-        <div className="rs-sidebar-meta" style={{ fontSize:10, color:'rgba(148,163,184,0.3)', marginTop:2 }}>
-          Serverless · AWS SAM
-        </div>
-      </div>
-    </aside>
+    </NavigationContext.Provider>
   );
 }
 
 // ── Topbar ────────────────────────────────────────────────────────────────────
-export function Topbar({ title, subtitle, actions }) {
+export function Topbar({ title: pageTitle, subtitle: pageSubtitle, actions }) {
+  let title = pageTitle;
+  let subtitle = pageSubtitle;
+  // Pages under Run Automations (EC2, SQL Health Check, SQL DR Switchover and
+  // approved documents) share one title and the Category → Automation
+  // chooser (components/run/AutomationHub.jsx); the chosen automation's name
+  // and description are shown in the chooser. Page actions are kept.
+  const inRunHub = useRunHub();
+  if (inRunHub) {
+    title = 'Run Automations';
+    subtitle = 'Select an automation and configure its targets.';
+  }
   return (
-    <div style={{
-      height:'var(--topbar-h)', minHeight:'var(--topbar-h)',
-      background:'var(--bg-surface)',
-      borderBottom:'1px solid var(--border)',
-      padding:'0 var(--page-pad-x)', gap:12,
-      display:'flex', alignItems:'center', justifyContent:'space-between',
-      position:'sticky', top:0, zIndex:5,
-    }}>
-      <div style={{ minWidth:0 }}>
-        <h1 style={{
-          fontSize:'var(--fs-page-title)', fontWeight:600, color:'var(--text-primary)', margin:0, lineHeight:1.25,
-          overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap',
-        }}>
-          {title}
-        </h1>
-        {subtitle && (
-          <div className="rs-topbar-sub" style={{ fontSize:'var(--fs-help)', color:'var(--text-secondary)', marginTop:1, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-            {subtitle}
+    <>
+      <div className="rs-topbar">
+        <div className="rs-topbar-inner">
+          <div style={{ minWidth:0 }}>
+            <h1 className="rs-topbar-title">{title}</h1>
+            {subtitle && <div className="rs-topbar-sub">{subtitle}</div>}
           </div>
-        )}
-      </div>
-      {actions && (
-        <div style={{ display:'flex', gap:8, alignItems:'center', flexShrink:0 }}>
-          {actions}
+          {actions && (
+            <div className="rs-topbar-actions">
+              {actions}
+            </div>
+          )}
         </div>
-      )}
-    </div>
+      </div>
+      {inRunHub && <AutomationHub />}
+    </>
   );
-}
-
-// ── Icons (stroke-based, neutral) ─────────────────────────────────────────────
-function Icon({ size=16, color='currentColor', children }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none"
-      stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-      {children}
-    </svg>
-  );
-}
-
-function IconGrid({ size, color }) {
-  return <Icon size={size} color={color}>
-    <rect x="1.5" y="1.5" width="5" height="5" rx="1"/>
-    <rect x="9.5" y="1.5" width="5" height="5" rx="1"/>
-    <rect x="1.5" y="9.5" width="5" height="5" rx="1"/>
-    <rect x="9.5" y="9.5" width="5" height="5" rx="1"/>
-  </Icon>;
-}
-function IconList({ size, color }) {
-  return <Icon size={size} color={color}>
-    <path d="M2 4h12M2 8h9M2 12h11"/>
-  </Icon>;
-}
-function IconAlert({ size, color }) {
-  return <Icon size={size} color={color}>
-    <path d="M8 1.5L14.5 13.5H1.5L8 1.5z"/>
-    <path d="M8 6v3.5"/>
-    <circle cx="8" cy="11.5" r="0.5" fill={color}/>
-  </Icon>;
-}
-function IconPlay({ size, color }) {
-  return <Icon size={size} color={color}>
-    <path fill={color} stroke="none" d="M3.5 2.5l10 5.5-10 5.5z"/>
-  </Icon>;
-}
-function IconPower({ size, color }) {
-  return <Icon size={size} color={color}>
-    <path d="M8 1.5v6"/><path d="M4.4 3.8a5.5 5.5 0 1 0 7.2 0"/>
-  </Icon>;
-}
-function IconCode({ size, color }) {
-  return <Icon size={size} color={color}>
-    <path d="M5.5 4.5L2 8l3.5 3.5"/><path d="M10.5 4.5L14 8l-3.5 3.5"/>
-  </Icon>;
-}
-function IconClock({ size, color }) {
-  return <Icon size={size} color={color}>
-    <circle cx="8" cy="8" r="6"/>
-    <path d="M8 5v3.5l2.5 1.5"/>
-  </Icon>;
-}
-// Pulse line — a health check.
-function IconPulse({ size, color }) {
-  return <Icon size={size} color={color}>
-    <path d="M1.5 8.5h3l1.5-4 3 7 1.5-3h4"/>
-  </Icon>;
-}
-// Two opposing arrows — a planned role swap between replicas.
-function IconSwitch({ size, color }) {
-  return <Icon size={size} color={color}>
-    <path d="M2.5 5h10"/>
-    <path d="M10 2.5L12.5 5 10 7.5"/>
-    <path d="M13.5 11h-10"/>
-    <path d="M6 8.5L3.5 11 6 13.5"/>
-  </Icon>;
-}
-function IconCloud({ size, color }) {
-  return <Icon size={size} color={color}>
-    <path d="M4 11a3 3 0 0 1 0-6 4 4 0 0 1 8 1 3 3 0 0 1 0 5"/>
-  </Icon>;
-}
-function IconDoc({ size, color }) {
-  return <Icon size={size} color={color}>
-    <path d="M3 2h7l3 3v9H3V2z"/>
-    <path d="M10 2v3h3"/>
-    <path d="M6 8h4M6 11h3"/>
-  </Icon>;
-}
-
-function IconUpload({ size, color }) {
-  return <Icon size={size} color={color}>
-    <path d="M8 11V3"/>
-    <path d="M5 6l3-3 3 3"/>
-    <path d="M3 11v2a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1v-2"/>
-  </Icon>;
-}
-
-function IconUsers({ size, color }) {
-  return <Icon size={size} color={color}>
-    <circle cx="5.5" cy="5" r="2"/>
-    <path d="M1.5 13c0-2.2 1.8-3.5 4-3.5s4 1.3 4 3.5"/>
-    <circle cx="11" cy="5.5" r="1.6"/>
-    <path d="M10 9.7c1.7.1 3 1.3 3 3.3"/>
-  </Icon>;
-}
-function IconGear({ size, color }) {
-  return <Icon size={size} color={color}>
-    <circle cx="8" cy="8" r="2.5"/>
-    <path d="M8 1.5v1M8 13.5v1M1.5 8h1M13.5 8h1M3.4 3.4l.7.7M11.9 11.9l.7.7M3.4 12.6l.7-.7M11.9 4.1l.7-.7"/>
-  </Icon>;
 }

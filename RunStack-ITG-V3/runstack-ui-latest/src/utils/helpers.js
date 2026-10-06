@@ -42,22 +42,23 @@ export function shortId(id) {
 // Green = finished OK, amber = waiting or in progress (pulsing while
 // running), red = did not succeed. Same meaning on every page.
 export const STATUS_META = {
-  COMPLETED: { color:'#0F9D6D', bg:'#E4F8F0', label:'Completed' },
-  SUCCEEDED: { color:'#0F9D6D', bg:'#E4F8F0', label:'Succeeded' },
-  RUNNING:   { color:'#B45309', bg:'#FEF3E2', label:'Running', pulse:true },
-  PENDING:   { color:'#B45309', bg:'#FEF3E2', label:'Pending' },
-  FAILED:    { color:'#DC2626', bg:'#FDECEC', label:'Failed' },
-  TIMED_OUT: { color:'#DC2626', bg:'#FDECEC', label:'Timed Out' },
-  CANCELLED: { color:'#DC2626', bg:'#FDECEC', label:'Cancelled' },
+  // color = dot/border, text = label (AA contrast on bg)
+  COMPLETED: { color:'#0F9D6D', text:'#0B6E4C', bg:'#E4F8F0', label:'Completed' },
+  SUCCEEDED: { color:'#0F9D6D', text:'#0B6E4C', bg:'#E4F8F0', label:'Succeeded' },
+  RUNNING:   { color:'#B45309', text:'#92400E', bg:'#FEF3E2', label:'Running', pulse:true },
+  PENDING:   { color:'#B45309', text:'#92400E', bg:'#FEF3E2', label:'Pending' },
+  FAILED:    { color:'#DC2626', text:'#9A1E1E', bg:'#FDECEC', label:'Failed' },
+  TIMED_OUT: { color:'#DC2626', text:'#9A1E1E', bg:'#FDECEC', label:'Timed Out' },
+  CANCELLED: { color:'#DC2626', text:'#9A1E1E', bg:'#FDECEC', label:'Cancelled' },
 };
 
 // ── Type meta ─────────────────────────────────────────────────────────────────
 // Type tags are labels, not statuses, so they use the teal accent and
 // slate — never the green/amber/red that mean Completed/Running/Failed.
 export const TYPE_META = {
-  'SSM-Automation': { color:'#365D9D', bg:'#EEF3FA' },
-  'SSM-RunCommand': { color:'#4F5B6E', bg:'#F5F6F8' },
-  'EC2-Action':     { color:'#2C4D84', bg:'#EEF3FA' },
+  'SSM-Automation': { color:'#365FA3', bg:'#E8F0FC' },
+  'SSM-RunCommand': { color:'#52647A', bg:'#F4F6FA' },
+  'EC2-Action':     { color:'#2B4D86', bg:'#E8F0FC' },
 };
 
 export const SSM_DOCS = [

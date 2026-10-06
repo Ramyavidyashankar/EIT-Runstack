@@ -21,6 +21,7 @@ import VarCleanupSummary from './VarCleanupSummary';
 import { fmtFull } from '../../utils/jobs';
 import { fmtElapsed, targetElapsed } from '../../utils/executionLogs';
 import { isActiveTarget, isUnsuccessfulTarget } from '../../utils/executionStatus';
+import Tabs from '../Tabs';
 
 function Info({ label, children, mono, copy }) {
   return (
@@ -148,17 +149,9 @@ export default function TargetOutputDrawer({ jobId, target, selected, paused, ge
         </div>
 
         {/* Tabs */}
-        <div role="tablist" aria-label="Server views" style={{ display: 'flex', gap: 2, padding: '0 12px', borderBottom: '1px solid var(--border)' }}>
-          {tabs.map((t) => (
-            <button key={t.k} type="button" role="tab" aria-selected={activeTab === t.k} onClick={() => setTab(t.k)}
-              style={{
-                padding: '9px 12px', fontSize: 13, fontWeight: 600, fontFamily: 'inherit', cursor: 'pointer', background: 'none', border: 'none',
-                color: activeTab === t.k ? 'var(--brand-hover)' : 'var(--text-tertiary)',
-                borderBottom: `2px solid ${activeTab === t.k ? 'var(--brand)' : 'transparent'}`, marginBottom: -1,
-              }}>{t.l}</button>
-          ))}
-          {!selected && <span style={{ alignSelf: 'center', marginLeft: 8 }}><Spinner size={12} /></span>}
-        </div>
+        <Tabs label="Server views" idPrefix="rs-target" size="sm" active={activeTab} onChange={setTab} className="rs-tabs--inset"
+          tabs={tabs.map((t) => ({ value: t.k, label: t.l }))}
+          after={!selected ? <Spinner size={12} /> : null} />
 
         {/* Body — scrolls inside the drawer, never the page */}
         <div role="tabpanel" style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>

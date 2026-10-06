@@ -3,16 +3,16 @@ import React from 'react';
 import { useAuth } from './AuthContext';
 import { Btn } from '../components/ui';
 
-const TEAL = '#365D9D';
-const TEAL_DARK = '#2C4D84';
+const TEAL = '#365FA3';
+const TEAL_DARK = '#2B4D86';
 
 function NetworkBg() {
   return (
     <svg width="480" height="480" viewBox="0 0 480 480" fill="none" aria-hidden="true" style={{ position: 'absolute', right: -80, bottom: -80, opacity: 0.35, pointerEvents: 'none' }}>
       {[[60, 80], [140, 40], [220, 110], [300, 60], [380, 130], [100, 200], [260, 220], [400, 260], [180, 320], [340, 360], [60, 380]].map((p, i) => (
-        <circle key={i} cx={p[0]} cy={p[1]} r="2.5" fill="#C9D1DC" />
+        <circle key={i} cx={p[0]} cy={p[1]} r="2.5" fill="#C3CFDD" />
       ))}
-      <path d="M60 80L140 40M140 40L220 110M220 110L300 60M300 60L380 130M100 200L220 110M100 200L260 220M260 220L400 260M260 220L180 320M180 320L340 360M180 320L60 380" stroke="#DCE2EA" strokeWidth="1" />
+      <path d="M60 80L140 40M140 40L220 110M220 110L300 60M300 60L380 130M100 200L220 110M100 200L260 220M260 220L400 260M260 220L180 320M180 320L340 360M180 320L60 380" stroke="#D7E0EB" strokeWidth="1" />
     </svg>
   );
 }
@@ -62,10 +62,10 @@ export default function Login() {
   const { login, signedOutReason } = useAuth();
 
   return (
-    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#F5F6F8', fontFamily: 'var(--font-sans)', position: 'relative', overflow: 'hidden' }}>
+    <div style={{ height: '100vh', display: 'flex', flexDirection: 'column', background: '#F4F6FA', fontFamily: 'var(--font-sans)', position: 'relative', overflow: 'hidden' }}>
       <NetworkBg />
 
-      <div style={{ height: 56, flexShrink: 0, position: 'relative', zIndex: 2, background: '#12151C', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '3px solid #365D9D' }}>
+      <div style={{ height: 56, flexShrink: 0, position: 'relative', zIndex: 2, background: '#12151C', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 24px', borderBottom: '3px solid #365FA3' }}>
         <div style={{ display: 'flex', alignItems: 'center' }}>
           <img src="/dxc-logo-color.svg" alt="DXC" style={{ height: 22, display: 'block' }} />
           <div style={{ marginLeft: 16, paddingLeft: 16, borderLeft: '1px solid rgba(255,255,255,0.15)', fontSize: 15, fontWeight: 600, color: '#FFFFFF',}}>
@@ -83,16 +83,16 @@ export default function Login() {
 
       <div className="rs-margin-text rs-margin-left" aria-hidden="true" style={{ position: 'absolute', left: 40, top: 96, zIndex: 1, fontSize: 13, fontWeight: 600, color: 'rgba(122,125,149,0.55)', lineHeight: 1.7 }}>
         Automation<br />for a stronger<br />tomorrow
-        <div style={{ width: 26, height: 2, background: '#365D9D', marginTop: 8 }} />
+        <div style={{ width: 26, height: 2, background: '#365FA3', marginTop: 8 }} />
       </div>
 
       <div className="rs-margin-text rs-margin-right" aria-hidden="true" style={{ position: 'absolute', right: 40, top: 96, zIndex: 1, textAlign: 'right', fontSize: 13, fontWeight: 600, color: 'rgba(122,125,149,0.55)', lineHeight: 1.7 }}>
         People<br />Technology<br />Outcomes
-        <div style={{ width: 26, height: 2, background: '#365D9D', marginTop: 8, marginLeft: 'auto' }} />
+        <div style={{ width: 26, height: 2, background: '#365FA3', marginTop: 8, marginLeft: 'auto' }} />
       </div>
 
       <main style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, position: 'relative', zIndex: 2 }}>
-        <div className="rs-login-card" style={{ display: 'flex', width: '100%', maxWidth: 980, minHeight: 520, background: '#FFFFFF', borderRadius: 14, border: '1px solid #DCE2EA', boxShadow: '0 8px 32px rgba(18,21,28,0.10)', overflow: 'hidden' }}>
+        <div className="rs-login-card" style={{ display: 'flex', width: '100%', maxWidth: 980, minHeight: 520, background: '#FFFFFF', borderRadius: 14, border: '1px solid #D7E0EB', boxShadow: '0 8px 32px rgba(18,21,28,0.10)', overflow: 'hidden' }}>
 
           <div className="rs-login-left" style={{ flex: '0 0 52%', position: 'relative', overflow: 'hidden', background: 'linear-gradient(160deg, #12151C 0%, #0D1526 100%)', padding: '40px 40px 32px', display: 'flex', flexDirection: 'column', color: '#FFFFFF' }}>
             <img src="/dxc-logo-color.svg" alt="DXC" style={{ height: 18, display: 'block', marginBottom: 22 }} />
@@ -131,9 +131,9 @@ export default function Login() {
               <svg width="100%" height="20" viewBox="0 0 300 20" preserveAspectRatio="none" aria-hidden="true" style={{ display: 'block', marginTop: 14 }}>
                 <defs>
                   <linearGradient id="glow" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#365D9D" stopOpacity="0" />
-                    <stop offset="50%" stopColor="#365D9D" stopOpacity="0.9" />
-                    <stop offset="100%" stopColor="#365D9D" stopOpacity="0" />
+                    <stop offset="0%" stopColor="#365FA3" stopOpacity="0" />
+                    <stop offset="50%" stopColor="#365FA3" stopOpacity="0.9" />
+                    <stop offset="100%" stopColor="#365FA3" stopOpacity="0" />
                   </linearGradient>
                 </defs>
                 <path d="M0 10 Q150 -6 300 10" stroke="url(#glow)" strokeWidth="1.5" fill="none" />
@@ -151,7 +151,7 @@ export default function Login() {
                 Welcome to<br />EIT RunStack
               </h2>
 
-              <p style={{ fontSize: 14, color: '#657185', marginTop: 12, marginBottom: signedOutReason ? 14 : 28, lineHeight: 1.6 }}>
+              <p style={{ fontSize: 14, color: '#52647A', marginTop: 12, marginBottom: signedOutReason ? 14 : 28, lineHeight: 1.6 }}>
                 Sign in with your corporate account to continue.
               </p>
               {signedOutReason === 'expired' && (
@@ -171,19 +171,19 @@ export default function Login() {
                 Sign in with SSO →
               </Btn>
 
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 16, fontSize: 12, color: '#657185' }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 16, fontSize: 12, color: '#52647A' }}>
                 <LockIcon size={12} />
                 Secured with enterprise SSO
               </div>
 
-              <div style={{ height: 1, background: '#DCE2EA', margin: '28px 0 20px' }} />
+              <div style={{ height: 1, background: '#D7E0EB', margin: '28px 0 20px' }} />
 
               <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-                <span style={{ width: 24, height: 24, borderRadius: 7, flexShrink: 0, background: '#F5F6F8', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <ChatIcon size={12} color="#657185" />
+                <span style={{ width: 24, height: 24, borderRadius: 7, flexShrink: 0, background: '#F4F6FA', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <ChatIcon size={12} color="#52647A" />
                 </span>
                 <div>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: '#3B4658' }}>Need help?</div>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#2F4258' }}>Need help?</div>
                   <a href="mailto:eit-ai-ops-runstack@dxc.com" style={{ fontSize: 13, color: TEAL, fontWeight: 500, textDecoration: 'none' }}>
                     Contact EIT RunStack Support
                   </a>
@@ -196,7 +196,7 @@ export default function Login() {
         </div>
       </main>
 
-      <div style={{ textAlign: 'center', padding: '16px 0', flexShrink: 0, fontSize: 12, color: '#657185', position: 'relative', zIndex: 2 }}>
+      <div style={{ textAlign: 'center', padding: '16px 0', flexShrink: 0, fontSize: 12, color: '#52647A', position: 'relative', zIndex: 2 }}>
         DXC Internal | EIT RunStack Automation Platform
       </div>
 

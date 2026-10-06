@@ -27,10 +27,10 @@ export default function RequireRole({ minRole, orGroup, children }) {
 
   return (
     <div style={{ padding: 48, textAlign: 'center' }}>
-      <div style={{ fontSize: 14, fontWeight: 600, color: '#202938', marginBottom: 6 }}>
+      <div style={{ fontSize: 14, fontWeight: 600, color: '#172B4D', marginBottom: 6 }}>
         You don't have permission to view this page
       </div>
-      <div style={{ fontSize: 13, color: '#657185' }}>
+      <div style={{ fontSize: 13, color: '#52647A' }}>
         This page requires the <strong>{minRole}</strong> role or higher
         {groupLabel ? <> (or membership in <strong>{groupLabel}</strong>)</> : null}. Your role: {role}.
         Contact a RunStack administrator if you believe this is incorrect.

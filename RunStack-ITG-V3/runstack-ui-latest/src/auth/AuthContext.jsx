@@ -30,7 +30,9 @@ import {
   getRoleFromIdToken,
   getEmailFromIdToken,
   getGroupsFromIdToken,
+  decodeJwt,
 } from './tokenStorage';
+import { displayNameFromClaims } from '../utils/identity';
 
 import { setAccessTokenProvider, setAuthFailureHandler } from '../api/client';
 
@@ -188,11 +190,13 @@ export function AuthProvider({ children }) {
   const role = session ? getRoleFromIdToken(session.idToken) : 'none';
   const email = session ? getEmailFromIdToken(session.idToken) : '';
   const groups = session ? getGroupsFromIdToken(session.idToken) : [];
+  // Header display only (see utils/identity.js) — never used for authorization.
+  const displayName = session ? displayNameFromClaims(decodeJwt(session.idToken), email) : '';
   const isAuthenticated = isSessionUsable(session);
 
   return (
     <AuthContext.Provider
-      value={{ session, role, email, groups, isAuthenticated, loading, signedOutReason, login, logout, completeLogin, getValidAccessToken }}
+      value={{ session, role, email, displayName, groups, isAuthenticated, loading, signedOutReason, login, logout, completeLogin, getValidAccessToken }}
     >
       {children}
     </AuthContext.Provider>

@@ -22,6 +22,7 @@ import AuthCallback from './auth/AuthCallback';
 import RequireRole from './auth/RequireRole';
 import { DR_SWITCHOVER_ACCESS, SQL_HEALTHCHECK_ACCESS } from './auth/access';
 import { Spinner } from './components/ui';
+import { RunHub } from './components/run/runHubContext';
 
 function ConfigWarning() {
   if (isConfigured()) return null;
@@ -64,18 +65,19 @@ function AppRoutes() {
         <Route path="/"            element={<Dashboard/>}/>
         <Route path="/jobs"        element={<Jobs/>}/>
         <Route path="/jobs/:jobId" element={<ExecutionDetails/>}/>
-        <Route path="/automations" element={<RunAutomations/>}/>
-        <Route path="/ec2"         element={<Ec2StartStop/>}/>
+        {/* Run Automations: Category → Automation chooser (RunHub) above each form */}
+        <Route path="/automations" element={<RunHub><RunAutomations/></RunHub>}/>
+        <Route path="/ec2"         element={<RunHub><Ec2StartStop/></RunHub>}/>
         {/* Advanced (original) single-target page — admins only */}
         <Route path="/trigger"     element={<RequireRole minRole="admin"><TriggerJob/></RequireRole>}/>
         <Route path="/schedules"   element={<RequireRole minRole="operator"><TriggersSchedules/></RequireRole>}/>
         <Route path="/dlq"         element={<RequireRole minRole="operator"><DLQ/></RequireRole>}/>
         <Route path="/accounts"    element={<RegisteredTargets/>}/>
         <Route path="/database/sql-health-check" element={
-          <RequireRole minRole={SQL_HEALTHCHECK_ACCESS.minRole} orGroup={SQL_HEALTHCHECK_ACCESS.orGroups}><SQLHealthCheck/></RequireRole>
+          <RunHub><RequireRole minRole={SQL_HEALTHCHECK_ACCESS.minRole} orGroup={SQL_HEALTHCHECK_ACCESS.orGroups}><SQLHealthCheck/></RequireRole></RunHub>
         }/>
         <Route path="/database/dr-switchover" element={
-          <RequireRole minRole={DR_SWITCHOVER_ACCESS.minRole} orGroup={DR_SWITCHOVER_ACCESS.orGroups}><DRSwitchover/></RequireRole>
+          <RunHub><RequireRole minRole={DR_SWITCHOVER_ACCESS.minRole} orGroup={DR_SWITCHOVER_ACCESS.orGroups}><DRSwitchover/></RequireRole></RunHub>
         }/>
         {/* Old DR Failover URL — keep bookmarks working */}
         <Route path="/dr-failover" element={<Navigate to="/database/dr-switchover" replace/>}/>

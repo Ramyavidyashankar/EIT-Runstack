@@ -207,19 +207,19 @@ export default function OutputPanel({ jobId, target, paused, getBuffer, isEc2, S
   return (
     <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, height: '100%' }}>
       {/* Toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '8px 12px', borderBottom: '1px solid #DCE2EA', background: '#FFFFFF' }}>
-        <div role="group" aria-label="Streams" style={{ display: 'inline-flex', border: '1px solid #C9D1DC', borderRadius: 8, overflow: 'hidden' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', padding: '8px 12px', borderBottom: '1px solid #D7E0EB', background: '#FFFFFF' }}>
+        <div role="group" aria-label="Streams" style={{ display: 'inline-flex', border: '1px solid #C3CFDD', borderRadius: 8, overflow: 'hidden' }}>
           {VIEWS.map((x) => (
             <button key={x.v} type="button" onClick={() => setView(x.v)} aria-pressed={view === x.v} style={{
-              padding: '4px 10px', fontSize: 12, fontWeight: 600, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
-              background: view === x.v ? 'var(--brand)' : '#FFFFFF', color: view === x.v ? '#FFFFFF' : '#3B4658',
+              padding: '4px 10px', fontSize: 12, border: 'none', cursor: 'pointer', fontFamily: 'inherit',
+              background: view === x.v ? 'var(--brand-bg)' : '#FFFFFF', color: view === x.v ? 'var(--brand-hover)' : '#2F4258', fontWeight: view === x.v ? 700 : 500, boxShadow: view === x.v ? 'inset 0 -2px 0 var(--brand)' : 'none',
             }}>{x.l}</button>
           ))}
         </div>
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#3B4658', cursor: 'pointer' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#2F4258', cursor: 'pointer' }}>
           <input type="checkbox" checked={autoScroll} onChange={(e) => setAutoScroll(e.target.checked)} /> Auto-scroll
         </label>
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#3B4658', cursor: 'pointer' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: '#2F4258', cursor: 'pointer' }}>
           <input type="checkbox" checked={showTimes} onChange={(e) => setShowTimes(e.target.checked)} /> Times
         </label>
         <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 6, alignItems: 'center' }}>
@@ -271,8 +271,8 @@ export default function OutputPanel({ jobId, target, paused, getBuffer, isEc2, S
         <div style={{ padding: '10px 12px 0', display: 'grid', gap: 8 }}>
           {meta.final_output.map((p, i) => (
             <div key={i}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: '#4F5B6E', marginBottom: 4 }}>
-                Final output preview · {p.step || p.plugin} <span style={{ fontWeight: 400, color: '#657185' }}>(first 2,500 characters, from Systems Manager)</span>
+              <div style={{ fontSize: 13, fontWeight: 600, color: '#52647A', marginBottom: 4 }}>
+                Final output preview · {p.step || p.plugin} <span style={{ fontWeight: 400, color: '#52647A' }}>(first 2,500 characters, from Systems Manager)</span>
               </div>
               <pre style={consoleStyle(false)}>{p.text}</pre>
             </div>
@@ -284,7 +284,7 @@ export default function OutputPanel({ jobId, target, paused, getBuffer, isEc2, S
       {(hasLines || status === 'ok') && (
         <div style={{ flex: 1, minHeight: 160, display: 'flex', flexDirection: 'column', padding: '10px 12px 12px' }}>
           {(buf.olderCursor || olderState.error || buf.dropped > 0) && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, fontSize: 12, color: '#657185' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6, fontSize: 12, color: '#52647A' }}>
               {buf.olderCursor && !buf.dropped && (
                 <Btn size="sm" variant="ghost" onClick={loadOlder} disabled={olderState.loading}>
                   {olderState.loading ? <><Spinner size={12} /> Loading…</> : '↑ Load older output'}
@@ -297,15 +297,15 @@ export default function OutputPanel({ jobId, target, paused, getBuffer, isEc2, S
           <div ref={box} onScroll={onScroll} role="log" aria-live="off" aria-label="Script output"
             style={{ ...consoleStyle(true), flex: 1, minHeight: 160, overflow: 'auto' }}>
             {shown.length === 0
-              ? <span style={{ color: '#657185' }}>{view === 'all' ? 'No output yet.' : `No ${view} output.`}</span>
+              ? <span style={{ color: '#52647A' }}>{view === 'all' ? 'No output yet.' : `No ${view} output.`}</span>
               : shown.map((l) => (
-                <div key={l.id} style={{ color: l.stream === 'stderr' ? '#FCA5A5' : '#DCE2EA', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                  {showTimes && <span style={{ color: '#657185', userSelect: 'none' }}>{l.ts ? new Date(l.ts).toISOString().slice(11, 19) : '--:--:--'} </span>}
+                <div key={l.id} style={{ color: l.stream === 'stderr' ? '#FCA5A5' : '#D7E0EB', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {showTimes && <span style={{ color: '#52647A', userSelect: 'none' }}>{l.ts ? new Date(l.ts).toISOString().slice(11, 19) : '--:--:--'} </span>}
                   {l.text || ' '}{l.truncated && <span style={{ color: '#F59E0B' }}> [line truncated]</span>}
                 </div>
               ))}
           </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6, fontSize: 12, color: '#657185', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginTop: 6, fontSize: 12, color: '#52647A', flexWrap: 'wrap' }}>
             <span>{buf.lines.length.toLocaleString()} lines loaded{meta?.log_group ? ` · ${meta.log_group}` : ''}</span>
             <span>·</span>
             <span>
@@ -327,8 +327,8 @@ export default function OutputPanel({ jobId, target, paused, getBuffer, isEc2, S
 function consoleStyle(dark) {
   return {
     margin: 0, fontFamily: 'var(--font-mono)', fontSize: 12, lineHeight: 1.55, borderRadius: 8, padding: 12,
-    background: dark ? 'var(--slate-950)' : '#FAFBFC', color: dark ? '#DCE2EA' : '#202938',
-    border: `1px solid ${dark ? '#1E293B' : '#DCE2EA'}`, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+    background: dark ? 'var(--slate-950)' : '#F8FAFD', color: dark ? '#D7E0EB' : '#172B4D',
+    border: `1px solid ${dark ? '#1E293B' : '#D7E0EB'}`, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
     maxHeight: dark ? 'none' : 240, overflowY: 'auto',
   };
 }

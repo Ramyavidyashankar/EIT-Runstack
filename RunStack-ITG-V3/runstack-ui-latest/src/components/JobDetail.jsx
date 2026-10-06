@@ -50,15 +50,15 @@ export function CopyButton({ value, label = 'Copy', size = 'sm' }) {
 function Field({ label, value, mono, copy, hint }) {
   const empty = value === undefined || value === null || value === '';
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 12, padding: '7px 0', borderBottom: '1px solid #F5F6F8', alignItems: 'start' }}>
-      <div style={{ fontSize: 13, color: '#657185' }}>{label}</div>
+    <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 12, padding: '7px 0', borderBottom: '1px solid #F4F6FA', alignItems: 'start' }}>
+      <div style={{ fontSize: 13, color: '#52647A' }}>{label}</div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', minWidth: 0 }}>
         <div style={{
-          fontSize: mono ? 11.5 : 12.5, color: empty ? '#657185' : '#202938', fontFamily: mono ? 'var(--font-mono)' : 'inherit',
+          fontSize: mono ? 11.5 : 12.5, color: empty ? '#52647A' : '#172B4D', fontFamily: mono ? 'var(--font-mono)' : 'inherit',
           wordBreak: 'break-all', minWidth: 0, flex: 1,
         }}>
           {empty ? 'Not recorded' : value}
-          {hint && <div style={{ fontSize: 12, color: '#657185', fontFamily: 'var(--font-sans)', marginTop: 2, wordBreak: 'normal' }}>{hint}</div>}
+          {hint && <div style={{ fontSize: 12, color: '#52647A', fontFamily: 'var(--font-sans)', marginTop: 2, wordBreak: 'normal' }}>{hint}</div>}
         </div>
         {copy && !empty && <CopyButton value={value} label={`Copy ${label}`} />}
       </div>
@@ -68,9 +68,9 @@ function Field({ label, value, mono, copy, hint }) {
 
 function Section({ title, children, right }) {
   return (
-    <div style={{ border: '1px solid #DCE2EA', borderRadius: 10, overflow: 'hidden', background: '#FFFFFF' }}>
-      <div style={{ padding: '9px 14px', background: '#FAFBFC', borderBottom: '1px solid #DCE2EA', display: 'flex', alignItems: 'center' }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: '#3B4658',}}>{title}</div>
+    <div style={{ border: '1px solid #D7E0EB', borderRadius: 10, overflow: 'hidden', background: '#FFFFFF' }}>
+      <div style={{ padding: '9px 14px', background: '#F8FAFD', borderBottom: '1px solid #D7E0EB', display: 'flex', alignItems: 'center' }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#2F4258',}}>{title}</div>
         {right && <div style={{ marginLeft: 'auto' }}>{right}</div>}
       </div>
       <div style={{ padding: '6px 14px 10px' }}>{children}</div>
@@ -84,12 +84,12 @@ function OutputBlock({ title, text, tone = 'neutral' }) {
   const long = text.length > 1200 || text.split('\n').length > 18;
   const colors = tone === 'error'
     ? { bg: '#FDECEC', border: '#F7B9B9' }
-    : { bg: '#FAFBFC', border: '#DCE2EA' };
+    : { bg: '#F8FAFD', border: '#D7E0EB' };
   return (
     <div style={{ marginTop: 8 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <div style={{ fontSize: 13, fontWeight: 600, color: '#3B4658' }}>{title}</div>
-        <span style={{ fontSize: 12, color: '#657185' }}>{text.split('\n').length} lines</span>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#2F4258' }}>{title}</div>
+        <span style={{ fontSize: 12, color: '#52647A' }}>{text.split('\n').length} lines</span>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
           {long && (
             <button type="button" onClick={() => setExpanded((x) => !x)} style={{ background: 'none', border: 'none', color: 'var(--nav-blue-text)', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
@@ -100,7 +100,7 @@ function OutputBlock({ title, text, tone = 'neutral' }) {
         </span>
       </div>
       <pre style={{
-        margin: 0, fontFamily: 'var(--font-mono)', fontSize: 12, lineHeight: 1.55, color: '#202938',
+        margin: 0, fontFamily: 'var(--font-mono)', fontSize: 12, lineHeight: 1.55, color: '#172B4D',
         background: colors.bg, border: `1px solid ${colors.border}`, borderRadius: 8, padding: 12,
         whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: expanded ? 'none' : 280, overflowY: 'auto',
       }}>{text}</pre>
@@ -167,8 +167,8 @@ export default function JobDetailContent({ jobId, initial, onUpdate }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <StatusBadge status={j.status} />
         {j.automation_type && <TypeTag type={j.automation_type} />}
-        {j.environment && <span style={{ fontSize: 12, color: '#4F5B6E', background: '#F5F6F8', border: '1px solid #DCE2EA', borderRadius: 999, padding: '2px 8px' }}>{j.environment}</span>}
-        <span style={{ fontSize: 12, color: '#657185' }}>
+        {j.environment && <span style={{ fontSize: 12, color: '#52647A', background: '#F4F6FA', border: '1px solid #D7E0EB', borderRadius: 999, padding: '2px 8px' }}>{j.environment}</span>}
+        <span style={{ fontSize: 12, color: '#52647A' }}>
           {active ? `Running for ${dur.text} · updates every ${ACTIVE_POLL_MS / 1000}s` : `Took ${dur.text}`}
         </span>
         {refreshing && <Spinner size={12} />}
@@ -216,7 +216,7 @@ export default function JobDetailContent({ jobId, initial, onUpdate }) {
         <Field label="Received" value={fmtFull(j.created_at)} hint={`${fmtAgo(j.created_at, now)} · job created as PENDING`} />
         <Field label="Last update" value={fmtFull(j.updated_at)} hint={`${fmtAgo(j.updated_at, now)} · status set to ${j.status}`} />
         <Field label={active ? 'Elapsed' : 'Duration'} value={dur.text} />
-        <div style={{ fontSize: 12, color: '#657185', paddingTop: 8 }}>
+        <div style={{ fontSize: 12, color: '#52647A', paddingTop: 8 }}>
           RunStack keeps the current status and these two timestamps only; individual status changes are not recorded.
         </div>
       </Section>
@@ -235,12 +235,12 @@ export default function JobDetailContent({ jobId, initial, onUpdate }) {
           <OutputBlock title="Output" text={job.output} />
         </Section>
       ) : job && (
-        <Section title="Output"><div style={{ fontSize: 13, color: '#657185', padding: '6px 0' }}>{active ? 'No output yet.' : 'No output was recorded for this job.'}</div></Section>
+        <Section title="Output"><div style={{ fontSize: 13, color: '#52647A', padding: '6px 0' }}>{active ? 'No output yet.' : 'No output was recorded for this job.'}</div></Section>
       )}
 
       {params && Object.keys(params).length > 0 && (
-        <Section title="Parameters" right={<span style={{ fontSize: 12, color: '#657185' }}>Secrets are masked</span>}>
-          <pre style={{ margin: '6px 0 0', fontFamily: 'var(--font-mono)', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#202938' }}>
+        <Section title="Parameters" right={<span style={{ fontSize: 12, color: '#52647A' }}>Secrets are masked</span>}>
+          <pre style={{ margin: '6px 0 0', fontFamily: 'var(--font-mono)', fontSize: 12, whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: '#172B4D' }}>
             {JSON.stringify(params, null, 2)}
           </pre>
         </Section>

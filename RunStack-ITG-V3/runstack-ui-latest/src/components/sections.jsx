@@ -47,9 +47,9 @@ export function SectionCard({ tone = 1, title, helper, right, children, bodyStyl
 
 export function Chip({ children, tone = 'default', title }) {
   const tones = {
-    default: { bg: '#EEF3FA', fg: '#2C4D84', border: '#C5D3E8' },
+    default: { bg: '#E8F0FC', fg: '#2B4D86', border: '#C4D4EC' },
     amber:   { bg: '#FDF3E4', fg: '#92400E', border: '#F3D9AE' },
-    gray:    { bg: '#F1F3F5', fg: '#4F5B6E', border: '#DCE2EA' },
+    gray:    { bg: '#F1F3F5', fg: '#52647A', border: '#D7E0EB' },
     red:     { bg: '#FDECEC', fg: '#B91C1C', border: '#F7B9B9' },
     green:   { bg: '#E4F8F0', fg: '#0B6E4C', border: '#A9E7CD' },
   };
@@ -76,7 +76,7 @@ export function ReviewRow({ label, value, mono }) {
 /** Plain-language message box. tone: info | success | warning | danger. */
 export function Callout({ tone = 'info', title, children, action }) {
   const tones = {
-    info:    { bg: '#EEF3FA', border: '#C5D3E8', fg: '#233F6C' },
+    info:    { bg: '#E8F0FC', border: '#C4D4EC', fg: '#223E6E' },
     success: { bg: '#E4F8F0', border: '#A9E7CD', fg: '#0B6E4C' },
     warning: { bg: '#FDF3E4', border: '#F3D9AE', fg: '#92400E' },
     danger:  { bg: '#FDECEC', border: '#F7B9B9', fg: '#9A1E1E' },
@@ -120,7 +120,7 @@ export function fmtClock(date) {
 export function RefreshControl({ onRefresh, refreshing, lastUpdated, label = 'Refresh', stampLabel = 'Last updated', autoEverySec, error }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-      <span style={{ fontSize: 12, color: error ? '#B91C1C' : '#657185', whiteSpace: 'nowrap' }} aria-live="polite">
+      <span style={{ fontSize: 12, color: error ? '#B91C1C' : '#52647A', whiteSpace: 'nowrap' }} aria-live="polite">
         {error
           ? `Refresh failed — showing data from ${fmtClock(lastUpdated)}`
           : <>{stampLabel} {fmtClock(lastUpdated)}{autoEverySec ? ` · auto every ${autoEverySec}s` : ''}</>}
@@ -134,7 +134,7 @@ export function RefreshControl({ onRefresh, refreshing, lastUpdated, label = 'Re
 
 function RefreshIcon() {
   return (
-    <svg width={13} height={13} viewBox="0 0 16 16" fill="none" stroke="#3B4658" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <svg width={13} height={13} viewBox="0 0 16 16" fill="none" stroke="#2F4258" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
       <path d="M13 8a5 5 0 1 1-1.5-3.6" /><path d="M13 2.5V6h-3.5" />
     </svg>
   );
@@ -142,15 +142,15 @@ function RefreshIcon() {
 
 /** Compact stat for summary strips. */
 export function SummaryTile({ label, value, sub, tone = 'default', mono }) {
-  const accents = { default: '#365D9D', green: '#0F9D6D', amber: '#B45309', red: '#DC2626', gray: '#657185' };
+  const accents = { default: '#365FA3', green: '#0F9D6D', amber: '#B45309', red: '#DC2626', gray: '#52647A' };
   return (
     <div style={{
-      background: '#FFFFFF', border: '1px solid #DCE2EA', borderTop: `3px solid ${accents[tone] || accents.default}`,
+      background: '#FFFFFF', border: '1px solid #D7E0EB', borderTop: `3px solid ${accents[tone] || accents.default}`,
       borderRadius: 10, padding: '12px 14px', minWidth: 0,
     }}>
       <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 6 }}>{label}</div>
-      <div style={{ fontSize: 14, fontWeight: 600, color: '#202938', fontFamily: mono ? 'var(--font-mono)' : 'inherit', wordBreak: 'break-all' }}>{value}</div>
-      {sub && <div style={{ fontSize: 12, color: '#657185', marginTop: 4 }}>{sub}</div>}
+      <div style={{ fontSize: 14, fontWeight: 600, color: '#172B4D', fontFamily: mono ? 'var(--font-mono)' : 'inherit', wordBreak: 'break-all' }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: '#52647A', marginTop: 4 }}>{sub}</div>}
     </div>
   );
 }

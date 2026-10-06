@@ -9,16 +9,28 @@ export function StatusBadge({ status }) {
     <span style={{
       display:'inline-flex', alignItems:'center', gap:5,
       padding:'3px 9px', borderRadius:20,
-      background: m.bg, color: m.color,
-      fontSize:12, fontWeight:600,
-      border:`1px solid ${m.color}30`,
+      background: m.bg, color: m.text || m.color,
+      fontSize:12, fontWeight:600, whiteSpace:'nowrap',
+      border:`1px solid ${m.color}40`,
     }}>
-      <span style={{
+      <span aria-hidden style={{
         width:6, height:6, borderRadius:'50%',
         background: m.color, flexShrink:0,
         animation: m.pulse ? 'pulse 1.6s ease infinite' : 'none',
       }}/>
       {m.label}
+    </span>
+  );
+}
+
+// ── Badge ─────────────────────────────────────────────────────────────────────
+// Labels and assignments. tone: neutral | brand | success | warning | danger.
+// Neutral/brand are for roles, user chips and tags — never for status.
+// Status tones always pair the colour with a text label.
+export function Badge({ tone = 'neutral', dot = false, mono = false, title, children, className = '' }) {
+  return (
+    <span title={title} className={`rs-badge rs-badge--${tone === 'neutral' ? 'muted' : tone}${mono ? ' rs-mono' : ''} ${className}`}>
+      {dot && <span className="rs-badge-dot" aria-hidden />}{children}
     </span>
   );
 }
@@ -48,23 +60,24 @@ export function Btn({ children, variant='default', size='md', onClick, disabled,
     transition:'all 0.15s', opacity: disabled ? 0.5 : 1,
     border:'none',
     lineHeight:1.4,
-    ...(size === 'sm' ? { padding:'5px 12px', fontSize:'var(--fs-label)' } : { padding:'8px 16px', fontSize:'var(--fs-label)' }),
+    justifyContent:'center', whiteSpace:'nowrap',
+    ...(size === 'sm' ? { padding:'5px 12px', minHeight:30, fontSize:'var(--fs-label)' } : { padding:'7px 16px', minHeight:'var(--control-h)', fontSize:'var(--fs-label)' }),
   };
   const variants = {
     default: {
-      background:'var(--bg-surface)', color:'var(--text-primary)',
-      border:'1px solid var(--border-md)',
+      background:'var(--bg-surface)', color:'var(--brand)',
+      border:'1px solid var(--brand-border)',
     },
     primary: {
       background:'var(--brand)', color:'#FFFFFF',
       border:'1px solid var(--brand)',
     },
     danger: {
-      background:'var(--danger-bg)', color:'var(--danger)',
+      background:'var(--danger-bg)', color:'#9A1E1E',
       border:'1px solid var(--danger-border)',
     },
     ghost: {
-      background:'transparent', color:'var(--text-secondary)',
+      background:'transparent', color:'var(--brand)',
       border:'1px solid transparent',
     },
     // Sidebar palette — primary action (navy) and secondary/selected (blue)
@@ -158,7 +171,7 @@ export function ErrorBanner({ message }) {
     <div style={{
       padding:'10px 16px', borderRadius:'var(--radius-md)',
       background:'var(--danger-bg)', border:'1px solid var(--danger-border)',
-      color:'var(--danger)', fontSize:14, marginBottom:16,
+      color:'#9A1E1E', fontSize:14, marginBottom:16, overflowWrap:'anywhere',
     }}>
       ⚠ {message}
     </div>
@@ -215,7 +228,7 @@ export function MonoField({ value, dim }) {
 
 // ── Form controls ─────────────────────────────────────────────────────────────
 const inputStyle = {
-  width:'100%', padding:'8px 12px',
+  width:'100%', padding:'7px 12px', minHeight:'var(--control-h)',
   borderRadius:'var(--radius-sm)',
   border:'1px solid var(--border-md)',
   background:'var(--bg-surface)',

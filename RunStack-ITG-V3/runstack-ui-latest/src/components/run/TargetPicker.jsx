@@ -23,7 +23,7 @@ import { Btn, Input, Select, Spinner } from '../ui';
 import { accountNameOf, appsLabel, facetOptions, filterInstances, osOf, paginate, serverLabel, sortInstances } from '../../utils/runTargets';
 
 const th = {
-  textAlign: 'left', padding: '8px 10px', fontSize: 13, fontWeight: 600, color: '#3B4658', background: 'var(--bg-tint)', borderBottom: '1px solid var(--border)',
+  textAlign: 'left', padding: '8px 10px', fontSize: 13, fontWeight: 600, color: '#2F4258', background: 'var(--bg-tint)', borderBottom: '1px solid var(--border)',
   whiteSpace: 'nowrap', position: 'sticky', top: 0, zIndex: 1,
 };
 const td = { padding: '7px 8px', borderBottom: '1px solid var(--slate-100)', fontSize: 14, verticalAlign: 'middle' };

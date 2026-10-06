@@ -16,7 +16,7 @@ import { fmtElapsed, targetElapsed } from '../../utils/executionLogs';
 import { isActiveTarget, isUnsuccessfulTarget, outputActionLabel } from '../../utils/executionStatus';
 
 const th = {
-  textAlign: 'left', padding: '8px 12px', fontSize: 13, fontWeight: 600, color: '#3B4658', background: 'var(--bg-tint)', borderBottom: '1px solid var(--border)',
+  textAlign: 'left', padding: '8px 12px', fontSize: 13, fontWeight: 600, color: '#2F4258', background: 'var(--bg-tint)', borderBottom: '1px solid var(--border)',
   whiteSpace: 'nowrap', position: 'sticky', top: 0, zIndex: 1,
 };
 const td = { padding: '8px 12px', borderBottom: '1px solid var(--slate-100)', fontSize: 14, verticalAlign: 'middle' };

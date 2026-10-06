@@ -363,7 +363,7 @@ export default function SQLHealthCheck() {
               )}
               {!job && !jobError && (
                 <SectionCard tone={4} title="Progress">
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#657185' }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#52647A' }}>
                     <Spinner size={14} /> Loading job {jobId}…
                   </div>
                 </SectionCard>
@@ -431,7 +431,7 @@ function TargetSelector({ options, loading, error, selectedIds, onChange, onRelo
         </>
       )}>
       {loading && !options && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#657185' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#52647A' }}>
           <Spinner size={14} /> Loading authorized SQL servers…
         </div>
       )}
@@ -444,7 +444,7 @@ function TargetSelector({ options, loading, error, selectedIds, onChange, onRelo
 
       {options && !options.source_error && (
         <>
-          <div style={{ fontSize: 12, color: '#657185' }}>
+          <div style={{ fontSize: 12, color: '#52647A' }}>
             From the GDBA MSSQL server list (<span style={{ fontFamily: 'var(--font-mono)' }}>{options.source?.file}</span>)
             matched to the RunStack instance catalog{options.scope === 'SCOPED' ? ', limited to the servers in your health check scope' : ''}.
           </div>
@@ -466,10 +466,10 @@ function TargetSelector({ options, loading, error, selectedIds, onChange, onRelo
           {targets.length === 0 ? (
             <Empty message="No SQL servers are available to you. If you expect to see servers here, contact a RunStack administrator." />
           ) : (
-            <div style={{ border: '1px solid #DCE2EA', borderRadius: 8, maxHeight: 360, overflowY: 'auto' }}>
+            <div style={{ border: '1px solid #D7E0EB', borderRadius: 8, maxHeight: 360, overflowY: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                <thead style={{ position: 'sticky', top: 0, background: '#FAFBFC', zIndex: 1 }}>
-                  <tr style={{ textAlign: 'left', color: '#657185', fontSize: 12 }}>
+                <thead style={{ position: 'sticky', top: 0, background: '#F8FAFD', zIndex: 1 }}>
+                  <tr style={{ textAlign: 'left', color: '#52647A', fontSize: 12 }}>
                     <th style={th}>
                       <input type="checkbox" checked={allShownSelected} disabled={!shownSelectable.length}
                         onChange={toggleAllShown} aria-label="Select all shown servers" title="Select all shown" />
@@ -491,7 +491,7 @@ function TargetSelector({ options, loading, error, selectedIds, onChange, onRelo
                         title={t.unavailable_reason || undefined}
                         style={{
                           borderTop: '1px solid #EEF2F6',
-                          background: isSel ? '#FAFBFC' : 'transparent',
+                          background: isSel ? '#F8FAFD' : 'transparent',
                           cursor: blocked ? 'not-allowed' : 'pointer',
                           opacity: t.selectable ? 1 : 0.55,
                         }}>
@@ -500,11 +500,11 @@ function TargetSelector({ options, loading, error, selectedIds, onChange, onRelo
                             onClick={(e) => e.stopPropagation()} onChange={() => toggle(t.instance_id)} aria-label={`Select ${t.server_name}`} />
                         </td>
                         <td style={td}>
-                          <div style={{ fontWeight: 600, color: '#202938' }}>{t.server_name}</div>
+                          <div style={{ fontWeight: 600, color: '#172B4D' }}>{t.server_name}</div>
                           <MonoField value={t.instance_id} dim />
                           {!t.selectable && <div style={{ fontSize: 12, color: '#92400E', marginTop: 2 }}>{t.unavailable_reason}</div>}
                         </td>
-                        <td style={td}>{t.app_name || t.app_id || '—'}{t.app_name && t.app_id ? <div style={{ fontSize: 12, color: '#657185' }}>{t.app_id}</div> : null}</td>
+                        <td style={td}>{t.app_name || t.app_id || '—'}{t.app_name && t.app_id ? <div style={{ fontSize: 12, color: '#52647A' }}>{t.app_id}</div> : null}</td>
                         <td style={td}>{t.environment || '—'}</td>
                         <td style={td}><MonoField value={t.account_id || '—'} /></td>
                         <td style={td}>{t.region || '—'}</td>
@@ -512,14 +512,14 @@ function TargetSelector({ options, loading, error, selectedIds, onChange, onRelo
                     );
                   })}
                   {shown.length === 0 && (
-                    <tr><td colSpan={6} style={{ ...td, textAlign: 'center', color: '#657185', padding: 20 }}>No servers match these filters.</td></tr>
+                    <tr><td colSpan={6} style={{ ...td, textAlign: 'center', color: '#52647A', padding: 20 }}>No servers match these filters.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
           )}
           {targets.length > 0 && (
-            <div style={{ fontSize: 12, color: overCap ? '#92400E' : '#657185' }}>
+            <div style={{ fontSize: 12, color: overCap ? '#92400E' : '#52647A' }}>
               Showing {shown.length} of {targets.length} authorized server{targets.length === 1 ? '' : 's'}.
               {' '}Tick one server for a detailed check, or several (up to {MAX_BATCH}) to check them together.
               {overCap && ` The ${MAX_BATCH}-server limit for one run is reached.`}
@@ -556,11 +556,11 @@ function HealthCheckOptions({ checks, loading, loaded, target, selectedId, onSel
     <SectionCard tone={2} title="Choose health check"
       helper="Checks are built from the SSM documents themselves; only the parameters a document requires are asked for.">
       {loading && !checks.length && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#657185' }}><Spinner size={14} /> Reading health check documents…</div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#52647A' }}><Spinner size={14} /> Reading health check documents…</div>
       )}
       {!loading && loaded && !checks.length && <Empty message="No health checks are configured." />}
       {!loading && !loaded && (
-        <div style={{ fontSize: 13, color: '#657185' }}>Health checks appear here once the options above load.</div>
+        <div style={{ fontSize: 13, color: '#52647A' }}>Health checks appear here once the options above load.</div>
       )}
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12 }}>
@@ -575,23 +575,23 @@ function HealthCheckOptions({ checks, loading, loaded, target, selectedId, onSel
               aria-pressed={isSel}
               style={{
                 textAlign: 'left', padding: 14, borderRadius: 10, font: 'inherit',
-                border: `1.5px solid ${isSel ? '#365D9D' : '#DCE2EA'}`,
-                background: isSel ? '#FAFBFC' : usable ? '#FFFFFF' : '#FAFBFC',
+                border: `1.5px solid ${isSel ? '#365FA3' : '#D7E0EB'}`,
+                background: isSel ? '#F8FAFD' : usable ? '#FFFFFF' : '#F8FAFD',
                 cursor: usable ? 'pointer' : 'not-allowed', opacity: usable ? 1 : 0.7, display: 'grid', gap: 6,
               }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <span style={{
                   width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
-                  border: `2px solid ${isSel ? '#365D9D' : '#C9D1DC'}`, background: isSel ? 'radial-gradient(#365D9D 45%, transparent 50%)' : 'transparent',
+                  border: `2px solid ${isSel ? '#365FA3' : '#C3CFDD'}`, background: isSel ? 'radial-gradient(#365FA3 45%, transparent 50%)' : 'transparent',
                 }} />
-                <span style={{ fontWeight: 600, fontSize: 14, color: '#202938' }}>{c.label}</span>
+                <span style={{ fontWeight: 600, fontSize: 14, color: '#172B4D' }}>{c.label}</span>
                 {!usable && <span style={{ marginLeft: 'auto' }}><Chip tone="gray">Unavailable</Chip></span>}
               </div>
-              <div style={{ fontSize: 12, color: '#657185' }}>
+              <div style={{ fontSize: 12, color: '#52647A' }}>
                 <span style={{ fontFamily: 'var(--font-mono)' }}>{c.document}</span>
                 {c.document_version && <> · v{c.document_version}</>}
               </div>
-              {c.description && <div style={{ fontSize: 13, color: '#3B4658' }}>{c.description}</div>}
+              {c.description && <div style={{ fontSize: 13, color: '#2F4258' }}>{c.description}</div>}
               {c.regions_available?.length > 0 && (
                 <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                   {c.regions_available.map((r) => <Chip key={r} tone="gray">{r}</Chip>)}
@@ -607,14 +607,14 @@ function HealthCheckOptions({ checks, loading, loaded, target, selectedId, onSel
         <div style={{ display: 'grid', gap: 12 }}>
           <Eyebrow>Parameters</Eyebrow>
           {selected.parameters.length === 0 && (
-            <div style={{ fontSize: 13, color: '#657185' }}>This check needs no parameters.</div>
+            <div style={{ fontSize: 13, color: '#52647A' }}>This check needs no parameters.</div>
           )}
           {selected.parameters.map((p) => (
             <ParamField key={p.name} spec={p} value={form[p.name]} onChange={(v) => onChange(p.name, v)}
               error={(touched[p.name] && errors[p.name]) || serverErrors?.[p.name] || null} />
           ))}
           {selected.optional_parameter_count > 0 && (
-            <div style={{ fontSize: 12, color: '#657185' }}>
+            <div style={{ fontSize: 12, color: '#52647A' }}>
               {selected.optional_parameter_count} optional parameter{selected.optional_parameter_count === 1 ? '' : 's'} will use the document’s default value{selected.optional_parameter_count === 1 ? '' : 's'}.
             </div>
           )}
@@ -680,7 +680,7 @@ function ExecutionReview({ target, targets, runnable, check, form, canRun, submi
             ? <><Spinner size={13} /> {progress ? `Starting ${progress.done} of ${progress.total}…` : 'Starting…'}</>
             : batch ? `Run Health Check on ${runnable.length} server${runnable.length === 1 ? '' : 's'}` : 'Run Health Check'}
         </Btn>
-        {!submitting && missing && <span style={{ fontSize: 13, color: '#657185' }}>{missing}</span>}
+        {!submitting && missing && <span style={{ fontSize: 13, color: '#52647A' }}>{missing}</span>}
       </div>
     </SectionCard>
   );
@@ -738,8 +738,8 @@ function JobProgress({ job }) {
           return (
             <li key={s.key} aria-current={active ? 'step' : undefined} style={{
               display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 999, fontSize: 13,
-              background: bad ? '#FDECEC' : s.done || active ? '#EEF3FA' : '#F5F6F8',
-              color: bad ? '#9A1E1E' : s.done || active ? '#2C4D84' : '#657185', fontWeight: active ? 700 : 500,
+              background: bad ? '#FDECEC' : s.done || active ? '#E8F0FC' : '#F4F6FA',
+              color: bad ? '#9A1E1E' : s.done || active ? '#2B4D86' : '#52647A', fontWeight: active ? 700 : 500,
             }}>
               {active ? <Spinner size={11} /> : <span aria-hidden>{bad ? '✕' : s.done ? '✓' : '○'}</span>}
               {s.label}
@@ -763,7 +763,7 @@ function JobProgress({ job }) {
         {job.execution_id && <ReviewRow label="Step Functions execution" value={job.execution_id} mono />}
       </div>
       <div>
-        <Link to={`/jobs/${encodeURIComponent(job.job_id)}`} style={{ fontSize: 13, color: '#365D9D', fontWeight: 600 }}>
+        <Link to={`/jobs/${encodeURIComponent(job.job_id)}`} style={{ fontSize: 13, color: '#365FA3', fontWeight: 600 }}>
           Open in Automation Executions →
         </Link>
       </div>
@@ -779,7 +779,7 @@ function HealthCheckResults({ job }) {
   if (!r || r.state === 'running') {
     return (
       <SectionCard tone="neutral" title="Results">
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#657185' }}>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#52647A' }}>
           <Spinner size={14} /> Results appear here when the check finishes. No result is shown until then.
         </div>
       </SectionCard>
@@ -811,10 +811,10 @@ function HealthCheckResults({ job }) {
             <SummaryTile label="Failed" value={r.counts.failed} tone={r.counts.failed ? 'red' : 'gray'} />
             <SummaryTile label="Not checked" value={r.counts.unavailable} tone={r.counts.unavailable ? 'amber' : 'gray'} />
           </div>
-          <div style={{ border: '1px solid #DCE2EA', borderRadius: 8, overflow: 'hidden' }}>
+          <div style={{ border: '1px solid #D7E0EB', borderRadius: 8, overflow: 'hidden' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead style={{ background: '#FAFBFC' }}>
-                <tr style={{ textAlign: 'left', color: '#657185', fontSize: 12 }}>
+              <thead style={{ background: '#F8FAFD' }}>
+                <tr style={{ textAlign: 'left', color: '#52647A', fontSize: 12 }}>
                   <th style={th}>Database</th><th style={th}>Result</th><th style={th}>Detail</th>
                 </tr>
               </thead>
@@ -823,7 +823,7 @@ function HealthCheckResults({ job }) {
                   <tr key={`${row.database}-${i}`} style={{ borderTop: '1px solid #EEF2F6' }}>
                     <td style={{ ...td, fontWeight: 600 }}>{row.database || '—'}</td>
                     <td style={td}><DbStatusChip row={row} /></td>
-                    <td style={{ ...td, color: '#3B4658' }}>{row.detail || '—'}</td>
+                    <td style={{ ...td, color: '#2F4258' }}>{row.detail || '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -935,10 +935,10 @@ function BatchView({ batchKey, jobIds, checks }) {
         <Callout tone={overall.tone} title={overall.title}>{overall.text}</Callout>
         {record?.execution_group_id && record?.run_job_id && (
           <div style={{ fontSize: 13 }}>
-            <Link to={`/jobs/${encodeURIComponent(record.run_job_id)}`} style={{ color: '#365D9D', fontWeight: 600 }}>
+            <Link to={`/jobs/${encodeURIComponent(record.run_job_id)}`} style={{ color: '#365FA3', fontWeight: 600 }}>
               Open as one run in Automation Executions →
             </Link>
-            <span style={{ color: '#657185', marginLeft: 8 }}>Live status and output for every server in this run</span>
+            <span style={{ color: '#52647A', marginLeft: 8 }}>Live status and output for every server in this run</span>
           </div>
         )}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: 12 }}>
@@ -949,14 +949,14 @@ function BatchView({ batchKey, jobIds, checks }) {
           <SummaryTile label="Running" value={running} tone={running ? 'default' : 'gray'} />
           {notStarted.length > 0 && <SummaryTile label="Not started" value={notStarted.length} tone="gray" />}
         </div>
-        <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13, color: '#3B4658' }}>
+        <label style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 13, color: '#2F4258' }}>
           <input type="checkbox" checked={attentionOnly} onChange={(e) => setAttentionOnly(e.target.checked)} />
           Show only servers that need attention
         </label>
-        <div style={{ border: '1px solid #DCE2EA', borderRadius: 8, overflow: 'hidden' }}>
+        <div style={{ border: '1px solid #D7E0EB', borderRadius: 8, overflow: 'hidden' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-            <thead style={{ background: '#FAFBFC' }}>
-              <tr style={{ textAlign: 'left', color: '#657185', fontSize: 12 }}>
+            <thead style={{ background: '#F8FAFD' }}>
+              <tr style={{ textAlign: 'left', color: '#52647A', fontSize: 12 }}>
                 <th style={th}>Server</th><th style={th}>Application · Environment</th><th style={th}>Account · Region</th>
                 <th style={th}>Job</th><th style={th}>Result</th><th style={th}>Time</th>
               </tr>
@@ -968,14 +968,14 @@ function BatchView({ batchKey, jobIds, checks }) {
                 return (
                   <React.Fragment key={x.id}>
                     <tr onClick={() => x.job && setExpanded(open ? null : x.id)}
-                      style={{ borderTop: '1px solid #EEF2F6', cursor: x.job ? 'pointer' : 'default', background: open ? '#FAFBFC' : 'transparent' }}>
+                      style={{ borderTop: '1px solid #EEF2F6', cursor: x.job ? 'pointer' : 'default', background: open ? '#F8FAFD' : 'transparent' }}>
                       <td style={{ ...td, fontWeight: 600 }}>{x.job ? (open ? '▾ ' : '▸ ') : ''}{x.server}</td>
                       <td style={td}>{x.job ? `${x.job.app_name || x.job.app_id || '—'} · ${x.job.environment || '—'}` : '—'}</td>
                       <td style={td}>{x.job ? <MonoField value={`${x.job.account_id || '—'} · ${x.job.region || '—'}`} /> : '—'}</td>
                       <td style={td}>{x.job ? <StatusBadge status={String(x.job.status || 'PENDING').toUpperCase()} /> : '—'}</td>
                       <td style={td}>
                         <Chip tone={v.tone}>{v.label}</Chip>
-                        <div style={{ fontSize: 12, color: '#657185', marginTop: 3 }}>
+                        <div style={{ fontSize: 12, color: '#52647A', marginTop: 3 }}>
                           {x.state === 'notstarted' ? x.reason : x.err && !x.job ? x.err.text : (x.r && x.state !== 'running' ? x.r.summary : '')}
                         </div>
                       </td>
@@ -985,9 +985,9 @@ function BatchView({ batchKey, jobIds, checks }) {
                       <tr><td colSpan={6} style={{ padding: 12, background: '#FBFDFC' }}>
                         <div style={{ display: 'grid', gap: 12 }}>
                           <div style={{ display: 'flex', gap: 16, fontSize: 13 }}>
-                            <Link to={`/database/sql-health-check?job=${encodeURIComponent(x.job.job_id)}`} style={{ color: '#365D9D', fontWeight: 600 }}>Open full result →</Link>
-                            <Link to={`/jobs/${encodeURIComponent(x.job.job_id)}`} style={{ color: '#365D9D', fontWeight: 600 }}>Open in Automation Executions →</Link>
-                            <span style={{ color: '#657185' }}>Job <MonoField value={x.job.job_id} /></span>
+                            <Link to={`/database/sql-health-check?job=${encodeURIComponent(x.job.job_id)}`} style={{ color: '#365FA3', fontWeight: 600 }}>Open full result →</Link>
+                            <Link to={`/jobs/${encodeURIComponent(x.job.job_id)}`} style={{ color: '#365FA3', fontWeight: 600 }}>Open in Automation Executions →</Link>
+                            <span style={{ color: '#52647A' }}>Job <MonoField value={x.job.job_id} /></span>
                           </div>
                           <HealthCheckResults job={x.job} />
                         </div>
@@ -997,13 +997,13 @@ function BatchView({ batchKey, jobIds, checks }) {
                 );
               })}
               {shown.length === 0 && (
-                <tr><td colSpan={6} style={{ ...td, textAlign: 'center', color: '#657185', padding: 20 }}>No servers need attention.</td></tr>
+                <tr><td colSpan={6} style={{ ...td, textAlign: 'center', color: '#52647A', padding: 20 }}>No servers need attention.</td></tr>
               )}
             </tbody>
           </table>
         </div>
         {!record && notStarted.length === 0 && (
-          <div style={{ fontSize: 12, color: '#657185' }}>
+          <div style={{ fontSize: 12, color: '#52647A' }}>
             Servers that could not be started are only listed in the browser tab that ran the check.
           </div>
         )}
@@ -1020,5 +1020,5 @@ function DbStatusChip({ row }) {
 
 const preStyle = {
   whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'var(--font-mono)', fontSize: 12,
-  background: '#202938', color: '#DCE2EA', padding: 12, borderRadius: 8, overflowY: 'auto', margin: 0,
+  background: '#172B4D', color: '#D7E0EB', padding: 12, borderRadius: 8, overflowY: 'auto', margin: 0,
 };

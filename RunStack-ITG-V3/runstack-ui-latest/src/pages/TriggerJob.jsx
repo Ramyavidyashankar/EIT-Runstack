@@ -32,7 +32,7 @@
 //    out of prominent placement into a "Technical details" expander inside
 //    the Review section — still fully editable/visible there, just not
 //    front-and-center for an operator who doesn't need AWS internals.
-//  - Single accent color throughout: Deep Teal (#365D9D), matching the
+//  - Single accent color throughout: Deep Teal (#365FA3), matching the
 //    rest of the app (Dashboard/index.css) rather than introducing a
 //    separate blue — replaces this file's old hardcoded DXC orange
 //    (#EE6C24) everywhere it appeared.
@@ -157,9 +157,9 @@ function SegButton({ active, onClick, children }) {
       style={{
         padding: '4px 12px', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
         borderRadius: 'var(--radius-sm)', cursor: 'pointer',
-        border: active ? '1px solid #365D9D' : '1px solid #C9D1DC',
-        background: active ? '#EEF3FA' : '#FFFFFF',
-        color: active ? '#365D9D' : '#3B4658',
+        border: active ? '1px solid #365FA3' : '1px solid #C3CFDD',
+        background: active ? '#E8F0FC' : '#FFFFFF',
+        color: active ? '#365FA3' : '#2F4258',
         transition: 'all 0.15s',
       }}
     >
@@ -174,8 +174,8 @@ function SectionHeader({ title, helper, right }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9 }}>
       <div>
-        <div style={{ fontWeight: 600, fontSize: 14, color: '#202938' }}>{title}</div>
-        {helper && <div style={{ fontSize: 12, color: '#657185', marginTop: 2, fontWeight: 400 }}>{helper}</div>}
+        <div style={{ fontWeight: 600, fontSize: 14, color: '#172B4D' }}>{title}</div>
+        {helper && <div style={{ fontSize: 12, color: '#52647A', marginTop: 2, fontWeight: 400 }}>{helper}</div>}
       </div>
       {right && <span style={{ marginLeft: 'auto', flexShrink: 0 }}>{right}</span>}
     </div>
@@ -186,9 +186,9 @@ function SectionHeader({ title, helper, right }) {
 // "Optional" tag on the additional-context section.
 function Chip({ children, tone = 'default' }) {
   const tones = {
-    default: { bg: '#EEF3FA', fg: '#2C4D84', border: '#C5D3E8' }, // teal tint
+    default: { bg: '#E8F0FC', fg: '#2B4D86', border: '#C4D4EC' }, // teal tint
     amber:   { bg: '#FDF3E4', fg: '#92400E', border: '#F3D9AE' },
-    gray:    { bg: '#F1F3F5', fg: '#4F5B6E', border: '#DCE2EA' },
+    gray:    { bg: '#F1F3F5', fg: '#52647A', border: '#D7E0EB' },
   };
   const t = tones[tone] || tones.default;
   return (
@@ -212,7 +212,7 @@ function TechnicalDetails({ children, label = 'Technical details' }) {
         type="button" onClick={() => setOpen(o => !o)}
         style={{
           background: 'none', border: 'none', padding: 0, cursor: 'pointer',
-          color: '#657185', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+          color: '#52647A', fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
           display: 'flex', alignItems: 'center', gap: 4,
         }}
       >
@@ -223,7 +223,7 @@ function TechnicalDetails({ children, label = 'Technical details' }) {
   );
 }
 
-function LockIcon({ size = 12, color = '#657185' }) {
+function LockIcon({ size = 12, color = '#52647A' }) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
       <rect x="3.5" y="7" width="9" height="6.5" rx="1.5" />
@@ -237,8 +237,8 @@ function LockIcon({ size = 12, color = '#657185' }) {
 function ReviewRow({ label, value, mono }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
-      <span style={{ color: '#657185' }}>{label}</span>
-      <span style={{ color: '#202938', fontWeight: 600, fontFamily: mono ? 'var(--font-mono)' : 'inherit', textAlign: 'right' }}>{value}</span>
+      <span style={{ color: '#52647A' }}>{label}</span>
+      <span style={{ color: '#172B4D', fontWeight: 600, fontFamily: mono ? 'var(--font-mono)' : 'inherit', textAlign: 'right' }}>{value}</span>
     </div>
   );
 }
@@ -281,9 +281,9 @@ function SearchablePicker({ value, onChange, options, placeholder, disabled }) {
         ref={btnRef} type="button" disabled={disabled} onClick={openPanel}
         style={{
           width: '100%', display: 'flex', alignItems: 'center', gap: 6,
-          padding: '8px 12px', borderRadius: 'var(--radius-md)', border: '1px solid #C9D1DC',
-          background: disabled ? '#FAFBFC' : '#FFFFFF', fontSize: 14,
-          color: selected ? '#202938' : '#657185',
+          padding: '8px 12px', borderRadius: 'var(--radius-md)', border: '1px solid #C3CFDD',
+          background: disabled ? '#F8FAFD' : '#FFFFFF', fontSize: 14,
+          color: selected ? '#172B4D' : '#52647A',
           cursor: disabled ? 'not-allowed' : 'pointer', fontFamily: 'inherit', textAlign: 'left',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
         }}
@@ -291,30 +291,30 @@ function SearchablePicker({ value, onChange, options, placeholder, disabled }) {
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {selected ? selected.label : placeholder}
         </span>
-        <span style={{ marginLeft: 'auto', color: '#657185', fontSize: 12, flexShrink: 0 }}>▾</span>
+        <span style={{ marginLeft: 'auto', color: '#52647A', fontSize: 12, flexShrink: 0 }}>▾</span>
       </button>
       {open && panelPos && ReactDOM.createPortal(
         <div ref={panelRef} style={{
           position: 'absolute', zIndex: 1000, top: panelPos.top, left: panelPos.left,
           width: Math.max(panelPos.width, 260), maxHeight: 300, overflowY: 'auto',
-          background: '#FFFFFF', border: '1px solid #DCE2EA', borderRadius: 'var(--radius-md)',
+          background: '#FFFFFF', border: '1px solid #D7E0EB', borderRadius: 'var(--radius-md)',
           boxShadow: '0 6px 18px rgba(18,21,28,0.14)', padding: 8,
         }}>
           <input
             autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search…"
-            style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 13, border: '1px solid #C9D1DC', borderRadius: 6, marginBottom: 6, fontFamily: 'inherit' }}
+            style={{ width: '100%', boxSizing: 'border-box', padding: '6px 8px', fontSize: 13, border: '1px solid #C3CFDD', borderRadius: 6, marginBottom: 6, fontFamily: 'inherit' }}
           />
           {filtered.length === 0 ? (
-            <div style={{ fontSize: 12, color: '#657185', padding: '6px 4px' }}>No matches.</div>
+            <div style={{ fontSize: 12, color: '#52647A', padding: '6px 4px' }}>No matches.</div>
           ) : filtered.map(o => (
             <div
               key={o.value} onClick={() => { onChange(o.value); setOpen(false); }}
               style={{ padding: '6px 8px', borderRadius: 6, cursor: 'pointer' }}
-              onMouseEnter={e => e.currentTarget.style.background = '#FAFBFC'}
+              onMouseEnter={e => e.currentTarget.style.background = '#F8FAFD'}
               onMouseLeave={e => e.currentTarget.style.background = ''}
             >
-              <div style={{ fontSize: 13, color: '#202938', fontWeight: 500 }}>{o.label}</div>
-              {o.sublabel && <div style={{ fontSize: 12, color: '#657185', marginTop: 1, fontFamily: 'var(--font-mono)' }}>{o.sublabel}</div>}
+              <div style={{ fontSize: 13, color: '#172B4D', fontWeight: 500 }}>{o.label}</div>
+              {o.sublabel && <div style={{ fontSize: 12, color: '#52647A', marginTop: 1, fontFamily: 'var(--font-mono)' }}>{o.sublabel}</div>}
             </div>
           ))}
         </div>,
@@ -332,19 +332,19 @@ function ResourceSummary({ form, isProdEnv }) {
   const [showDetails, setShowDetails] = useState(false);
 
   if (!form.resource_id) {
-    return <div style={{ fontSize: 13, color: '#657185' }}>No server selected yet.</div>;
+    return <div style={{ fontSize: 13, color: '#52647A' }}>No server selected yet.</div>;
   }
 
   return (
     <div style={{
-      padding: '16px 18px', background: '#FAFBFC', border: '1px solid #DCE2EA',
-      borderRadius: 12, borderLeft: `3px solid ${isProdEnv ? '#B45309' : '#365D9D'}`,
+      padding: '16px 18px', background: '#F8FAFD', border: '1px solid #D7E0EB',
+      borderRadius: 12, borderLeft: `3px solid ${isProdEnv ? '#B45309' : '#365FA3'}`,
     }}>
-      <div style={{ fontSize: 16, fontWeight: 600, color: '#202938', fontFamily: 'var(--font-mono)' }}>
+      <div style={{ fontSize: 16, fontWeight: 600, color: '#172B4D', fontFamily: 'var(--font-mono)' }}>
         {form.server_name || form.resource_id}
       </div>
       {form.app_name && (
-        <div style={{ fontSize: 13, color: '#3B4658', marginTop: 2 }}>{form.app_name}</div>
+        <div style={{ fontSize: 13, color: '#2F4258', marginTop: 2 }}>{form.app_name}</div>
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
@@ -353,14 +353,14 @@ function ResourceSummary({ form, isProdEnv }) {
         {form.account_id && <Chip tone="gray">Account {form.account_id}</Chip>}
       </div>
 
-      <div style={{ fontSize: 12, color: '#657185', fontFamily: 'var(--font-mono)', marginTop: 10 }}>
+      <div style={{ fontSize: 12, color: '#52647A', fontFamily: 'var(--font-mono)', marginTop: 10 }}>
         {form.resource_id}
       </div>
 
       <div style={{ marginTop: 10 }}>
         <button
           type="button" onClick={() => setShowDetails(s => !s)}
-          style={{ background: 'none', border: 'none', color: '#365D9D', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
+          style={{ background: 'none', border: 'none', color: '#365FA3', fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit', padding: 0 }}
         >
           {showDetails ? 'Hide' : 'View'} technical details
         </button>
@@ -706,8 +706,8 @@ export default function TriggerJob() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
             {/* ── Where do you want to run the automation? — always visible ── */}
-            <Card style={{ borderLeft: '3px solid #DCE2EA' }}>
-            <CardHead style={{ background: '#FAFBFC' }}>
+            <Card style={{ borderLeft: '3px solid #D7E0EB' }}>
+            <CardHead style={{ background: '#F8FAFD' }}>
               <SectionHeader
                 title="Where do you want to run the automation?"
                 helper="Choose the application, environment, and server you want to work with."
@@ -814,8 +814,8 @@ export default function TriggerJob() {
 
             {/* ── What would you like to run? — reveals once a target is chosen ── */}
             {step1Complete && (
-            <Card style={{ borderLeft: '3px solid #DCE2EA' }}>
-              <CardHead style={{ background: '#FAFBFC' }}>
+            <Card style={{ borderLeft: '3px solid #D7E0EB' }}>
+              <CardHead style={{ background: '#F8FAFD' }}>
                 <SectionHeader
                   title="What would you like to run?"
                   helper="Choose the automation that should be executed on the selected server."
@@ -841,12 +841,12 @@ export default function TriggerJob() {
                 </div>
 
                 <div>
-                  <label style={{ fontSize: 14, fontWeight: 600, color: '#202938', display: 'block', marginBottom: 6 }}>
+                  <label style={{ fontSize: 14, fontWeight: 600, color: '#172B4D', display: 'block', marginBottom: 6 }}>
                     Automation
                   </label>
                   {isRunCommand && (
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8, alignItems: 'center' }}>
-                      <span style={{ fontSize: 12, color: '#657185' }}>Quick command:</span>
+                      <span style={{ fontSize: 12, color: '#52647A' }}>Quick command:</span>
                       {QUICK_COMMAND_DOCS.map(q => (
                         <Btn key={q.doc} size="sm" variant={form.docName === q.doc ? 'primary' : 'default'}
                           onClick={() => setForm(prev => ({
@@ -864,11 +864,11 @@ export default function TriggerJob() {
                     disabled={docsLoading || docs.length === 0}
                   />
                   {!form.docName && !docsLoading && (
-                    <div style={{ fontSize: 12, color: '#657185', marginTop: 4 }}>
+                    <div style={{ fontSize: 12, color: '#52647A', marginTop: 4 }}>
                       Nothing is selected yet — choose {isRunCommand ? 'a quick command or ' : ''}an automation to continue.
                     </div>
                   )}
-                  <div style={{ fontSize: 12, color: '#657185', marginTop: 4, minHeight: 14 }}>
+                  <div style={{ fontSize: 12, color: '#52647A', marginTop: 4, minHeight: 14 }}>
                     {docsLoading ? 'Loading documents…'
                       : docsError ? `Could not load documents: ${docsError}`
                       : docs.length === 0 ? `No ${DOC_TYPE_FOR_AUTOMATION_TYPE[form.automation_type]} documents found for this source`
@@ -888,7 +888,7 @@ export default function TriggerJob() {
                 )}
 
                 <TechnicalDetails>
-                  <div style={{ fontSize: 12, color: '#3B4658', fontFamily: 'var(--font-mono)' }}>
+                  <div style={{ fontSize: 12, color: '#2F4258', fontFamily: 'var(--font-mono)' }}>
                     {form.docArn || 'AWS-managed document — no account-specific ARN'}
                   </div>
                 </TechnicalDetails>
@@ -898,8 +898,8 @@ export default function TriggerJob() {
 
                       {/* ── Review the automation parameters — reveals once an automation is chosen ── */}
             {step2Complete && (
-            <Card style={{ borderLeft: '3px solid #DCE2EA' }}>
-              <CardHead style={{ background: '#FAFBFC' }}>
+            <Card style={{ borderLeft: '3px solid #D7E0EB' }}>
+              <CardHead style={{ background: '#F8FAFD' }}>
                 <SectionHeader
                   title="Review the automation parameters"
                   helper="Check the values RunStack will use during execution."
@@ -926,12 +926,12 @@ export default function TriggerJob() {
                       if (isInstanceId) {
                         return (
                           <div key={key}>
-                            <div style={{ fontSize: 13, fontWeight: 600, color: '#3B4658', marginBottom: 6 }}>{humanizeKey(key)}</div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 12px', background: '#FAFBFC', border: '1px solid #DCE2EA', borderRadius: 8 }}>
+                            <div style={{ fontSize: 13, fontWeight: 600, color: '#2F4258', marginBottom: 6 }}>{humanizeKey(key)}</div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 12px', background: '#F8FAFD', border: '1px solid #D7E0EB', borderRadius: 8 }}>
                               <LockIcon />
-                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: '#3B4658' }}>{displayVal || '—'}</span>
+                              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, color: '#2F4258' }}>{displayVal || '—'}</span>
                             </div>
-                            <div style={{ fontSize: 12, color: '#657185', marginTop: 4 }}>From selected server</div>
+                            <div style={{ fontSize: 12, color: '#52647A', marginTop: 4 }}>From selected server</div>
                           </div>
                         );
                       }
@@ -959,7 +959,7 @@ export default function TriggerJob() {
 
             {/* ── Add additional context — always visible, collapsed by default ── */}
             <Card>
-            <CardHead style={{ cursor: 'pointer', background: '#FAFBFC' }} onClick={() => setShowMetadata(s => !s)}>
+            <CardHead style={{ cursor: 'pointer', background: '#F8FAFD' }} onClick={() => setShowMetadata(s => !s)}>
               <span style={{ fontWeight: 600 }}>Add additional context</span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <Chip tone="gray">Optional</Chip>
@@ -991,8 +991,8 @@ export default function TriggerJob() {
 
             {/* ── Review before you run — reveals once parameters are valid ── */}
             {step3Complete && (
-            <Card style={{ borderLeft: '3px solid #365D9D' }}>
-              <CardHead style={{ background: '#FAFBFC' }}>
+            <Card style={{ borderLeft: '3px solid #365FA3' }}>
+              <CardHead style={{ background: '#F8FAFD' }}>
                 <SectionHeader
                   title="Review before you run"
                   helper="Confirm the target and automation details before starting the execution."
@@ -1035,7 +1035,7 @@ export default function TriggerJob() {
                     <FormRow label="Notification ID" hint="Unique identifier — auto-generated, editable">
                       <Input value={form.id} onChange={set('id')} placeholder="unique-notification-id" />
                     </FormRow>
-                    <div style={{ fontSize: 12, color: '#657185' }}>
+                    <div style={{ fontSize: 12, color: '#52647A' }}>
                       Execution path: SQS → Lambda → DynamoDB → Step Function → SSM
                     </div>
                   </div>
