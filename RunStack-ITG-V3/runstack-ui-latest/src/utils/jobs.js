@@ -3,6 +3,8 @@
 // Job timestamps are stored as naive UTC ISO strings ("2026-09-25T03:41:07.12")
 // by process_messages. Parse them as UTC, display them in the viewer's zone.
 
+import { RANGE_PRESETS, presetStart, rangeWindow } from './dateRange';
+
 export function parseUtc(iso) {
   if (!iso) return null;
   const s = String(iso);
@@ -74,37 +76,38 @@ export function jobDuration(job, now = Date.now()) {
   return { text: fmtSeconds(sec), live: false, seconds: sec };
 }
 
-// Date range presets; value is what goes in the URL.
-export const DATE_PRESETS = [
-  { value: '24h', label: 'Last 24 hours', hours: 24 },
-  { value: '7d', label: 'Last 7 days', hours: 24 * 7 },
-  { value: '30d', label: 'Last 30 days', hours: 24 * 30 },
-  { value: 'all', label: 'All time', hours: null },
-  { value: 'custom', label: 'Custom range…', hours: null },
-];
-
-/** Start of a preset window, aligned to the UTC hour: "Last 24 hours" is the
- *  current hour plus the 23 before it. Hour alignment lets the backend answer
- *  the total from its hourly counters instead of reading the index. */
-export function presetStart(hours, now = Date.now()) {
-  const d = new Date(now);
-  d.setUTCMinutes(0, 0, 0);
-  return new Date(d.getTime() - (hours - 1) * 3600_000);
+/** What a run is called in lists and titles: the automation name it was
+ *  given (e.g. "SQL DB Instance Version CMDB Update"), else the document
+ *  label ("Run Remote Script"). */
+export function jobTitle(job) {
+  const name = String(job?.automation_name || '').replace(/\s+/g, ' ').trim();
+  return name || job?.automation_label || job?.document_name || job?.automation_type || '—';
 }
 
-export function rangeToQuery(range, fromLocal, toLocal, now = Date.now()) {
-  const preset = DATE_PRESETS.find((p) => p.value === range);
-  if (preset?.hours) return { from: toUtcIso(presetStart(preset.hours, now)) };
-  if (range === 'custom') {
-    const out = {};
-    if (fromLocal) out.from = toUtcIso(new Date(fromLocal));
-    if (toLocal) out.to = toUtcIso(new Date(toLocal));
-    return out;
-  }
-  return {};
+/** The line under jobTitle: the document label when the title is a name,
+ *  otherwise the automation type. */
+export function jobSubtitle(job) {
+  const title = jobTitle(job);
+  const label = job?.automation_label || job?.document_name;
+  if (label && label !== title) return label;
+  return job?.automation_type || '';
 }
 
-/** "1 completed · 1 failed" for a run row's per-server status counts. */
+// Date ranges: shared with the Dashboard (utils/dateRange.js). value is what
+// goes in the URL (range=…; custom adds from_day / to_day).
+export const DATE_PRESETS = RANGE_PRESETS;
+export { presetStart };
+
+/**
+ * Query window ({ from, to } UTC ISO) for the Executions filters.
+ *   rangeToQuery({ range, from_day, to_day, from, to }, now)
+ *   rangeToQuery(range, fromLocal, toLocal, now)        (older form)
+ */
+export function rangeToQuery(value, fromLocal, toLocal, now = Date.now()) {
+  if (typeof value === 'string') return rangeWindow({ range: value, from: fromLocal, to: toLocal }, now);
+  return rangeWindow(value, typeof fromLocal === 'number' ? fromLocal : Date.now());
+}
+
 export function runBreakdown(counts) {
   const c = counts || {};
   const parts = [

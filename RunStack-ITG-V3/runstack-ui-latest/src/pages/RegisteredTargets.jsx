@@ -19,12 +19,15 @@
 
 import React from 'react';
 import { Topbar } from '../components/Layout';
-import { Card, Empty, ErrorBanner, Input, Select, Spinner } from '../components/ui';
+import { Btn, Card, Empty, ErrorBanner, Input, Select, Spinner } from '../components/ui';
 import { Callout, Chip, RefreshControl, SummaryTile } from '../components/sections';
 import { useAuth } from '../auth/AuthContext';
 import { fetchAppInstances } from '../api/client';
 import { usePageRefresh } from '../hooks/usePageRefresh';
 import { usePersistentState } from '../hooks/useNavigation';
+import { appAccessWithoutRequest } from '../hooks/useAppAccess';
+import { teamsText } from '../utils/identity';
+import { useAppNavigate } from '../components/nav/navigationContext';
 import { applyFilters, filterOptions, groupByApplication, isAccountId, normalizeRecords, totals } from '../utils/targets';
 
 const TEAL = '#365FA3';
@@ -54,9 +57,38 @@ function InstanceList({ row }) {
   );
 }
 
+// No application access: GET /app-instances refuses users without a platform
+// role (team groups don't count — allow_team_visibility=False) and users whose
+// runstack-app-access has no rows. Both are expected, not errors, so the page
+// explains it instead of showing the backend's 403 text.
+function isNoAccessError(e) {
+  if (e?.status !== 403) return false;
+  const b = e.body || {};
+  return b.reason === 'not_in_group' || /do not have access to any applications/i.test(b.message || '');
+}
+
+function NoAccess({ groups }) {
+  const go = useAppNavigate();
+  const teams = teamsText(groups);
+  return (
+    <Callout tone="info" title="You don't have any applications assigned">
+      Registered Targets lists the servers in applications assigned to you for EC2 access. Ask a RunStack administrator if you need an application assigned.
+      {teams && (
+        <div style={{ marginTop: 8, display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          <span>Your team access ({teams}) is available in Run Automations.</span>
+          <Btn size="sm" variant="default" onClick={() => go('/automations?category=database')}>Open Run Automations</Btn>
+        </div>
+      )}
+    </Callout>
+  );
+}
+
 export default function RegisteredTargets() {
-  const { role } = useAuth();
+  const { role, groups: userGroups } = useAuth();
   const isAdmin = role === 'admin';
+  // No platform role → the backend always refuses; don't ask.
+  const knownNoAccess = appAccessWithoutRequest(role) === false;
+  const [noAccess, setNoAccess] = React.useState(knownNoAccess);
   const [records, setRecords] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
@@ -65,18 +97,21 @@ export default function RegisteredTargets() {
   const [open, setOpen] = React.useState(() => new Set());
 
   const load = React.useCallback(async () => {
+    if (knownNoAccess) { setNoAccess(true); setLoading(false); return; }
     setLoading(true);
     setError(null);
     try {
       const res = await fetchAppInstances();
       setRecords(normalizeRecords(res.instances || []));
+      setNoAccess(false);
       setLastUpdated(new Date());
     } catch (e) {
-      setError(e.body?.message || e.body?.error || e.message || String(e));
+      if (isNoAccessError(e)) { setNoAccess(true); setRecords(null); }
+      else setError(e.body?.message || e.body?.error || e.message || String(e));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [knownNoAccess]);
   React.useEffect(() => { load(); }, [load]);
   usePageRefresh(load);
 
@@ -98,10 +133,11 @@ export default function RegisteredTargets() {
       <Topbar
         title="Registered Targets"
         subtitle="Explore registered applications and servers by AWS account and region."
-        actions={records && <RefreshControl onRefresh={load} refreshing={loading} lastUpdated={lastUpdated} error={records && error} />}
+        actions={!noAccess && records && <RefreshControl onRefresh={load} refreshing={loading} lastUpdated={lastUpdated} error={records && error} />}
       />
       <div className="rs-page-body">
         <div className="rs-page-content">
+          {noAccess ? <NoAccess groups={userGroups} /> : (<>
           {!isAdmin && <div style={{ fontSize: 13, color: '#52647A' }}>You're seeing targets for the applications assigned to you.</div>}
 
           {error && !records && <ErrorBanner message={error} />}
@@ -214,6 +250,7 @@ export default function RegisteredTargets() {
               A registered target isn't proof that RunStack's cross-account role works in that account.
             </div>
           )}
+          </>)}
         </div>
       </div>
     </div>

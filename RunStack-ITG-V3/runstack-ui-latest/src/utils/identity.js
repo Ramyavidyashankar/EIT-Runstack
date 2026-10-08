@@ -39,3 +39,44 @@ export function environmentLabel(env = process.env.REACT_APP_RUNSTACK_ENV) {
 
 /** PROD gets a warning tone so it is never mistaken for a test environment. */
 export const isProductionEnv = (label) => /^PROD/.test(label);
+
+// ── Team membership (display only) ──────────────────────────────────────────
+// Team groups (runstack-team-*) are not platform roles: they grant SQL / SAP
+// / Tidal actions through team capabilities (shared.require_team_capability).
+// Labels match process_messages/access_review.TEAM_LABELS. Shown in the
+// header so a team-only user doesn't just see "No RunStack role"; never
+// used for authorization.
+// Short names, in display order. runstack-team-gdba-ora has no Azure AD
+// mapping in the pre-token Lambda yet; it's listed so the label is ready
+// when an Oracle team group is added.
+const TEAM_GROUP_LABELS = {
+  'runstack-team-gdba-sql': 'GDBA SQL',
+  'runstack-team-gdba': 'GDBA SQL',   // older group still created by template.yaml
+  'runstack-team-gdba-ora': 'GDBA ORA',
+  'runstack-team-sap': 'SAP App',
+  'runstack-team-tidal': 'Tidal',
+};
+const TEAM_ORDER = ['GDBA SQL', 'GDBA ORA', 'SAP App', 'Tidal'];
+
+/** Distinct team labels for the user's groups, e.g. ['GDBA SQL']. */
+export function teamLabels(groups) {
+  const out = [];
+  (groups || []).forEach((g) => {
+    const label = TEAM_GROUP_LABELS[g] || (g.startsWith('runstack-team-') ? g.slice('runstack-team-'.length).split('-').filter(Boolean).map(title).join(' ') : null);
+    if (label && !out.includes(label)) out.push(label);
+  });
+  const rank = (l) => { const i = TEAM_ORDER.indexOf(l); return i < 0 ? TEAM_ORDER.length : i; };
+  return out.sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+}
+
+/** "GDBA SQL" / "GDBA SQL · SAP App", or null. */
+export function teamsText(groups) {
+  const t = teamLabels(groups);
+  return t.length ? t.join(' · ') : null;
+}
+
+/** Header subtitle: the platform role, or the team(s) when there is no role. */
+export function accessLabel(role, groups) {
+  if (role && role !== 'none') return roleLabel(role);
+  return teamsText(groups) || roleLabel('none');
+}

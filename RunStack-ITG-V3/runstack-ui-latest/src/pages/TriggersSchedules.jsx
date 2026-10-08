@@ -24,6 +24,7 @@ import { useAuth } from '../auth/AuthContext';
 import { createSchedule, deleteSchedule, fetchSchedules, updateSchedule } from '../api/client';
 import { usePageRefresh } from '../hooks/usePageRefresh';
 import { usePersistentState, useUnsavedChanges } from '../hooks/useNavigation';
+import { FilterBar, FilterChips, FilterField, FilterSelect as CompactSelect, MoreFilters, SearchInput } from '../components/filters';
 import {
   allTimeZones, DAY_LABELS, DEFAULT_TZ, describeExpression, describeRate, describeSpec, describeUtc, fmtInZone,
   fromCronUtc, nextRuns, normalizeCron, observesDst, parseExpression, prettyJson, summarizeEventPattern, toCronUtc, tzAbbrev,
@@ -680,14 +681,22 @@ export default function TriggersSchedules() {
                 { value: 'event', label: `Event-triggered ${current ? counts.event : ''}` },
               ]} />
             )}
-            <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name, description or target…" style={{ maxWidth: 280, fontSize: 13 }} />
-            <span style={{ flex: 1 }} />
-            <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, color: '#52647A', fontWeight: 600 }}>Show times in
-              <Select value={tz} onChange={(e) => setTz(e.target.value)} style={{ width: 210, fontSize: 13 }}>
-                {zones.map((z) => <option key={z} value={z}>{z}</option>)}
-              </Select>
-            </label>
           </div>
+          <FilterBar>
+            <SearchInput value={search} onChange={setSearch} label="Search rules" placeholder="Search rules…"
+              help="Matches the rule name, its description and its target names." />
+            <MoreFilters title="Display options" activeCount={tz !== DEFAULT_TZ ? 1 : 0} onClearAll={() => setTz(DEFAULT_TZ)}>
+              <FilterField label="Show times in">
+                <CompactSelect label="Show times in" value={tz} set={tz !== DEFAULT_TZ} onChange={setTz}>
+                  {zones.map((z) => <option key={z} value={z}>{z}</option>)}
+                </CompactSelect>
+              </FilterField>
+              <div className="rs-help" style={{ gridColumn: '1 / -1', fontSize: 12 }}>Remembered in this browser. EventBridge rules run in UTC; times are also shown in UTC.</div>
+            </MoreFilters>
+          </FilterBar>
+          <FilterChips chips={[
+            tz !== DEFAULT_TZ && { key: 'tz', label: 'Times shown in', value: tz, onRemove: () => setTz(DEFAULT_TZ) },
+          ]} />
 
           {source === 'other' && <Callout tone="info">Rules in this account that don't belong to RunStack. They're shown for reference; rules managed by an AWS service can't be edited here.</Callout>}
           {source === 'scheduler' && (

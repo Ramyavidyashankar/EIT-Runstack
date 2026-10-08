@@ -29,3 +29,23 @@ test('role labels', () => {
   expect(roleLabel('none')).toBe('No RunStack role');
   expect(roleLabel('app_operator')).toBe('App operator');
 });
+
+describe('team labels (display only)', () => {
+  const { accessLabel, teamsText, teamLabels } = require('./identity');
+  test('team-only user shows the team instead of "No RunStack role"', () => {
+    expect(accessLabel('none', ['runstack-team-gdba-sql'])).toBe('GDBA SQL');
+    expect(accessLabel('none', ['runstack-team-sap', 'runstack-team-gdba-sql'])).toBe('GDBA SQL · SAP App');
+    expect(accessLabel('none', ['runstack-team-tidal', 'runstack-team-gdba-ora', 'runstack-team-sap'])).toBe('GDBA ORA · SAP App · Tidal');
+  });
+  test('a platform role always wins', () => {
+    expect(accessLabel('operator', ['runstack-team-sap'])).toBe('Operator');
+  });
+  test('no role and no team', () => {
+    expect(accessLabel('none', ['runstack-viewers'])).toBe('No RunStack role');
+    expect(teamsText([])).toBeNull();
+  });
+  test('old GDBA group maps to the same team; unknown team groups are readable', () => {
+    expect(teamLabels(['runstack-team-gdba', 'runstack-team-gdba-sql'])).toEqual(['GDBA SQL']);
+    expect(teamLabels(['runstack-team-oracle-dba'])).toEqual(['Oracle Dba']);
+  });
+});

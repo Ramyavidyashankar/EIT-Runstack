@@ -21,13 +21,15 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Topbar } from '../components/Layout';
 import Tabs from '../components/Tabs';
-import { Btn, Card, Empty, ErrorBanner, Input, Spinner, StatusBadge } from '../components/ui';
+import { Btn, Card, Empty, ErrorBanner, Spinner, StatusBadge } from '../components/ui';
 import { Callout, RefreshControl } from '../components/sections';
+import DateRangeSelect from '../components/DateRangeSelect';
+import { FilterBar, FilterChips, FilterField, FilterSelect as CompactSelect, InfoTip, MoreFilters, SearchInput } from '../components/filters';
 import JobDetailContent, { CopyButton } from '../components/JobDetail';
 import { queryJobs } from '../api/client';
 import { useAutoRefresh, usePageRefresh } from '../hooks/usePageRefresh';
 import {
-  DATE_PRESETS, downloadText, fmtFull, fmtStarted, jobDuration, jobsToCsv, pageRangeLabel, rangeToQuery, runBreakdown, statusGroup,
+  downloadText, fmtFull, fmtStarted, jobDuration, jobSubtitle, jobTitle, jobsToCsv, pageRangeLabel, rangeToQuery, runBreakdown, statusGroup,
 } from '../utils/jobs';
 
 const PAGE_SIZE = 50;
@@ -43,10 +45,10 @@ const STATUS_TABS = [
   { key: 'FAILED', label: 'Failed', hint: 'Includes timed out and cancelled' },
 ];
 const SORTS = [
-  { value: 'started_desc', label: 'Newest first' },
-  { value: 'started_asc', label: 'Oldest first' },
+  { value: 'started_desc', label: 'Sort: Newest first' },
+  { value: 'started_asc', label: 'Sort: Oldest first' },
 ];
-const SEARCH_HELP = 'Searches job ID, notification ID, execution ID, resource ID, server name, application name, account ID and automation or document name.';
+const SEARCH_FIELDS = ['Job ID', 'Notification ID', 'Execution ID', 'Resource ID', 'Server name', 'Application name', 'Account ID', 'Automation or document name'];
 const GROUP_EDGE = { FAILED: '#DC2626', RUNNING: '#D97706', PENDING: '#F59E0B', COMPLETED: 'transparent' };
 
 const n = (v) => (typeof v === 'number' ? v.toLocaleString('en-GB') : '—');
@@ -60,6 +62,8 @@ function useViewState() {
     range: params.get('range') || '7d',
     from: params.get('from') || '',
     to: params.get('to') || '',
+    from_day: params.get('from_day') || '',
+    to_day: params.get('to_day') || '',
     automation: params.get('automation') || '',
     name: params.get('name') || '',
     account: params.get('account') || '',
@@ -83,20 +87,6 @@ function useViewState() {
 }
 
 // ─── Small pieces ────────────────────────────────────────────────────────────
-function FilterSelect({ label, value, onChange, children, width = 180 }) {
-  return (
-    <label style={{ display: 'grid', gap: 4, fontSize: 13, color: 'var(--text-primary)', fontWeight: 600 }}>
-      {label}
-      <select className="rs-input" value={value} onChange={(e) => onChange(e.target.value)} style={{
-        width, padding: '7px 10px', borderRadius: 8, border: `1px solid ${value ? 'var(--nav-blue)' : '#C3CFDD'}`,
-        background: value ? 'var(--nav-blue-bg)' : '#FFFFFF', color: '#172B4D', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer',
-      }}>
-        {children}
-      </select>
-    </label>
-  );
-}
-
 function Th({ children, width, align }) {
   return (
     <th style={{
@@ -134,10 +124,10 @@ function JobRow({ job, selected, onOpen, now }) {
       style={{ cursor: 'pointer' }}>
       <td style={{ ...td, borderLeft: `3px solid ${GROUP_EDGE[group]}`, maxWidth: 280 }}>
         <div style={{ fontWeight: 600, color: '#172B4D', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={job.document_name}>
-          {job.automation_label || job.document_name || job.automation_type || '—'}
+          {jobTitle(job)}
         </div>
         <div style={{ fontSize: 12, color: '#52647A', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {job.automation_name && job.automation_name !== job.automation_label ? job.automation_name : job.automation_type}
+          {jobSubtitle(job)}
         </div>
       </td>
       <td style={{ ...td, maxWidth: 240 }}>
@@ -214,7 +204,7 @@ function DetailDrawer({ jobId, row, onClose, onUpdate }) {
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{ fontSize: 13, color: '#C4D4EC', fontWeight: 600,}}>Execution details</div>
             <div style={{ fontSize: 15, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {row?.automation_label || 'Job'} {row?.server_name ? `· ${row.server_name}` : ''}
+              {row ? jobTitle(row) : 'Job'} {row?.server_name ? `· ${row.server_name}` : ''}
             </div>
           </div>
           <button type="button" onClick={() => nav(`/jobs/${encodeURIComponent(jobId)}`)} style={{
@@ -266,13 +256,14 @@ export default function Jobs() {
   }, [searchText]); // eslint-disable-line
 
   // Everything that defines "the result set" (not the open job or the page).
-  const queryKey = JSON.stringify([view.status, view.q, view.automation, view.name, view.account, view.environment, view.sort, view.range, view.from, view.to]);
+  const queryKey = JSON.stringify([view.status, view.q, view.automation, view.name, view.account, view.environment, view.sort, view.range, view.from, view.to, view.from_day, view.to_day]);
   const buildQuery = useCallback(() => ({
     // One row per run: servers started together (an execution group) are
     // listed once; the run opens Execution Details with every server.
     group: 'runs',
     status: view.status, q: view.q, automation: view.automation, name: view.name, account: view.account,
-    environment: view.environment, sort: view.sort, ...rangeToQuery(view.range, view.from, view.to),
+    environment: view.environment, sort: view.sort,
+    ...rangeToQuery({ range: view.range, from_day: view.from_day, to_day: view.to_day, from: view.from, to: view.to }),
   }), [queryKey]); // eslint-disable-line
 
   const loadRows = useCallback(async (query, cursor, { background = false } = {}) => {
@@ -397,10 +388,11 @@ export default function Jobs() {
   const total = countsMeta?.total_matching;
   const countsComplete = countsMeta?.counts_complete !== false;
   const filtersActive = !!(view.q || view.automation || view.name || view.account || view.environment || view.range !== '7d' || view.status !== 'ALL');
+  const moreActive = (view.account ? 1 : 0) + (view.environment ? 1 : 0);
+  const clearSecondary = () => setView({ automation: '', account: '', environment: '' });
+  const resetAll = () => { setSearchText(''); setView({ status: 'ALL', q: '', automation: '', name: '', account: '', environment: '', range: '7d', from: '', to: '', from_day: '', to_day: '' }); };
   const openRow = rows.find((j) => j.job_id === view.job) || (lastOpenRow.current?.job_id === view.job ? lastOpenRow.current : undefined);
   if (openRow) lastOpenRow.current = openRow;
-  const rangeLabel = DATE_PRESETS.find((p) => p.value === view.range)?.label || 'Custom range';
-  const windowStart = activeQuery.current?.from ? fmtStarted(activeQuery.current.from) : null;
   const hasNext = !!pageMeta?.next_cursor;
   const lastUpdated = [rowsState.updatedAt, countsState.updatedAt].filter(Boolean).sort((a, b) => a - b)[0] || null;
   // A refresh error is only current while the last request actually failed;
@@ -409,7 +401,7 @@ export default function Jobs() {
   const showing = rowsState.loading && pageMeta ? 'Loading…' : pageMeta ? pageRangeLabel({ pageIndex, pageSize: PAGE_SIZE, returned: rows.length, total, complete: countsComplete }) : null;
 
   const subtitle = total != null
-    ? `${n(total)} matching${countsComplete ? '' : '+'} · ${n(countsMeta.total_in_table)} executions recorded in RunStack`
+    ? `${n(total)} matching${countsComplete ? '' : '+'} · ${n(countsMeta.total_in_table)} total executions`
     : countsState.error ? 'Totals unavailable' : 'Counting matching executions…';
 
   return (
@@ -459,111 +451,65 @@ export default function Jobs() {
             </Callout>
           )}
 
-          {/* ── Attention: running + failed within the current filters ── */}
-          <div style={{
-            display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap', padding: '10px 14px', borderRadius: 10,
-            background: '#FFFFFF', border: '1px solid #D7E0EB', boxShadow: 'var(--shadow-sm)', minHeight: 44,
-          }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)',}}>Needs a look</span>
-            {countsState.loading && (
-              <span style={{ display: 'inline-flex' }} title="Counting executions for these filters"><Spinner size={12} /></span>
-            )}
-            {!countsMeta ? (
-              countsState.error
-                ? <span style={{ fontSize: 13, color: '#B91C1C' }}>Couldn't load totals: {countsState.error} <Btn variant="ghost" size="sm" onClick={() => loadCounts(activeQuery.current)}>Retry</Btn></span>
-                : <span style={{ fontSize: 13, color: '#52647A', display: 'inline-flex', gap: 8, alignItems: 'center' }}><Spinner size={12} /> Counting…</span>
-            ) : (
-              <>
-                {counts.FAILED > 0 && (
-                  <button type="button" onClick={() => setView({ status: 'FAILED' })} style={attnBtn('#DC2626', view.status === 'FAILED')}>
-                    <span style={dot('#DC2626')} /> {n(counts.FAILED)} failed
-                  </button>
-                )}
-                {counts.RUNNING > 0 && (
-                  <button type="button" onClick={() => setView({ status: 'RUNNING' })} style={attnBtn('#B45309', view.status === 'RUNNING')}>
-                    <span style={{ ...dot('#D97706'), animation: 'pulse 1.6s ease infinite' }} /> {n(counts.RUNNING)} running
-                  </button>
-                )}
-                {counts.PENDING > 0 && (
-                  <button type="button" onClick={() => setView({ status: 'PENDING' })} style={attnBtn('#B45309', view.status === 'PENDING')}>
-                    <span style={dot('#F59E0B')} /> {n(counts.PENDING)} pending
-                  </button>
-                )}
-                {!counts.FAILED && !counts.RUNNING && !counts.PENDING && (
-                  <span style={{ fontSize: 13, color: '#0B6E4C', fontWeight: 600, padding: '4px 0' }}>Nothing failed or in progress</span>
-                )}
-              </>
-            )}
-            <span style={{ fontSize: 12, color: '#52647A', marginLeft: 'auto' }}>
-              {rangeLabel}{windowStart ? ` (since ${windowStart})` : ''}{view.automation || view.name || view.account || view.environment || view.q ? ' · with your filters' : ''}
-            </span>
-          </div>
-
-          {/* ── Filters ── */}
+          {/* ── Status tabs + filters ── */}
           <Card style={{ padding: 14, display: 'grid', gap: 12, overflow: 'visible' }}>
             <Tabs label="Status" idPrefix="rs-jobs-status" size="sm" active={view.status} onChange={(v) => setView({ status: v })}
               tabs={STATUS_TABS.map((t) => ({ value: t.key, label: t.label, hint: t.hint, count: typeof counts[t.key] === 'number' ? counts[t.key] : '—' }))}
-              after={<span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Counts cover every execution matching the filters, not just this page.</span>} />
+              after={(
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  {countsState.loading && <Spinner size={12} />}
+                  {countsState.error && !countsMeta && <span style={{ fontSize: 12, color: '#B91C1C' }}>Couldn't load counts <Btn variant="ghost" size="sm" onClick={() => loadCounts(activeQuery.current)}>Retry</Btn></span>}
+                  <InfoTip label="About these counts" align="right">Counts cover every execution matching the filters, not just this page.</InfoTip>
+                </span>
+              )} />
 
-            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'flex-end' }}>
-              <label style={{ display: 'grid', gap: 4, fontSize: 13, color: 'var(--text-primary)', fontWeight: 600, flex: '1 1 220px', maxWidth: 420 }}>
-                Search
-                <Input type="search" value={searchText} onChange={(e) => setSearchText(e.target.value)}
-                  placeholder="Job, execution or resource ID, server, app, account, automation…"
-                  aria-describedby="exec-search-help" style={{ fontSize: 13, padding: '7px 10px' }} />
-              </label>
-              <FilterSelect label="Date range" value={view.range === '7d' ? '' : view.range} onChange={(v) => setView({ range: v || '7d', ...(v !== 'custom' ? { from: '', to: '' } : {}) })} width={140}>
-                {DATE_PRESETS.map((p) => <option key={p.value} value={p.value === '7d' ? '' : p.value}>{p.label}</option>)}
-              </FilterSelect>
-              {view.range === 'custom' && (
-                <>
-                  <label style={{ display: 'grid', gap: 4, fontSize: 13, color: 'var(--text-primary)', fontWeight: 600 }}>
-                    From
-                    <Input type="datetime-local" value={view.from} onChange={(e) => setView({ from: e.target.value })} style={{ padding: '6px 8px', fontSize: 13 }} />
-                  </label>
-                  <label style={{ display: 'grid', gap: 4, fontSize: 13, color: 'var(--text-primary)', fontWeight: 600 }}>
-                    Before
-                    <Input type="datetime-local" value={view.to} onChange={(e) => setView({ to: e.target.value })} style={{ padding: '6px 8px', fontSize: 13 }} />
-                  </label>
-                </>
-              )}
-              <FilterSelect label="Automation" value={view.automation} onChange={(v) => setView({ automation: v })} width={190}>
-                <option value="">All automations</option>
-                {(facets.automations || []).map((f) => <option key={f.value} value={f.value}>{f.value} ({n(f.count)})</option>)}
-                {view.automation && !(facets.automations || []).some((f) => f.value === view.automation) && <option value={view.automation}>{view.automation}</option>}
-              </FilterSelect>
+            <FilterBar>
+              <SearchInput value={searchText} onChange={setSearchText} label="Search executions"
+                placeholder="Search job, server, application, execution ID…"
+                help={<>Search matches:<ul>{SEARCH_FIELDS.map((f) => <li key={f}>{f}</li>)}</ul></>} />
+              <DateRangeSelect label="Date range"
+                value={{ range: view.range, from_day: view.from_day, to_day: view.to_day, from: view.from, to: view.to }}
+                onChange={(r) => setView({ range: r.range, from_day: r.from_day || '', to_day: r.to_day || '', from: '', to: '' })} />
               {/* Name given when the job was submitted (e.g. a schedule's
                   automation_name). Only jobs that have a name are listed. */}
-              {((facets.names || []).length > 0 || view.name) && (
-                <FilterSelect label="Automation name" value={view.name} onChange={(v) => setView({ name: v })} width={220}>
-                  <option value="">All automation names</option>
-                  {(facets.names || []).map((f) => <option key={f.value} value={f.value}>{f.value} ({n(f.count)})</option>)}
-                  {view.name && !(facets.names || []).some((f) => f.value === view.name) && <option value={view.name}>{view.name}</option>}
-                </FilterSelect>
-              )}
-              <FilterSelect label="Account" value={view.account} onChange={(v) => setView({ account: v })} width={160}>
-                <option value="">All accounts</option>
-                {(facets.accounts || []).map((f) => <option key={f.value} value={f.value}>{f.value} ({n(f.count)})</option>)}
-                {view.account && !(facets.accounts || []).some((f) => f.value === view.account) && <option value={view.account}>{view.account}</option>}
-              </FilterSelect>
-              {(facets.environments || []).length > 0 && (
-                <FilterSelect label="Environment" value={view.environment} onChange={(v) => setView({ environment: v })} width={150}>
-                  <option value="">All environments</option>
-                  {facets.environments.map((f) => <option key={f.value} value={f.value}>{f.value} ({n(f.count)})</option>)}
-                </FilterSelect>
-              )}
-              <FilterSelect label="Sort" value={view.sort === 'started_desc' ? '' : view.sort} onChange={(v) => setView({ sort: v || 'started_desc' })} width={140}>
-                {SORTS.map((s) => <option key={s.value} value={s.value === 'started_desc' ? '' : s.value}>{s.label}</option>)}
-              </FilterSelect>
-              {filtersActive && (
-                <Btn variant="ghost" size="sm" onClick={() => { setSearchText(''); setView({ status: 'ALL', q: '', automation: '', name: '', account: '', environment: '', range: '7d', from: '', to: '' }); }}>
-                  Clear filters
-                </Btn>
-              )}
-            </div>
-            <div id="exec-search-help" style={{ fontSize: 12, color: '#52647A', marginTop: -4 }}>
-              {SEARCH_HELP} Numbers in the filter lists are all-time counts. Environment is only available for jobs submitted with it.
-            </div>
+              <CompactSelect label="Automation name" value={view.name} set={!!view.name} onChange={(v) => setView({ name: v })}
+                className="rs-filter-wide">
+                <option value="">All automation names</option>
+                {(facets.names || []).map((f) => <option key={f.value} value={f.value}>{f.value} ({n(f.count)})</option>)}
+                {view.name && !(facets.names || []).some((f) => f.value === view.name) && <option value={view.name}>{view.name}</option>}
+              </CompactSelect>
+              <MoreFilters activeCount={moreActive} onClearAll={() => setView({ account: '', environment: '' })}>
+                <FilterField label="Account">
+                  <CompactSelect label="Account" value={view.account} set={!!view.account} onChange={(v) => setView({ account: v })}>
+                    <option value="">All accounts</option>
+                    {(facets.accounts || []).map((f) => <option key={f.value} value={f.value}>{f.value} ({n(f.count)})</option>)}
+                    {view.account && !(facets.accounts || []).some((f) => f.value === view.account) && <option value={view.account}>{view.account}</option>}
+                  </CompactSelect>
+                </FilterField>
+                <FilterField label="Environment">
+                  <CompactSelect label="Environment" value={view.environment} set={!!view.environment} onChange={(v) => setView({ environment: v })}>
+                    <option value="">All environments</option>
+                    {(facets.environments || []).map((f) => <option key={f.value} value={f.value}>{f.value} ({n(f.count)})</option>)}
+                    {view.environment && !(facets.environments || []).some((f) => f.value === view.environment) && <option value={view.environment}>{view.environment}</option>}
+                  </CompactSelect>
+                </FilterField>
+                <div className="rs-help" style={{ gridColumn: '1 / -1', fontSize: 12 }}>
+                  Numbers in the lists are all-time counts. Environment is only recorded for jobs submitted with it.
+                </div>
+              </MoreFilters>
+              <div className="rs-filterbar-end">
+                {filtersActive && <button type="button" className="rs-chips-clear" onClick={resetAll}>Reset filters</button>}
+                <CompactSelect label="Sort" value={view.sort} onChange={(v) => setView({ sort: v })}>
+                  {SORTS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </CompactSelect>
+              </div>
+            </FilterBar>
+
+            <FilterChips onClearAll={clearSecondary} chips={[
+              view.automation && { key: 'automation', label: 'Automation', value: view.automation, onRemove: () => setView({ automation: '' }) },
+              view.account && { key: 'account', label: 'Account', value: view.account, onRemove: () => setView({ account: '' }) },
+              view.environment && { key: 'env', label: 'Environment', value: view.environment, onRemove: () => setView({ environment: '' }) },
+            ]} />
           </Card>
 
           {/* ── Table ── */}
@@ -654,13 +600,6 @@ function ExportChoice({ title, sub, onClick, disabled }) {
   );
 }
 
-const dot = (c) => ({ width: 8, height: 8, borderRadius: '50%', background: c, display: 'inline-block' });
-const attnBtn = (c, active) => ({
-  display: 'inline-flex', alignItems: 'center', gap: 7, padding: '4px 10px', borderRadius: 999, cursor: 'pointer',
-  fontFamily: 'inherit', fontSize: 13, fontWeight: 600, color: c,
-  background: active ? 'var(--nav-blue-bg)' : '#FFFFFF', border: `1px solid ${active ? 'var(--nav-blue)' : '#D7E0EB'}`,
-});
-
 // ─── Full-page detail (/jobs/:jobId — linked from the Dashboard) ─────────────
 export function JobDetail() {
   const { jobId } = useParams();
@@ -669,7 +608,7 @@ export function JobDetail() {
   return (
     <div className="rs-page">
       <Topbar
-        title={row?.automation_label ? `${row.automation_label}` : 'Execution details'}
+        title={row ? jobTitle(row) : 'Execution details'}
         subtitle={row ? `${row.server_name || row.resource_id || ''}${row.created_at ? ` · started ${fmtStarted(row.created_at)}` : ''}` : jobId}
         actions={<Btn variant="accent" size="sm" onClick={() => (window.history.length > 1 ? nav(-1) : nav('/jobs'))}>← Back to executions</Btn>}
       />

@@ -17,15 +17,15 @@ import React from 'react';
 import ReactDOM from 'react-dom';
 import { Topbar } from '../components/Layout';
 import Tabs from '../components/Tabs';
-import { Btn, Card, Empty, ErrorBanner, Input, Select, Spinner } from '../components/ui';
+import { Btn, Card, Empty, ErrorBanner, Select, Spinner } from '../components/ui';
 import { Callout, Chip, RefreshControl, SummaryTile } from '../components/sections';
 import { fetchSSMDocumentCatalog, fetchSSMDocumentDetail } from '../api/client';
 import { usePageRefresh } from '../hooks/usePageRefresh';
 import { usePersistentState } from '../hooks/useNavigation';
+import { FilterBar, FilterChips, FilterField, FilterSelect as CompactSelect, MoreFilters, SearchInput } from '../components/filters';
 import { copyText } from '../utils/jobs';
 import { downloadName, filterDocuments, missingRegions, regionStyle, statusTone, summarize, versionLabel } from '../utils/ssmDocs';
 
-const TEAL = '#365FA3';
 const mono = { fontFamily: 'var(--font-mono)' };
 const NOT_PROVIDED = <span style={{ color: '#52647A', fontStyle: 'italic' }}>Not provided</span>;
 const OWNERS = [
@@ -317,13 +317,6 @@ export default function SSMDocuments() {
 
   const th = { textAlign: 'left', padding: '9px 12px', fontSize: 13, fontWeight: 600, color: '#2F4258', background: '#F8FAFD', borderBottom: '1px solid #D7E0EB', whiteSpace: 'nowrap' };
   const td = { padding: '11px 12px', borderBottom: '1px solid #F4F6FA', verticalAlign: 'top', fontSize: 14 };
-  const segBtn = (value, label) => (
-    <button key={value || 'all'} type="button" role="radio" aria-checked={region === value} onClick={() => setRegion(value)} style={{
-      padding: '6px 12px', fontSize: 13, fontFamily: 'inherit', cursor: 'pointer', border: 'none',
-      borderLeft: value ? '1px solid #C3CFDD' : 'none', background: region === value ? 'var(--brand-bg)' : '#FFFFFF', color: region === value ? 'var(--brand-hover)' : '#2F4258', fontWeight: region === value ? 700 : 500, boxShadow: region === value ? 'inset 0 -2px 0 var(--brand)' : 'none',
-    }}>{label}</button>
-  );
-
   return (
     <div className="rs-page">
       <Topbar
@@ -341,20 +334,35 @@ export default function SSMDocuments() {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name or description…" aria-label="Search documents" style={{ maxWidth: 300, fontSize: 13 }} />
-            <Select value={owner} onChange={(e) => setOwner(e.target.value)} aria-label="Owner" style={{ width: 210, fontSize: 13 }}>
-              {OWNERS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-            </Select>
-            <Select value={type} onChange={(e) => setType(e.target.value)} aria-label="Document type" style={{ width: 160, fontSize: 13 }}>
-              {TYPES.map((t) => <option key={t} value={t}>{t === 'All' ? 'All types' : t}</option>)}
-            </Select>
-            <div role="radiogroup" aria-label="Region" style={{ display: 'inline-flex', border: '1px solid #C3CFDD', borderRadius: 8, overflow: 'hidden' }}>
-              {segBtn('', 'All regions')}
-              {regions.map((r) => segBtn(r, r))}
-            </div>
-            {filtering && <button type="button" onClick={() => { setSearch(''); setRegion(''); }} style={{ background: 'none', border: 'none', color: TEAL, fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>Clear filters</button>}
-          </div>
+          <FilterBar>
+            <SearchInput value={search} onChange={setSearch} label="Search documents" placeholder="Search documents…"
+              help="Matches the document name and description." />
+            <CompactSelect label="Region" value={region} set={!!region} onChange={setRegion}>
+              <option value="">All regions</option>
+              {regions.map((r) => <option key={r} value={r}>{r}</option>)}
+            </CompactSelect>
+            <MoreFilters activeCount={(owner !== 'Self' ? 1 : 0) + (type !== 'All' ? 1 : 0)} onClearAll={() => { setOwner('Self'); setType('All'); }}>
+              <FilterField label="Owner">
+                <CompactSelect label="Owner" value={owner} set={owner !== 'Self'} onChange={setOwner}>
+                  {OWNERS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </CompactSelect>
+              </FilterField>
+              <FilterField label="Document type">
+                <CompactSelect label="Document type" value={type} set={type !== 'All'} onChange={setType}>
+                  {TYPES.map((t) => <option key={t} value={t}>{t === 'All' ? 'All types' : t}</option>)}
+                </CompactSelect>
+              </FilterField>
+            </MoreFilters>
+            {(filtering || owner !== 'Self' || type !== 'All') && (
+              <div className="rs-filterbar-end">
+                <button type="button" className="rs-chips-clear" onClick={() => { setSearch(''); setRegion(''); setOwner('Self'); setType('All'); }}>Reset filters</button>
+              </div>
+            )}
+          </FilterBar>
+          <FilterChips onClearAll={() => { setOwner('Self'); setType('All'); }} chips={[
+            owner !== 'Self' && { key: 'owner', label: 'Owner', value: OWNERS.find((o) => o.value === owner)?.label || owner, onRemove: () => setOwner('Self') },
+            type !== 'All' && { key: 'type', label: 'Type', value: type, onRemove: () => setType('All') },
+          ]} />
 
           {error && !data && <ErrorBanner message={`Couldn't load SSM documents: ${error}`} />}
           {regionErrors.map(([r, msg]) => (

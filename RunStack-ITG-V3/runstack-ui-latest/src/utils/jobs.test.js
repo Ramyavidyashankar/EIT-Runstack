@@ -33,3 +33,17 @@ test('run rows: per-server breakdown and CSV columns', () => {
   expect(csv[1]).toContain('"run","grp-hcui-1","2","2 completed"');
   expect(csv[2]).toContain('"job","","1",""');
 });
+
+describe('job title and subtitle', () => {
+  const { jobTitle, jobSubtitle } = require('./jobs');
+  test('automation name first, document label underneath', () => {
+    const j = { automation_name: 'SQL DB  Instance Version CMDB Update', automation_label: 'Run Remote Script', automation_type: 'SSM-RunCommand' };
+    expect(jobTitle(j)).toBe('SQL DB Instance Version CMDB Update');
+    expect(jobSubtitle(j)).toBe('Run Remote Script');
+  });
+  test('no name: document label, then automation type', () => {
+    const j = { automation_label: 'Run Remote Script', automation_type: 'SSM-RunCommand' };
+    expect(jobTitle(j)).toBe('Run Remote Script');
+    expect(jobSubtitle(j)).toBe('SSM-RunCommand');
+  });
+});

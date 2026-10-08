@@ -2,6 +2,9 @@
 import React from 'react';
 import { useAuth } from './AuthContext';
 import { canAccess } from './access';
+import { Callout } from '../components/sections';
+import { Topbar } from '../components/Layout';
+import { teamsText } from '../utils/identity';
 
 /**
  * Wraps a page and renders a "no permission" state instead of the page
@@ -17,23 +20,41 @@ import { canAccess } from './access';
  * rather than by role alone. This is a coarse "can they see the page at
  * all" check; per-action / per-AG scoping still happens server-side.
  */
-export default function RequireRole({ minRole, orGroup, children }) {
+const ROLE_NAME = { admin: 'Administrator', operator: 'Operator', app_operator: 'App operator', viewer: 'Viewer' };
+
+/**
+ * title / reason (optional): page-specific wording for the no-access panel,
+ * e.g. title="Triggers & Schedules" reason="Creating and changing EventBridge
+ * rules affects automations for every team."
+ */
+export default function RequireRole({ minRole, orGroup, title, reason, children }) {
   const { role, groups } = useAuth();
 
   if (canAccess({ role, groups }, { minRole, orGroups: orGroup })) {
     return children;
   }
   const groupLabel = Array.isArray(orGroup) ? orGroup.join(' or ') : orGroup;
+  const teams = teamsText(groups);
+  const needed = ROLE_NAME[minRole] || minRole;
 
   return (
-    <div style={{ padding: 48, textAlign: 'center' }}>
-      <div style={{ fontSize: 14, fontWeight: 600, color: '#172B4D', marginBottom: 6 }}>
-        You don't have permission to view this page
+    <div className="rs-page">
+      <Topbar title={title || 'No access'} />
+      <div className="rs-page-body">
+      <div className="rs-page-content">
+        <Callout tone="info" title={title ? `You don't have access to ${title}` : "You don't have access to this page"}>
+          <div style={{ display: 'grid', gap: 6 }}>
+            {reason && <div>{reason}</div>}
+            <div>
+              It needs {minRole === 'viewer' ? <>a <strong>RunStack role</strong> (any)</> : <>the <strong>{needed}</strong> role{minRole !== 'admin' ? ' or higher' : ''}</>}
+              {groupLabel ? <> (or membership in <strong>{groupLabel}</strong>)</> : null}.
+              {' '}You have {role && role !== 'none' ? <>the <strong>{ROLE_NAME[role] || role}</strong> role</> : 'no platform role'}
+              {teams ? <> and team access to <strong>{teams}</strong></> : null}.
+            </div>
+            <div>Roles come from Azure AD groups. Contact a RunStack administrator if you need access.</div>
+          </div>
+        </Callout>
       </div>
-      <div style={{ fontSize: 13, color: '#52647A' }}>
-        This page requires the <strong>{minRole}</strong> role or higher
-        {groupLabel ? <> (or membership in <strong>{groupLabel}</strong>)</> : null}. Your role: {role}.
-        Contact a RunStack administrator if you believe this is incorrect.
       </div>
     </div>
   );

@@ -139,10 +139,31 @@ export async function queryJobs(params = {}) {
   return apiFetch(`/jobs/query?${qs.toString()}`);
 }
 
-/** GET /jobs/query?view=summary — counts and chart buckets for a labelled
- *  range (24h | 3d | 7d | 30d), from the job counters (no table scan). */
-export async function fetchJobsSummary(range = '24h') {
-  return apiFetch(`/jobs/query?view=summary&range=${encodeURIComponent(range)}`);
+// Dashboard window: a labelled range ('24h' | '7d' | '30d' | '90d' | 'all')
+// or custom UTC dates { from_day, to_day } (YYYY-MM-DD, both included).
+function windowQuery(win) {
+  const w = typeof win === 'string' ? { range: win } : (win || {});
+  const qs = new URLSearchParams();
+  if (w.from_day || w.to_day) {
+    qs.set('from_day', w.from_day || '');
+    qs.set('to_day', w.to_day || '');
+  } else {
+    qs.set('range', w.range || '24h');
+  }
+  return qs.toString();
+}
+
+/** GET /jobs/query?view=summary — counts and chart buckets for the window,
+ *  from the job counters (no table scan). */
+export async function fetchJobsSummary(win = '24h') {
+  return apiFetch(`/jobs/query?view=summary&${windowQuery(win)}`);
+}
+
+/** GET /jobs/query?view=automations — executions, outcomes, average duration
+ *  and last start per automation for the same window, from the per-automation
+ *  counters. available: false until job_stats' backfill_automations has run. */
+export async function fetchAutomationSummary(win = '24h', { refresh = false } = {}) {
+  return apiFetch(`/jobs/query?view=automations&${windowQuery(win)}${refresh ? '&refresh=true' : ''}`);
 }
 
 /** GET /jobs/query?view=recent — the newest few executions. */

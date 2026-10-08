@@ -1,8 +1,9 @@
 // src/components/Layout.jsx
 //
-// App shell: the dark navy header (components/nav/AppHeader.jsx) above one
-// scrolling content area. The vertical sidebar this file used to render has
-// been replaced by the header; the navigation behaviour below is unchanged.
+// App shell: a slim dark navy header (components/nav/AppHeader.jsx) above a
+// collapsible left sidebar (components/nav/Sidebar.jsx) and one scrolling
+// content area. The collapsed/expanded choice is remembered in this browser.
+// Below 900 px the sidebar becomes a drawer opened from the header.
 import React from 'react';
 import ReactDOM from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -11,12 +12,31 @@ import { getUnsavedChangesMessage } from '../hooks/useNavigation';
 import { getApiActivity, subscribeApiActivity } from '../api/client';
 import { Btn } from './ui';
 import AppHeader from './nav/AppHeader';
+import Sidebar from './nav/Sidebar';
 import { useRunHub } from './run/runHubContext';
 import AutomationHub from './run/AutomationHub';
 
 import { NavigationContext } from './nav/navigationContext';
 
 export { useAppNavigate } from './nav/navigationContext';
+
+const COLLAPSE_KEY = 'runstack.sidebar.collapsed';
+const readCollapsed = () => { try { return localStorage.getItem(COLLAPSE_KEY) === '1'; } catch { return false; } };
+const saveCollapsed = (v) => { try { localStorage.setItem(COLLAPSE_KEY, v ? '1' : '0'); } catch { /* optional */ } };
+const DRAWER_QUERY = '(max-width: 899px)';
+
+function useIsDrawer() {
+  const get = () => (typeof window !== 'undefined' && window.matchMedia ? window.matchMedia(DRAWER_QUERY).matches : false);
+  const [drawer, setDrawer] = React.useState(get);
+  React.useEffect(() => {
+    if (!window.matchMedia) return undefined;
+    const mq = window.matchMedia(DRAWER_QUERY);
+    const on = () => setDrawer(mq.matches);
+    mq.addEventListener ? mq.addEventListener('change', on) : mq.addListener(on);
+    return () => (mq.removeEventListener ? mq.removeEventListener('change', on) : mq.removeListener(on));
+  }, []);
+  return drawer;
+}
 
 // ── Navigation behaviour ─────────────────────────────────────────────────────
 // • Header item for another page: navigate in-app (no browser reload); the
@@ -57,6 +77,18 @@ export default function Layout({ children }) {
   const [busy, setBusy] = React.useState(false);
   const busyTimer = React.useRef(null);
   const [pendingLeave, setPendingLeave] = React.useState(null); // { to, message }
+  const [collapsed, setCollapsed] = React.useState(readCollapsed);
+  const drawer = useIsDrawer();
+  const [navOpen, setNavOpen] = React.useState(false);
+  const toggleCollapsed = () => setCollapsed((v) => { saveCollapsed(!v); return !v; });
+
+  React.useEffect(() => { setNavOpen(false); }, [pathname, drawer]);
+  React.useEffect(() => {
+    if (!navOpen) return undefined;
+    const onKey = (e) => { if (e.key === 'Escape') { setNavOpen(false); document.getElementById('rs-menu-toggle')?.focus(); } };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navOpen]);
 
   React.useEffect(() => { lastSearch.set(pathname, search); }, [pathname, search]);
 
@@ -132,13 +164,23 @@ export default function Layout({ children }) {
 
   return (
     <NavigationContext.Provider value={go}>
-    <div className="rs-shell">
+    <div className={`rs-shell${collapsed && !drawer ? ' is-collapsed' : ''}${drawer ? ' is-drawer' : ''}`}>
       <a href="#rs-main" className="rs-skip-link">Skip to content</a>
-      <AppHeader onNavigate={go} />
-      <main id="rs-main" ref={contentRef} tabIndex={-1} className="rs-shell-main">
-        <div className={`rs-nav-progress${busy ? ' is-busy' : ''}`} role="progressbar" aria-hidden={!busy} aria-label="Loading" />
-        {children}
-      </main>
+      <AppHeader onNavigate={go} navOpen={navOpen} onToggleNav={() => setNavOpen((v) => !v)} />
+      <div className="rs-shell-body">
+        {drawer ? (navOpen && (
+          <>
+            <div className="rs-side-backdrop" onClick={() => setNavOpen(false)} aria-hidden />
+            <div id="rs-side-drawer"><Sidebar onNavigate={go} drawer onClose={() => setNavOpen(false)} /></div>
+          </>
+        )) : (
+          <Sidebar onNavigate={go} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
+        )}
+        <main id="rs-main" ref={contentRef} tabIndex={-1} className="rs-shell-main">
+          <div className={`rs-nav-progress${busy ? ' is-busy' : ''}`} role="progressbar" aria-hidden={!busy} aria-label="Loading" />
+          {children}
+        </main>
+      </div>
       {pendingLeave && ReactDOM.createPortal(
         <>
           <div onClick={() => setPendingLeave(null)} aria-hidden style={{ position:'fixed', inset:0, background:'rgba(15,23,42,0.28)', zIndex:60 }} />

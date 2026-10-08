@@ -69,9 +69,16 @@ function AppRoutes() {
         <Route path="/automations" element={<RunHub><RunAutomations/></RunHub>}/>
         <Route path="/ec2"         element={<RunHub><Ec2StartStop/></RunHub>}/>
         {/* Advanced (original) single-target page — admins only */}
-        <Route path="/trigger"     element={<RequireRole minRole="admin"><TriggerJob/></RequireRole>}/>
-        <Route path="/schedules"   element={<RequireRole minRole="operator"><TriggersSchedules/></RequireRole>}/>
-        <Route path="/dlq"         element={<RequireRole minRole="operator"><DLQ/></RequireRole>}/>
+        <Route path="/trigger"     element={<RequireRole minRole="admin" title="Advanced Run" reason="Runs a single automation with raw parameters on any target.">
+          <TriggerJob/></RequireRole>}/>
+        <Route path="/schedules"   element={
+          <RequireRole minRole="operator" title="Triggers & Schedules"
+            reason="This page creates, changes and deletes the EventBridge rules that start RunStack automations.">
+            <TriggersSchedules/>
+          </RequireRole>
+        }/>
+        <Route path="/dlq"         element={<RequireRole minRole="operator" title="Dead Letter Queue" reason="Shows messages RunStack could not process after retries.">
+          <DLQ/></RequireRole>}/>
         <Route path="/accounts"    element={<RegisteredTargets/>}/>
         <Route path="/database/sql-health-check" element={
           <RunHub><RequireRole minRole={SQL_HEALTHCHECK_ACCESS.minRole} orGroup={SQL_HEALTHCHECK_ACCESS.orGroups}><SQLHealthCheck/></RequireRole></RunHub>
@@ -82,9 +89,12 @@ function AppRoutes() {
         {/* Old DR Failover URL — keep bookmarks working */}
         <Route path="/dr-failover" element={<Navigate to="/database/dr-switchover" replace/>}/>
         <Route path="/docs"        element={<SSMDocuments/>}/>
-        <Route path="/uploads"     element={<RequireRole minRole="admin"><Uploads/></RequireRole>}/>
-        <Route path="/users"       element={<RequireRole minRole="admin"><UsersRoles/></RequireRole>}/>
-        <Route path="/settings"    element={<Settings/>}/>
+        <Route path="/uploads"     element={<RequireRole minRole="admin" title="Uploads" reason="Manages the files automations use.">
+          <Uploads/></RequireRole>}/>
+        <Route path="/users"       element={<RequireRole minRole="admin" title="Users & Access" reason="Manages platform roles, EC2 application access and team permissions.">
+          <UsersRoles/></RequireRole>}/>
+        <Route path="/settings"    element={<RequireRole minRole="viewer" title="Settings" reason="Shows the RunStack UI configuration.">
+          <Settings/></RequireRole>}/>
         <Route path="*"            element={<Navigate to="/" replace/>}/>
       </Routes>
     </Layout>
