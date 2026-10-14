@@ -71,7 +71,7 @@
         "RoleArn.$": "States.Format('arn:aws:iam::{}:role/runstack-cross-account-role', $.account_id)"
       },
       "ResultPath": "$.ec2_result",
-      "Next": "NormalizeEC2Output",
+      "Next": "GetEC2InstanceStatus",
       "Catch": [
         {
           "ErrorEquals": [
@@ -93,7 +93,9 @@
           "resource_id.$": "$.resource_id",
           "automation_type.$": "$.automation_type",
           "status": "COMPLETED",
-          "ec2_state.$": "$.ec2_result.Reservations[0].Instances[0].State.Name"
+          "ec2_state.$": "$.ec2_result.Reservations[0].Instances[0].State.Name",
+          "ec2_health_raw.$": "States.JsonToString($.ec2_health)",
+          "ssm_info_raw.$": "States.JsonToString($.ssm_info)"
         }
       ],
       "ResultPath": "$",
@@ -109,7 +111,7 @@
             "S.$": "$[0].job_id"
           }
         },
-        "UpdateExpression": "SET #status = :status, ec2_state = :ec2_state, updated_at = :updated_at",
+        "UpdateExpression": "SET #status = :status, ec2_state = :ec2_state, ec2_health_raw = :ec2_health_raw, ssm_info_raw = :ssm_info_raw, updated_at = :updated_at",
         "ExpressionAttributeNames": {
           "#status": "status"
         },
@@ -122,6 +124,12 @@
           },
           ":updated_at": {
             "S.$": "$$.State.EnteredTime"
+          },
+          ":ec2_health_raw": {
+            "S.$": "$[0].ec2_health_raw"
+          },
+          ":ssm_info_raw": {
+            "S.$": "$[0].ssm_info_raw"
           }
         }
       },
@@ -310,7 +318,7 @@
                       "StringEquals": "Waiting"
                     }
                   ],
-                  "Next": "WaitForAutomationCommand"
+                  "Next": "IsEC2PowerDocument"
                 }
               ],
               "Default": "CheckAutomationRetry"
@@ -405,7 +413,7 @@
                 "RoleArn.$": "States.Format('arn:aws:iam::{}:role/runstack-cross-account-role', $.account_id)"
               },
               "ResultPath": "$.ec2_validation",
-              "Next": "CheckValidatedState"
+              "Next": "RecordValidatedEC2State"
             },
             "ValidateEC2StateCentral": {
               "Type": "Task",
@@ -417,11 +425,28 @@
                 "RoleArn": "arn:aws:iam::246314649749:role/runstack-cross-account-role"
               },
               "ResultPath": "$.ec2_validation",
-              "Next": "CheckValidatedState"
+              "Next": "RecordValidatedEC2State"
             },
             "CheckValidatedState": {
               "Type": "Choice",
               "Choices": [
+                {
+                  "And": [
+                    {
+                      "Variable": "$.automation_data.DocumentName",
+                      "StringEquals": "AWS-StartEC2Instance"
+                    },
+                    {
+                      "Variable": "$.ec2_validation.Reservations[0].Instances[0].State.Name",
+                      "StringEquals": "running"
+                    },
+                    {
+                      "Variable": "$.region",
+                      "StringEquals": "us-east-1"
+                    }
+                  ],
+                  "Next": "InitStartHealth"
+                },
                 {
                   "And": [
                     {
@@ -663,11 +688,8 @@
                 "ExpressionAttributeValues": {
                   ":e": {
                     "M": {
-                      "error": {
-                        "S.$": "$.error.Error"
-                      },
-                      "cause": {
-                        "S.$": "$.error.Cause"
+                      "detail": {
+                        "S.$": "States.JsonToString($.error)"
                       },
                       "step": {
                         "S.$": "$$.State.Name"
@@ -690,6 +712,480 @@
                   "ResultPath": "$.record_dispatch_error_failed"
                 }
               ]
+            },
+            "IsEC2PowerDocument": {
+              "Type": "Choice",
+              "Comment": "Only EC2 start/stop automations record live EC2 state; every other automation goes straight back to waiting, exactly as before.",
+              "Choices": [
+                {
+                  "Or": [
+                    {
+                      "Variable": "$.automation_data.DocumentName",
+                      "StringEquals": "AWS-StopEC2Instance"
+                    },
+                    {
+                      "Variable": "$.automation_data.DocumentName",
+                      "StringEquals": "AWS-StartEC2Instance"
+                    }
+                  ],
+                  "Next": "CaptureLiveEC2State"
+                }
+              ],
+              "Default": "WaitForAutomationCommand"
+            },
+            "CaptureLiveEC2State": {
+              "Type": "Task",
+              "Comment": "Read-only: current EC2 state while the start/stop automation runs. Failure (e.g. instance outside this region) just continues waiting.",
+              "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstances",
+              "Parameters": {
+                "InstanceIds.$": "States.Array($.resource_id)"
+              },
+              "Credentials": {
+                "RoleArn.$": "States.Format('arn:aws:iam::{}:role/runstack-cross-account-role', $.account_id)"
+              },
+              "ResultSelector": {
+                "state.$": "$.Reservations[0].Instances[0].State.Name"
+              },
+              "ResultPath": "$.live_ec2",
+              "Next": "RecordLiveEC2State",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "ResultPath": null,
+                  "Next": "WaitForAutomationCommand"
+                }
+              ]
+            },
+            "RecordLiveEC2State": {
+              "Type": "Task",
+              "Comment": "Best effort: record the observed EC2 state on the job (ec2_state + first time each state was seen as seen_<state>_at) so GET /jobs shows live progress and transitions. Failures never affect the run.",
+              "Resource": "arn:aws:states:::dynamodb:updateItem",
+              "Parameters": {
+                "TableName": "runstack-jobs-table",
+                "Key": {
+                  "job_id": {
+                    "S.$": "$.job_id"
+                  }
+                },
+                "UpdateExpression": "SET ec2_state = :s, live_state_checked_at = :t, #seen = if_not_exists(#seen, :t)",
+                "ConditionExpression": "attribute_exists(job_id)",
+                "ExpressionAttributeNames": {
+                  "#seen.$": "States.Format('seen_{}_at', $.live_ec2.state)"
+                },
+                "ExpressionAttributeValues": {
+                  ":s": {
+                    "S.$": "$.live_ec2.state"
+                  },
+                  ":t": {
+                    "S.$": "$$.State.EnteredTime"
+                  }
+                }
+              },
+              "ResultPath": null,
+              "Next": "LiveStateReachedTarget",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "ResultPath": null,
+                  "Next": "WaitForAutomationCommand"
+                }
+              ]
+            },
+            "RecordValidatedEC2State": {
+              "Type": "Task",
+              "Comment": "Best effort: record the observed EC2 state on the job (ec2_state + first time each state was seen as seen_<state>_at) so GET /jobs shows live progress and transitions. Failures never affect the run.",
+              "Resource": "arn:aws:states:::dynamodb:updateItem",
+              "Parameters": {
+                "TableName": "runstack-jobs-table",
+                "Key": {
+                  "job_id": {
+                    "S.$": "$.job_id"
+                  }
+                },
+                "UpdateExpression": "SET ec2_state = :s, live_state_checked_at = :t, #seen = if_not_exists(#seen, :t)",
+                "ConditionExpression": "attribute_exists(job_id)",
+                "ExpressionAttributeNames": {
+                  "#seen.$": "States.Format('seen_{}_at', $.ec2_validation.Reservations[0].Instances[0].State.Name)"
+                },
+                "ExpressionAttributeValues": {
+                  ":s": {
+                    "S.$": "$.ec2_validation.Reservations[0].Instances[0].State.Name"
+                  },
+                  ":t": {
+                    "S.$": "$$.State.EnteredTime"
+                  }
+                }
+              },
+              "ResultPath": null,
+              "Next": "CheckValidatedState",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "ResultPath": null,
+                  "Next": "CheckValidatedState"
+                }
+              ]
+            },
+            "InitStartHealth": {
+              "Type": "Pass",
+              "Comment": "Start jobs: keep the job open until EC2 status checks pass and SSM is Online (or timeout), so GET /jobs shows the full start-up.",
+              "Result": {
+                "count": 0
+              },
+              "ResultPath": "$.health_attempt",
+              "Next": "WaitForStartHealth"
+            },
+            "WaitForStartHealth": {
+              "Type": "Wait",
+              "Seconds": 20,
+              "Next": "GetStartInstanceStatus"
+            },
+            "GetStartInstanceStatus": {
+              "Type": "Task",
+              "Comment": "Read-only: EC2 status checks during start-up.",
+              "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstanceStatus",
+              "Parameters": {
+                "InstanceIds.$": "States.Array($.resource_id)",
+                "IncludeAllInstances": true
+              },
+              "Credentials": {
+                "RoleArn.$": "States.Format('arn:aws:iam::{}:role/runstack-cross-account-role', $.account_id)"
+              },
+              "ResultSelector": {
+                "InstanceStatuses.$": "$.InstanceStatuses",
+                "available": true
+              },
+              "ResultPath": "$.ec2_health",
+              "Next": "GetStartSSMPing",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "ResultPath": null,
+                  "Next": "SetStartHealthUnavailable"
+                }
+              ]
+            },
+            "SetStartHealthUnavailable": {
+              "Type": "Pass",
+              "Result": {
+                "InstanceStatuses": [],
+                "available": false
+              },
+              "ResultPath": "$.ec2_health",
+              "Next": "GetStartSSMPing"
+            },
+            "GetStartSSMPing": {
+              "Type": "Task",
+              "Comment": "Read-only: SSM agent PingStatus during start-up.",
+              "Resource": "arn:aws:states:::aws-sdk:ssm:describeInstanceInformation",
+              "Parameters": {
+                "Filters": [
+                  {
+                    "Key": "InstanceIds",
+                    "Values.$": "States.Array($.resource_id)"
+                  }
+                ]
+              },
+              "Credentials": {
+                "RoleArn.$": "States.Format('arn:aws:iam::{}:role/runstack-cross-account-role', $.account_id)"
+              },
+              "ResultSelector": {
+                "InstanceInformationList.$": "$.InstanceInformationList",
+                "available": true
+              },
+              "ResultPath": "$.ssm_info",
+              "Next": "RecordStartHealth",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "ResultPath": null,
+                  "Next": "SetStartSSMUnavailable"
+                }
+              ]
+            },
+            "SetStartSSMUnavailable": {
+              "Type": "Pass",
+              "Result": {
+                "InstanceInformationList": [],
+                "available": false
+              },
+              "ResultPath": "$.ssm_info",
+              "Next": "RecordStartHealth"
+            },
+            "RecordStartHealth": {
+              "Type": "Task",
+              "Comment": "Best effort: publish the latest health results on the job for GET /jobs.",
+              "Resource": "arn:aws:states:::dynamodb:updateItem",
+              "Parameters": {
+                "TableName": "runstack-jobs-table",
+                "Key": {
+                  "job_id": {
+                    "S.$": "$.job_id"
+                  }
+                },
+                "UpdateExpression": "SET ec2_health_raw = :h, ssm_info_raw = :s, health_checked_at = :t",
+                "ConditionExpression": "attribute_exists(job_id)",
+                "ExpressionAttributeValues": {
+                  ":h": {
+                    "S.$": "States.JsonToString($.ec2_health)"
+                  },
+                  ":s": {
+                    "S.$": "States.JsonToString($.ssm_info)"
+                  },
+                  ":t": {
+                    "S.$": "$$.State.EnteredTime"
+                  }
+                }
+              },
+              "ResultPath": null,
+              "Next": "EvaluateStartHealthPresence",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "ResultPath": null,
+                  "Next": "EvaluateStartHealthPresence"
+                }
+              ]
+            },
+            "EvaluateStartHealthPresence": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "And": [
+                    {
+                      "Variable": "$.ec2_health.available",
+                      "BooleanEquals": false
+                    },
+                    {
+                      "Variable": "$.ssm_info.available",
+                      "BooleanEquals": false
+                    }
+                  ],
+                  "Next": "StartHealthUnavailable"
+                },
+                {
+                  "And": [
+                    {
+                      "Variable": "$.ec2_health.InstanceStatuses[0].SystemStatus.Status",
+                      "IsPresent": true
+                    },
+                    {
+                      "Variable": "$.ec2_health.InstanceStatuses[0].InstanceStatus.Status",
+                      "IsPresent": true
+                    },
+                    {
+                      "Variable": "$.ssm_info.InstanceInformationList[0].PingStatus",
+                      "IsPresent": true
+                    }
+                  ],
+                  "Next": "EvaluateStartHealthValues"
+                }
+              ],
+              "Default": "CheckStartHealthAttempts"
+            },
+            "EvaluateStartHealthValues": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "And": [
+                    {
+                      "Variable": "$.ec2_health.InstanceStatuses[0].SystemStatus.Status",
+                      "StringEquals": "ok"
+                    },
+                    {
+                      "Variable": "$.ec2_health.InstanceStatuses[0].InstanceStatus.Status",
+                      "StringEquals": "ok"
+                    },
+                    {
+                      "Variable": "$.ssm_info.InstanceInformationList[0].PingStatus",
+                      "StringEquals": "Online"
+                    },
+                    {
+                      "Not": {
+                        "Variable": "$.ec2_health.InstanceStatuses[0].AttachedEbsStatus.Status",
+                        "IsPresent": true
+                      }
+                    }
+                  ],
+                  "Next": "StartHealthPassed"
+                },
+                {
+                  "And": [
+                    {
+                      "Variable": "$.ec2_health.InstanceStatuses[0].SystemStatus.Status",
+                      "StringEquals": "ok"
+                    },
+                    {
+                      "Variable": "$.ec2_health.InstanceStatuses[0].InstanceStatus.Status",
+                      "StringEquals": "ok"
+                    },
+                    {
+                      "Variable": "$.ssm_info.InstanceInformationList[0].PingStatus",
+                      "StringEquals": "Online"
+                    },
+                    {
+                      "Variable": "$.ec2_health.InstanceStatuses[0].AttachedEbsStatus.Status",
+                      "IsPresent": true
+                    }
+                  ],
+                  "Next": "EvaluateStartEbs"
+                },
+                {
+                  "Or": [
+                    {
+                      "Variable": "$.ec2_health.InstanceStatuses[0].SystemStatus.Status",
+                      "StringEquals": "impaired"
+                    },
+                    {
+                      "Variable": "$.ec2_health.InstanceStatuses[0].InstanceStatus.Status",
+                      "StringEquals": "impaired"
+                    }
+                  ],
+                  "Next": "StartHealthImpaired"
+                }
+              ],
+              "Default": "CheckStartHealthAttempts"
+            },
+            "EvaluateStartEbs": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.ec2_health.InstanceStatuses[0].AttachedEbsStatus.Status",
+                  "StringEquals": "ok",
+                  "Next": "StartHealthPassed"
+                },
+                {
+                  "Variable": "$.ec2_health.InstanceStatuses[0].AttachedEbsStatus.Status",
+                  "StringEquals": "impaired",
+                  "Next": "StartHealthImpaired"
+                }
+              ],
+              "Default": "CheckStartHealthAttempts"
+            },
+            "CheckStartHealthAttempts": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.health_attempt.count",
+                  "NumericGreaterThanEquals": 30,
+                  "Next": "StartHealthTimedOut"
+                }
+              ],
+              "Default": "IncrementStartHealthAttempt"
+            },
+            "IncrementStartHealthAttempt": {
+              "Type": "Pass",
+              "Parameters": {
+                "count.$": "States.MathAdd($.health_attempt.count, 1)"
+              },
+              "ResultPath": "$.health_attempt",
+              "Next": "WaitForStartHealth"
+            },
+            "StartHealthPassed": {
+              "Type": "Pass",
+              "Result": "passed",
+              "ResultPath": "$.health_outcome",
+              "Next": "RecordStartHealthOutcome"
+            },
+            "StartHealthImpaired": {
+              "Type": "Pass",
+              "Result": "impaired",
+              "ResultPath": "$.health_outcome",
+              "Next": "RecordStartHealthOutcome"
+            },
+            "StartHealthTimedOut": {
+              "Type": "Pass",
+              "Result": "timeout",
+              "ResultPath": "$.health_outcome",
+              "Next": "RecordStartHealthOutcome"
+            },
+            "StartHealthUnavailable": {
+              "Type": "Pass",
+              "Result": "unavailable",
+              "ResultPath": "$.health_outcome",
+              "Next": "RecordStartHealthOutcome"
+            },
+            "RecordStartHealthOutcome": {
+              "Type": "Task",
+              "Comment": "Best effort: final health outcome (passed / impaired / timeout / unavailable) plus seen_<outcome>_at for the transitions list. The job then completes as before.",
+              "Resource": "arn:aws:states:::dynamodb:updateItem",
+              "Parameters": {
+                "TableName": "runstack-jobs-table",
+                "Key": {
+                  "job_id": {
+                    "S.$": "$.job_id"
+                  }
+                },
+                "UpdateExpression": "SET health_outcome = :o, health_outcome_at = :t, #seen = if_not_exists(#seen, :t)",
+                "ConditionExpression": "attribute_exists(job_id)",
+                "ExpressionAttributeNames": {
+                  "#seen.$": "States.Format('seen_health_{}_at', $.health_outcome)"
+                },
+                "ExpressionAttributeValues": {
+                  ":o": {
+                    "S.$": "$.health_outcome"
+                  },
+                  ":t": {
+                    "S.$": "$$.State.EnteredTime"
+                  }
+                }
+              },
+              "ResultPath": null,
+              "Next": "AutomationCompletedWithEC2Validation",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "ResultPath": null,
+                  "Next": "AutomationCompletedWithEC2Validation"
+                }
+              ]
+            },
+            "LiveStateReachedTarget": {
+              "Type": "Choice",
+              "Comment": "Fast path: once the instance is observed in the target state (running for start, stopped for stop), go straight to EC2 validation (and, for start, the health loop) instead of waiting for the AWS automation to report Success. The automation finishes on its own in the background.",
+              "Choices": [
+                {
+                  "And": [
+                    {
+                      "Variable": "$.automation_data.DocumentName",
+                      "StringEquals": "AWS-StartEC2Instance"
+                    },
+                    {
+                      "Variable": "$.live_ec2.state",
+                      "StringEquals": "running"
+                    }
+                  ],
+                  "Next": "CheckRegionForEC2Validation"
+                },
+                {
+                  "And": [
+                    {
+                      "Variable": "$.automation_data.DocumentName",
+                      "StringEquals": "AWS-StopEC2Instance"
+                    },
+                    {
+                      "Variable": "$.live_ec2.state",
+                      "StringEquals": "stopped"
+                    }
+                  ],
+                  "Next": "CheckRegionForEC2Validation"
+                }
+              ],
+              "Default": "WaitForAutomationCommand"
             }
           }
         }
@@ -807,7 +1303,7 @@
             },
             "WaitForCommand": {
               "Type": "Wait",
-              "Seconds": 30,
+              "Seconds": 20,
               "Next": "CheckRegionForMonitor"
             },
             "CheckRegionForMonitor": {
@@ -841,6 +1337,19 @@
                   "Next": "CheckCommandRetry",
                   "ResultPath": "$.error"
                 }
+              ],
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Ssm.InvocationDoesNotExistException",
+                    "Ssm.ThrottlingException",
+                    "Ssm.InternalServerErrorException",
+                    "Sts.StsException"
+                  ],
+                  "IntervalSeconds": 5,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
+                }
               ]
             },
             "MonitorSSMRunCommandCrossRegion": {
@@ -862,6 +1371,19 @@
                   ],
                   "Next": "CheckCommandRetry",
                   "ResultPath": "$.error"
+                }
+              ],
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Ssm.AutomationExecutionNotFoundException",
+                    "Ssm.ThrottlingException",
+                    "Ssm.InternalServerErrorException",
+                    "Sts.StsException"
+                  ],
+                  "IntervalSeconds": 5,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
                 }
               ]
             },
@@ -949,6 +1471,19 @@
                   ],
                   "Next": "CheckCommandRetry",
                   "ResultPath": "$.error"
+                }
+              ],
+              "Retry": [
+                {
+                  "ErrorEquals": [
+                    "Lambda.ServiceException",
+                    "Lambda.AWSLambdaException",
+                    "Lambda.SdkClientException",
+                    "Lambda.TooManyRequestsException"
+                  ],
+                  "IntervalSeconds": 2,
+                  "MaxAttempts": 3,
+                  "BackoffRate": 2
                 }
               ]
             },
@@ -1165,13 +1700,13 @@
                 }
               },
               "ResultPath": null,
-              "Next": "WaitForCommand",
+              "Next": "WaitForCommandFirst",
               "Catch": [
                 {
                   "ErrorEquals": [
                     "States.ALL"
                   ],
-                  "Next": "WaitForCommand",
+                  "Next": "WaitForCommandFirst",
                   "ResultPath": "$.record_dispatch_error"
                 }
               ]
@@ -1215,13 +1750,13 @@
                 }
               },
               "ResultPath": null,
-              "Next": "WaitForCommand",
+              "Next": "WaitForCommandFirst",
               "Catch": [
                 {
                   "ErrorEquals": [
                     "States.ALL"
                   ],
-                  "Next": "WaitForCommand",
+                  "Next": "WaitForCommandFirst",
                   "ResultPath": "$.record_dispatch_error"
                 }
               ]
@@ -1242,11 +1777,8 @@
                 "ExpressionAttributeValues": {
                   ":e": {
                     "M": {
-                      "error": {
-                        "S.$": "$.error.Error"
-                      },
-                      "cause": {
-                        "S.$": "$.error.Cause"
+                      "detail": {
+                        "S.$": "States.JsonToString($.error)"
                       },
                       "step": {
                         "S.$": "$$.State.Name"
@@ -1269,6 +1801,12 @@
                   "ResultPath": "$.record_dispatch_error_failed"
                 }
               ]
+            },
+            "WaitForCommandFirst": {
+              "Type": "Wait",
+              "Seconds": 10,
+              "Comment": "First status check 10 s after dispatch (later checks use WaitForCommand).",
+              "Next": "CheckRegionForMonitor"
             }
           }
         }
@@ -1356,6 +1894,82 @@
     "WorkflowFailed": {
       "Type": "Fail",
       "Cause": "Workflow execution failed"
+    },
+    "GetEC2InstanceStatus": {
+      "Type": "Task",
+      "Comment": "Read-only: EC2 status checks (system, instance, attached EBS). IncludeAllInstances returns an entry for stopped instances too. Any failure (e.g. missing ec2:DescribeInstanceStatus on the cross-account role) falls back to 'unavailable' and never fails the state check.",
+      "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstanceStatus",
+      "Parameters": {
+        "InstanceIds.$": "States.Array($.resource_id)",
+        "IncludeAllInstances": true
+      },
+      "Credentials": {
+        "RoleArn.$": "States.Format('arn:aws:iam::{}:role/runstack-cross-account-role', $.account_id)"
+      },
+      "ResultSelector": {
+        "InstanceStatuses.$": "$.InstanceStatuses",
+        "available": true
+      },
+      "ResultPath": "$.ec2_health",
+      "Next": "GetSSMPingStatus",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.ec2_health_error",
+          "Next": "SetEC2HealthUnavailable"
+        }
+      ]
+    },
+    "SetEC2HealthUnavailable": {
+      "Type": "Pass",
+      "Result": {
+        "InstanceStatuses": [],
+        "available": false
+      },
+      "ResultPath": "$.ec2_health",
+      "Next": "GetSSMPingStatus"
+    },
+    "GetSSMPingStatus": {
+      "Type": "Task",
+      "Comment": "Read-only: SSM agent registration and PingStatus for the instance (server connectivity via SSM). Any failure (e.g. missing ssm:DescribeInstanceInformation) falls back to 'unavailable'.",
+      "Resource": "arn:aws:states:::aws-sdk:ssm:describeInstanceInformation",
+      "Parameters": {
+        "Filters": [
+          {
+            "Key": "InstanceIds",
+            "Values.$": "States.Array($.resource_id)"
+          }
+        ]
+      },
+      "Credentials": {
+        "RoleArn.$": "States.Format('arn:aws:iam::{}:role/runstack-cross-account-role', $.account_id)"
+      },
+      "ResultSelector": {
+        "InstanceInformationList.$": "$.InstanceInformationList",
+        "available": true
+      },
+      "ResultPath": "$.ssm_info",
+      "Next": "NormalizeEC2Output",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.ssm_info_error",
+          "Next": "SetSSMInfoUnavailable"
+        }
+      ]
+    },
+    "SetSSMInfoUnavailable": {
+      "Type": "Pass",
+      "Result": {
+        "InstanceInformationList": [],
+        "available": false
+      },
+      "ResultPath": "$.ssm_info",
+      "Next": "NormalizeEC2Output"
     }
   }
 }
