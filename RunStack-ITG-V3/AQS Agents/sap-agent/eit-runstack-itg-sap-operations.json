@@ -1,0 +1,979 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "RunStack SAP Landscape API",
+    "version": "1.0.0",
+    "summary": "SAP landscape status and full-stack stop/start for any SID",
+    "description": "Landscape-level SAP operations for RunStack AQS agents. One operation (`SapLandscapeAction`) covers read-only status, the two phases of full-stack stop and start, and run progress, for any SID onboarded in RunStack's SAP inventory. Approvals happen in the agent conversation; the backend enforces sequencing and authorization. Plus `GET /jobs/{jobId}` for polling individual child jobs."
+  },
+  "servers": [
+    {
+      "url": "https://ovl7azq404.execute-api.us-east-1.amazonaws.com/v1"
+    }
+  ],
+  "paths": {
+    "/notify-sync": {
+      "post": {
+        "operationId": "SapLandscapeAction",
+        "summary": "SAP landscape operations for one SID — status, full-stack stop/start phases, run progress",
+        "description": "One operation for every landscape-level SAP action. The backend resolves servers, script paths, order, accounts and regions from RunStack's SAP inventory — send only `sid`, `action`, and `prior_job_id` / `job_id` where required.\n\n**Read-only (immediate result):** `list_sids`, `plan`, `sap_status`, `ec2_status`, `run_list`, `run_status`. Items not finished within the call return `status: RUNNING` with a `job_id` — poll `GET /jobs/{jobId}` for that item only.\n\n**Full-stack runs (return a run `job_id` immediately; follow with `run_status`):**\n- Stop: `sap_stop` → user approves in conversation → `ec2_stop` with `prior_job_id`.\n- Start: `ec2_start` → user approves in conversation → `sap_start` with `prior_job_id`.\n\nThe backend enforces the order: Phase 2 is rejected (409) unless `prior_job_id` is a successful, recent, unused Phase 1 run for the same SID. Only one run per SID can be active at a time.\n\n**Authorization:** list_sids / plan / sap_status / ec2_status / run_status / run_list need the 'sap-status-check' capability. sap_stop / sap_start / run_cancel need 'sap-start-stop'. ec2_stop / ec2_start need 'sap-start-stop' plus EC2 access for every server (app access and environment guardrail). Admin/operator roles bypass team capabilities.\n\nActions not yet enabled on the backend return 400.",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "id",
+                  "domain",
+                  "sid",
+                  "action"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "description": "Descriptive correlation ID, e.g. sap-stop-lh4-<timestamp>"
+                  },
+                  "domain": {
+                    "type": "string",
+                    "enum": [
+                      "sap"
+                    ],
+                    "description": "Always \"sap\""
+                  },
+                  "sid": {
+                    "type": "string",
+                    "description": "SAP system ID, e.g. G1D, LH4, LH3. For list_sids send \"*\"."
+                  },
+                  "action": {
+                    "type": "string",
+                    "enum": [
+                      "list_sids",
+                      "plan",
+                      "sap_status",
+                      "ec2_status",
+                      "sap_stop",
+                      "ec2_stop",
+                      "ec2_start",
+                      "sap_start",
+                      "run_status",
+                      "run_list",
+                      "run_cancel"
+                    ],
+                    "description": "list_sids — SAP SIDs onboarded for landscape operations that the user can see (sid not required; send \"*\").\nplan — the servers, components and stop/start order RunStack will use for this SID, without running anything.\nsap_status — status of every SAP component of the SID (read-only, one call). Optional `component` limits it to one component.\nec2_status — EC2 power state of every server of the SID (read-only, one call).\nsap_stop — stop all SAP components in stop order, verifying each before the next (Phase 1 of full-stack stop). Returns a run job_id.\nec2_stop — stop all EC2 servers of the SID (Phase 2 of stop). Requires prior_job_id of a successful, recent, unused sap_stop run. Backend re-checks SAP status before stopping.\nec2_start — start all EC2 servers of the SID and confirm SSM readiness (Phase 1 of full-stack start). Returns a run job_id.\nsap_start — start all SAP components in start order, verifying each before the next (Phase 2 of start). Requires prior_job_id of a successful, recent, unused ec2_start run.\nrun_status — progress and per-step results of a run. Requires job_id.\nrun_list — recent runs for the SID (newest first), including any still active and whether each can be used as prior_job_id. Used to resume after the user returns to the conversation.\nrun_cancel — stop an active run from continuing to the next step. The step already in progress finishes; nothing is rolled back. Requires job_id."
+                  },
+                  "prior_job_id": {
+                    "type": "string",
+                    "description": "Required for ec2_stop (the sap_stop run's job_id) and sap_start (the ec2_start run's job_id). Ignored for other actions. The backend rejects it if the run is for a different SID, did not succeed, is too old, or was already used."
+                  },
+                  "job_id": {
+                    "type": "string",
+                    "description": "Required for run_status and run_cancel: the run job_id returned by sap_stop, ec2_stop, ec2_start or sap_start."
+                  },
+                  "component": {
+                    "type": "string",
+                    "description": "Optional, sap_status only: check a single component (e.g. PAS) instead of all."
+                  }
+                }
+              },
+              "examples": {
+                "SapStatus": {
+                  "summary": "Status of every SAP component",
+                  "value": {
+                    "id": "sap-status-g1d-001",
+                    "domain": "sap",
+                    "sid": "G1D",
+                    "action": "sap_status"
+                  }
+                },
+                "Ec2Status": {
+                  "summary": "EC2 state of every server",
+                  "value": {
+                    "id": "sap-ec2-status-g1d-001",
+                    "domain": "sap",
+                    "sid": "G1D",
+                    "action": "ec2_status"
+                  }
+                },
+                "SapStop": {
+                  "summary": "Phase 1 of full-stack stop",
+                  "value": {
+                    "id": "sap-stop-lh4-001",
+                    "domain": "sap",
+                    "sid": "LH4",
+                    "action": "sap_stop"
+                  }
+                },
+                "Ec2Stop": {
+                  "summary": "Phase 2 of full-stack stop (after user approval)",
+                  "value": {
+                    "id": "sap-ec2-stop-lh4-001",
+                    "domain": "sap",
+                    "sid": "LH4",
+                    "action": "ec2_stop",
+                    "prior_job_id": "<sap_stop job_id>"
+                  }
+                },
+                "Ec2Start": {
+                  "summary": "Phase 1 of full-stack start",
+                  "value": {
+                    "id": "sap-ec2-start-lh4-001",
+                    "domain": "sap",
+                    "sid": "LH4",
+                    "action": "ec2_start"
+                  }
+                },
+                "SapStart": {
+                  "summary": "Phase 2 of full-stack start (after user approval)",
+                  "value": {
+                    "id": "sap-start-lh4-001",
+                    "domain": "sap",
+                    "sid": "LH4",
+                    "action": "sap_start",
+                    "prior_job_id": "<ec2_start job_id>"
+                  }
+                },
+                "RunStatus": {
+                  "summary": "Progress of a run",
+                  "value": {
+                    "id": "sap-run-status-lh4-001",
+                    "domain": "sap",
+                    "sid": "LH4",
+                    "action": "run_status",
+                    "job_id": "<run job_id>"
+                  }
+                },
+                "ListSids": {
+                  "summary": "SIDs available for landscape operations",
+                  "value": {
+                    "id": "sap-list-sids-001",
+                    "domain": "sap",
+                    "sid": "*",
+                    "action": "list_sids"
+                  }
+                },
+                "Plan": {
+                  "summary": "Show what a stop/start would do, without running it",
+                  "value": {
+                    "id": "sap-plan-lh4-001",
+                    "domain": "sap",
+                    "sid": "LH4",
+                    "action": "plan"
+                  }
+                },
+                "StatusOne": {
+                  "summary": "Status of a single component",
+                  "value": {
+                    "id": "sap-status-pas-g1d-001",
+                    "domain": "sap",
+                    "sid": "G1D",
+                    "action": "sap_status",
+                    "component": "PAS"
+                  }
+                },
+                "RunList": {
+                  "summary": "Recent runs for a SID (resume after reconnect)",
+                  "value": {
+                    "id": "sap-run-list-lh4-001",
+                    "domain": "sap",
+                    "sid": "LH4",
+                    "action": "run_list"
+                  }
+                },
+                "RunCancel": {
+                  "summary": "Stop an active run after its current step",
+                  "value": {
+                    "id": "sap-run-cancel-lh4-001",
+                    "domain": "sap",
+                    "sid": "LH4",
+                    "action": "run_cancel",
+                    "job_id": "<run job_id>"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success. For sap_stop / ec2_stop / ec2_start / sap_start the run has started — follow it with run_status.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SapLandscapeResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request — missing sid / prior_job_id / job_id, or action not enabled"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden — user lacks the required SAP capability or EC2 access for a server"
+          },
+          "404": {
+            "description": "No components found for SID, or run job_id not found"
+          },
+          "409": {
+            "description": "Conflict — another run is active for this SID, prior_job_id is invalid / not successful / expired / already used, or the safety re-check failed (e.g. an SAP component is still running before ec2_stop)"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
+    "/jobs/{jobId}": {
+      "get": {
+        "operationId": "GetAutomationJobStatusById",
+        "summary": "Get automation execution status by job ID",
+        "description": "Poll ONE child job: a component or server that `SapLandscapeAction` returned with `status: RUNNING` and a `job_id` (sap_status / ec2_status). Poll every 5 seconds, up to 2 minutes. For SAP status jobs read `qualys_output`; for EC2 jobs read `ec2_state`.\n\nDo NOT use this for the progress of a stop/start run — use `SapLandscapeAction` with `action: run_status` instead.",
+        "security": [
+          {
+            "cognitoClientCredentials": [
+              "runstack-api/notify"
+            ]
+          },
+          {
+            "cognitoUserAuth": [
+              "openid",
+              "email",
+              "runstack-api/notify"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "name": "jobId",
+            "in": "path",
+            "required": true,
+            "description": "Automation job identifier returned by POST /notify",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Automation job status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Job not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "cognitoClientCredentials": {
+        "type": "oauth2",
+        "description": "Cognito OAuth2 Client Credentials Flow — for system-to-system integrations (Dynatrace, EventBridge, schedulers). No user login required. Never subject to app-level instance scoping.",
+        "flows": {
+          "clientCredentials": {
+            "tokenUrl": "https://runstack-auth-246314649749.auth.us-east-1.amazoncognito.com/oauth2/token",
+            "scopes": {
+              "runstack-api/notify": "Permission to execute RunStack automations"
+            }
+          }
+        }
+      },
+      "cognitoUserAuth": {
+        "type": "oauth2",
+        "description": "Cognito OAuth2 Authorization Code Flow — for user-initiated flows via Amazon QuickSuite. Users authenticate with corporate Azure AD credentials via SAML SSO.\n\nA successfully authenticated user is granted `runstack:authorized=true` through either:\n- Membership in the `runstack-admins` or `runstack-operators` Cognito group (platform-wide access, no instance scoping), or\n- An entry in the `runstack-app-access` table mapping their email to one or more app IDs (scoped access — restricted to instances belonging to their assigned app(s))\n\nUsers with neither receive `runstack:authorized=false` and are blocked with `403` on every endpoint.",
+        "flows": {
+          "authorizationCode": {
+            "authorizationUrl": "https://runstack-auth-246314649749.auth.us-east-1.amazoncognito.com/oauth2/authorize?identity_provider=AzureAD",
+            "tokenUrl": "https://runstack-auth-246314649749.auth.us-east-1.amazoncognito.com/oauth2/token",
+            "scopes": {
+              "openid": "OpenID Connect — required for user identity",
+              "email": "User email address",
+              "runstack-api/notify": "Permission to execute RunStack automations"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "JobStatusResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "job_id",
+          "status",
+          "region",
+          "account_id",
+          "resource_id",
+          "automation_type"
+        ],
+        "properties": {
+          "job_id": {
+            "type": "string"
+          },
+          "execution_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "description": "PENDING → RUNNING → COMPLETED or FAILED",
+            "enum": [
+              "PENDING",
+              "RUNNING",
+              "COMPLETED",
+              "IN_PROGRESS",
+              "SUCCEEDED",
+              "FAILED",
+              "TIMED_OUT",
+              "CANCELLED"
+            ]
+          },
+          "ec2_state": {
+            "type": "string",
+            "description": "EC2 instance state — populated for EC2-Action jobs when status=COMPLETED",
+            "enum": [
+              "pending",
+              "running",
+              "stopping",
+              "stopped",
+              "terminated"
+            ]
+          },
+          "instance_state": {
+            "type": "string",
+            "description": "Alias for ec2_state",
+            "enum": [
+              "PENDING",
+              "RUNNING",
+              "STOPPING",
+              "STOPPED",
+              "TERMINATED"
+            ]
+          },
+          "region": {
+            "type": "string"
+          },
+          "account_id": {
+            "type": "string"
+          },
+          "resource_id": {
+            "type": "string"
+          },
+          "automation_type": {
+            "type": "string",
+            "enum": [
+              "SSM-RunCommand",
+              "SSM-Automation",
+              "EC2-Action"
+            ]
+          },
+          "notification_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "automation_data": {
+            "$ref": "#/components/schemas/AutomationData"
+          },
+          "ssm": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "automationExecutionId": {
+                "type": "string"
+              },
+              "commandId": {
+                "type": "string"
+              }
+            }
+          },
+          "exit_code": {
+            "type": "integer",
+            "description": "The script's own process exit code (distinct from SSM-level status). -1 or absent means SSM did not report an exit code (e.g. EC2-Action jobs)."
+          },
+          "script_result": {
+            "type": "string",
+            "description": "PASSED if exit_code == 0, FAILED if exit_code is non-zero. Note: a status script using \"; true\" always exits 0, so script_result will always read PASSED for those calls -- read the parsed output field instead for actual service health.",
+            "enum": [
+              "PASSED",
+              "FAILED"
+            ]
+          },
+          "output": {
+            "type": "string",
+            "description": "Raw stdout captured from the RunCommand script (e.g. the JSON printed by check_oracle_status.sh, or plain text from other scripts). This is the field to parse for actual service state -- status and script_result only describe whether the command executed, not what it found."
+          },
+          "error": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "code": {
+                "type": "string"
+              },
+              "details": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "AutomationData": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "Automation parameters. For EC2-Action, pass empty object `{}`. For SSM types, DocumentName is required.",
+        "properties": {
+          "DocumentName": {
+            "type": "string",
+            "description": "AWS SSM document name. Required for SSM-Automation and SSM-RunCommand. Not required for EC2-Action.",
+            "examples": [
+              "AWS-RunRemoteScript",
+              "AWS-StopEC2Instance",
+              "AWS-StartEC2Instance"
+            ]
+          },
+          "InstanceIds": {
+            "type": "array",
+            "description": "Used for SSM-RunCommand. Should contain the resource_id.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "Parameters": {
+            "type": "object",
+            "description": "SSM document parameters. Values must be arrays of strings.",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "SapLandscapeResponse": {
+        "type": "object",
+        "description": "Fields present depend on the action: list_sids → sids; plan → plan; sap_status / ec2_status → results; run-start actions → job_id + status STARTED; run_status → run fields + steps; run_list → runs; run_cancel → job_id + status CANCEL_REQUESTED.",
+        "properties": {
+          "sid": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string"
+          },
+          "execution_group_id": {
+            "type": "string"
+          },
+          "complete": {
+            "type": "boolean",
+            "description": "false if any item is still RUNNING"
+          },
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One component (sap_status) or one server (ec2_status).",
+              "properties": {
+                "component": {
+                  "type": "string",
+                  "description": "sap_status — component key from the SAP inventory (e.g. DB, ASCS, PAS, AAS, APP1)"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "sap_status — display label / role (e.g. Database, PAS, \"PAS + 2×AAS\")"
+                },
+                "components": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "ec2_status — labels of the SAP components hosted on this server"
+                },
+                "host": {
+                  "type": "string",
+                  "description": "Server name from the instance catalog"
+                },
+                "instance_id": {
+                  "type": "string"
+                },
+                "job_id": {
+                  "type": "string",
+                  "description": "Child job ID. Poll GET /jobs/{jobId} when status is RUNNING"
+                },
+                "status": {
+                  "type": "string",
+                  "description": "SUCCEEDED / COMPLETED / FAILED / TIMED_OUT / CANCELLED when finished; RUNNING if not finished within the call; ERROR if the check could not be dispatched; NOT_CONFIGURED if the component has no status script"
+                },
+                "output": {
+                  "type": "string",
+                  "description": "sap_status — raw status-script output (JSON text). Interpret this; ignore exit_code"
+                },
+                "exit_code": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "description": "sap_status — always 0 for status checks; never use it to judge component state"
+                },
+                "ec2_state": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "ec2_status — running / stopped / pending / stopping / terminated"
+                },
+                "message": {
+                  "type": "string"
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "job_id": {
+            "type": "string",
+            "description": "Run job ID (run-start actions and run_status)."
+          },
+          "prior_job_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "description": "Run-start actions: STARTED. run_status: RUNNING / SUCCEEDED / FAILED / CANCELLED. run_cancel: CANCEL_REQUESTED."
+          },
+          "message": {
+            "type": "string"
+          },
+          "run_action": {
+            "type": "string",
+            "description": "sap_stop / ec2_stop / ec2_start / sap_start"
+          },
+          "initiated_by": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "finished_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "current_step": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "order of the step in progress"
+          },
+          "failed_step": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "order of the step that failed, if any"
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "description": "One step of a run: a script on a server (sap_stop/sap_start) or one server (ec2_stop/ec2_start).",
+              "properties": {
+                "order": {
+                  "type": "integer",
+                  "description": "Position in the sequence (1 runs first). Steps with the same order may run together."
+                },
+                "component": {
+                  "type": "string"
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Display label / role"
+                },
+                "components": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "EC2 steps — SAP components hosted on this server"
+                },
+                "host": {
+                  "type": "string"
+                },
+                "instance_id": {
+                  "type": "string"
+                },
+                "step_action": {
+                  "type": "string",
+                  "description": "e.g. stop_script, verify, ec2_stop, ec2_start, ssm_ready"
+                },
+                "job_id": {
+                  "type": "string",
+                  "description": "Child job ID for this step (for Execution Details / troubleshooting)"
+                },
+                "status": {
+                  "type": "string",
+                  "description": "PENDING / RUNNING / SUCCEEDED / FAILED / SKIPPED"
+                },
+                "verified_state": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "State confirmed by verification: STOPPED / RUNNING (SAP), stopped / running (EC2), SSM_READY"
+                },
+                "output": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Raw verification output, where applicable"
+                },
+                "message": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Failure or skip reason"
+                },
+                "started_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "finished_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            }
+          },
+          "sids": {
+            "type": "array",
+            "description": "list_sids",
+            "items": {
+              "type": "object",
+              "properties": {
+                "sid": {
+                  "type": "string"
+                },
+                "app_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "environment": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "component_count": {
+                  "type": "integer"
+                },
+                "server_count": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "plan": {
+            "type": "object",
+            "description": "plan",
+            "properties": {
+              "stop_sequence": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One step of a run: a script on a server (sap_stop/sap_start) or one server (ec2_stop/ec2_start).",
+                  "properties": {
+                    "order": {
+                      "type": "integer",
+                      "description": "Position in the sequence (1 runs first). Steps with the same order may run together."
+                    },
+                    "component": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "Display label / role"
+                    },
+                    "components": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "EC2 steps — SAP components hosted on this server"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "instance_id": {
+                      "type": "string"
+                    },
+                    "step_action": {
+                      "type": "string",
+                      "description": "e.g. stop_script, verify, ec2_stop, ec2_start, ssm_ready"
+                    },
+                    "job_id": {
+                      "type": "string",
+                      "description": "Child job ID for this step (for Execution Details / troubleshooting)"
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "PENDING / RUNNING / SUCCEEDED / FAILED / SKIPPED"
+                    },
+                    "verified_state": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "State confirmed by verification: STOPPED / RUNNING (SAP), stopped / running (EC2), SSM_READY"
+                    },
+                    "output": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Raw verification output, where applicable"
+                    },
+                    "message": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Failure or skip reason"
+                    },
+                    "started_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "finished_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                },
+                "description": "SAP components in stop order"
+              },
+              "start_sequence": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "description": "One step of a run: a script on a server (sap_stop/sap_start) or one server (ec2_stop/ec2_start).",
+                  "properties": {
+                    "order": {
+                      "type": "integer",
+                      "description": "Position in the sequence (1 runs first). Steps with the same order may run together."
+                    },
+                    "component": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string",
+                      "description": "Display label / role"
+                    },
+                    "components": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      },
+                      "description": "EC2 steps — SAP components hosted on this server"
+                    },
+                    "host": {
+                      "type": "string"
+                    },
+                    "instance_id": {
+                      "type": "string"
+                    },
+                    "step_action": {
+                      "type": "string",
+                      "description": "e.g. stop_script, verify, ec2_stop, ec2_start, ssm_ready"
+                    },
+                    "job_id": {
+                      "type": "string",
+                      "description": "Child job ID for this step (for Execution Details / troubleshooting)"
+                    },
+                    "status": {
+                      "type": "string",
+                      "description": "PENDING / RUNNING / SUCCEEDED / FAILED / SKIPPED"
+                    },
+                    "verified_state": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "State confirmed by verification: STOPPED / RUNNING (SAP), stopped / running (EC2), SSM_READY"
+                    },
+                    "output": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Raw verification output, where applicable"
+                    },
+                    "message": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "description": "Failure or skip reason"
+                    },
+                    "started_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "finished_at": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  }
+                },
+                "description": "SAP components in start order"
+              },
+              "servers": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "host": {
+                      "type": "string"
+                    },
+                    "instance_id": {
+                      "type": "string"
+                    },
+                    "components": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "ec2_stop_allowed": {
+                      "type": "boolean",
+                      "description": "false for servers shared with other systems — ec2_stop skips them"
+                    }
+                  }
+                }
+              },
+              "warnings": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "e.g. instance missing from catalog, component without scripts"
+              }
+            }
+          },
+          "runs": {
+            "type": "array",
+            "description": "run_list — newest first",
+            "items": {
+              "type": "object",
+              "properties": {
+                "job_id": {
+                  "type": "string"
+                },
+                "run_action": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "initiated_by": {
+                  "type": "string"
+                },
+                "started_at": {
+                  "type": "string"
+                },
+                "finished_at": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "usable_as_prior_job_id": {
+                  "type": "boolean",
+                  "description": "true if this run can still be used for the next phase"
+                },
+                "consumed_by_job_id": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "the Phase 2 run that already used it, if any"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
