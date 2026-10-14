@@ -663,8 +663,11 @@
                 "ExpressionAttributeValues": {
                   ":e": {
                     "M": {
-                      "detail": {
-                        "S.$": "States.JsonToString($.error)"
+                      "error": {
+                        "S.$": "$.error.Error"
+                      },
+                      "cause": {
+                        "S.$": "$.error.Cause"
                       },
                       "step": {
                         "S.$": "$$.State.Name"
@@ -1239,8 +1242,11 @@
                 "ExpressionAttributeValues": {
                   ":e": {
                     "M": {
-                      "detail": {
-                        "S.$": "States.JsonToString($.error)"
+                      "error": {
+                        "S.$": "$.error.Error"
+                      },
+                      "cause": {
+                        "S.$": "$.error.Cause"
                       },
                       "step": {
                         "S.$": "$$.State.Name"

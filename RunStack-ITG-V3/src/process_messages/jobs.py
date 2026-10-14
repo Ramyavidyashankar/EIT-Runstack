@@ -193,8 +193,160 @@ def handle_jobs_recent(event, http_method, path, path_parameters, query_params):
 
 # ── GET /jobs/{jobId} ─────────────────────────────────────────
 
+# ── EC2 health (status checks + SSM connectivity) for EC2-Action jobs ──
+# The workflow stores the raw describeInstanceStatus / describeInstanceInformation
+# results as JSON strings (ec2_health_raw / ssm_info_raw). These helpers turn
+# them into simple, agent-friendly fields. Additive only: jobs without the raw
+# fields (older jobs, non EC2-Action jobs) get "available": false.
+
+_CHECK_OK = "ok"
+_CHECK_PENDING = ("initializing", "insufficient-data")
+
+
+def _load_json_field(job, key):
+    raw = job.get(key)
+    if not raw:
+        return None
+    try:
+        return json.loads(raw) if isinstance(raw, str) else raw
+    except (TypeError, ValueError):
+        return None
+
+
+def ec2_status_checks_summary(job):
+    """{"available", "overall", "summary", "system", "instance", "ebs", "passed", "total"}.
+
+    overall: passed | initializing | failed | not_applicable | unavailable
+    """
+    data = _load_json_field(job, "ec2_health_raw")
+    if not data or not data.get("available"):
+        return {"available": False, "overall": "unavailable",
+                "summary": "Unavailable — status checks could not be retrieved"}
+    statuses = data.get("InstanceStatuses") or []
+    if not statuses:
+        return {"available": True, "overall": "unavailable",
+                "summary": "No status-check data returned for this instance"}
+    st = statuses[0]
+    system = ((st.get("SystemStatus") or {}).get("Status") or "not-reported").lower()
+    instance = ((st.get("InstanceStatus") or {}).get("Status") or "not-reported").lower()
+    ebs = ((st.get("AttachedEbsStatus") or {}).get("Status") or "not-reported").lower()
+
+    reported = [c for c in (system, instance, ebs) if c != "not-reported"]
+    passed = sum(1 for c in reported if c == _CHECK_OK)
+    total = len(reported)
+    names = {"system": system, "instance": instance, "ebs": ebs}
+
+    if reported and all(c == "not-applicable" for c in reported):
+        overall, summary = "not_applicable", "Not applicable — instance is not running"
+    elif total and passed == total:
+        overall, summary = "passed", f"{passed}/{total} passed"
+    elif any(c == "impaired" for c in reported):
+        bad = ", ".join(k for k, v in names.items() if v == "impaired")
+        overall, summary = "failed", f"{passed}/{total} passed — impaired: {bad}"
+    elif any(c in _CHECK_PENDING for c in reported):
+        pend = ", ".join(f"{k}: {v}" for k, v in names.items() if v in _CHECK_PENDING)
+        overall, summary = "initializing", f"{passed}/{total} passed — {pend}"
+    else:
+        other = ", ".join(f"{k}: {v}" for k, v in names.items() if v not in (_CHECK_OK, "not-reported"))
+        overall, summary = "failed", f"{passed}/{total} passed — {other or 'unknown'}"
+
+    return {"available": True, "overall": overall, "summary": summary,
+            "system": system, "instance": instance, "ebs": ebs,
+            "passed": passed, "total": total}
+
+
+def ssm_connectivity_summary(job):
+    """{"available", "ping_status", "summary", "last_ping", "agent_version", "platform", "computer_name"}.
+
+    ping_status: Online | ConnectionLost | Inactive | NotRegistered | unavailable
+    """
+    data = _load_json_field(job, "ssm_info_raw")
+    if not data or not data.get("available"):
+        return {"available": False, "ping_status": "unavailable",
+                "summary": "Unavailable — SSM connectivity could not be retrieved"}
+    items = data.get("InstanceInformationList") or []
+    if not items:
+        return {"available": True, "ping_status": "NotRegistered",
+                "summary": "Not registered with SSM (agent not installed, not running, or no SSM role)"}
+    it = items[0]
+    ping = it.get("PingStatus") or "unknown"
+    summary = {"Online": "Online — SSM agent is connected",
+               "ConnectionLost": "Connection lost — SSM agent is not responding",
+               "Inactive": "Inactive — instance is not reachable through SSM"}.get(ping, ping)
+    return {"available": True, "ping_status": ping, "summary": summary,
+            "last_ping": it.get("LastPingDateTime"),
+            "agent_version": it.get("AgentVersion"),
+            "platform": it.get("PlatformName") or it.get("PlatformType"),
+            "computer_name": it.get("ComputerName")}
+
+
+def ec2_state_transitions(job):
+    """Observed EC2 states in order, from the seen_<state>_at attributes the
+    workflow records while an EC2 start/stop runs: [{"state", "at"}, ...]."""
+    seen = [(str(v), k[len("seen_"):-len("_at")]) for k, v in job.items()
+            if isinstance(k, str) and k.startswith("seen_") and k.endswith("_at") and v]
+    return [{"state": st, "at": at} for at, st in sorted(seen)]
+
+
+# ── Long-poll for EC2 start/stop jobs (agent callers only) ────────────────
+# AQS agents cannot wait between polls, so while an EC2 start/stop job is in
+# progress GET /jobs/{jobId} holds the request (up to JOB_LONGPOLL_SECONDS,
+# default 22s — under API Gateway's 29s limit) and returns as soon as
+# something visible changes: status, ec2_state, a new transition, or the
+# start-up health result. Browser calls (the RunStack UI sends an Origin
+# header, as all cross-origin requests do) are never held, so the UI is
+# unaffected. Set JOB_LONGPOLL_SECONDS=0 to disable.
+import time as _lp_time
+
+JOB_LONGPOLL_SECONDS = int(os.getenv("JOB_LONGPOLL_SECONDS", "22"))
+_JOB_TERMINAL = ("COMPLETED", "SUCCEEDED", "FAILED", "TIMED_OUT", "CANCELLED")
+_EC2_POWER_DOCS = ("aws-stopec2instance", "aws-startec2instance")
+
+
+def _is_browser_request(event):
+    headers = (event or {}).get("headers") or {}
+    return any(str(k).lower() == "origin" and v for k, v in headers.items())
+
+
+def _is_running_ec2_power_job(job):
+    if not job or str(job.get("status") or "").upper() in _JOB_TERMINAL:
+        return False
+    doc = str(((job.get("automation_data") or {}).get("DocumentName")) or "").lower()
+    return doc in _EC2_POWER_DOCS
+
+
+def _job_fingerprint(job):
+    checks = ec2_status_checks_summary(job) if job.get("ec2_health_raw") else {}
+    ssm = ssm_connectivity_summary(job) if job.get("ssm_info_raw") else {}
+    return (job.get("status"), job.get("ec2_state"), job.get("health_outcome"),
+            tuple(sorted(k for k in job if isinstance(k, str) and k.startswith("seen_"))),
+            checks.get("summary"), ssm.get("ping_status"))
+
+
+def _long_poll_job(event, job_id, job):
+    if JOB_LONGPOLL_SECONDS <= 0 or _is_browser_request(event) or not _is_running_ec2_power_job(job):
+        return job
+    start = _job_fingerprint(job)
+    deadline = _lp_time.time() + JOB_LONGPOLL_SECONDS
+    while _lp_time.time() < deadline:
+        _lp_time.sleep(2)
+        fresh = get_job_by_id(job_id)
+        if fresh is None:
+            return job
+        job = fresh
+        if _job_fingerprint(job) != start or not _is_running_ec2_power_job(job):
+            break
+    return job
+
+
 def handle_job_detail(event, http_method, path, path_parameters, query_params):
     job_id = path_parameters["jobId"]
+
+    # SAP full-stack run (sap_runs.py): run record, not a jobs-table row.
+    import sap_runs
+    if sap_runs.is_run_id(job_id):
+        return sap_runs.handle_run_detail(event, job_id)
+
     job = get_job_by_id(job_id)
 
     if job is None:
@@ -203,6 +355,8 @@ def handle_job_detail(event, http_method, path, path_parameters, query_params):
             "headers": CORS_HEADERS,
             "body": json.dumps({"error": f"Job {job_id} not found"})
         }
+
+    job = _long_poll_job(event, job_id, job)
 
     qualys_installed = "UNKNOWN"
     qualys_status = "UNKNOWN"
@@ -256,7 +410,20 @@ def handle_job_detail(event, http_method, path, path_parameters, query_params):
             "result": {
                 "qualys_installed": qualys_installed,
                 "qualys_status": qualys_status
-            }
+            },
+            # EC2 start/stop jobs: states observed by the workflow while the
+            # automation ran (empty for other jobs / older jobs).
+            "state_transitions": ec2_state_transitions(job),
+            "live_state_checked_at": job.get("live_state_checked_at"),
+            # EC2-Action jobs only (null for other job types): EC2 status
+            # checks (3/3) and SSM connectivity collected by the workflow.
+            # Also on EC2 start jobs, which now wait for start-up health.
+            **({
+                "status_checks": ec2_status_checks_summary(job),
+                "server_connectivity": ssm_connectivity_summary(job),
+                "health_outcome": job.get("health_outcome"),
+                "health_checked_at": job.get("health_checked_at"),
+            } if job.get("automation_type") == "EC2-Action" or job.get("ec2_health_raw") else {}),
         }, default=decimal_default)
     }
 

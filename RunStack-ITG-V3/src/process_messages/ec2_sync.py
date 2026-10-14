@@ -9,7 +9,9 @@ SAP-specific — it serves EC2 stop/start/status for any app (LH1, Compass,
 etc.) — and keeping it in a file named sap_sync.py was misleading.
 
 SAP-domain requests ({"domain": "sap", ...}) are dispatched to
-handle_sap_action in sap_sync.py; everything else is handled here.
+handle_sap_action in sap_sync.py — except the landscape-level actions
+("sap_status", "ec2_status"), which go to sap_landscape.py; everything
+else is handled here.
 """
 
 import json
@@ -18,6 +20,7 @@ import time as _time
 
 from shared import *
 from sap_sync import handle_sap_action
+import sap_landscape
 
 
 # ── POST /notify-sync — synchronous status-check wrapper ──────────────
@@ -34,6 +37,12 @@ from sap_sync import handle_sap_action
 def handle_notify_sync(event, http_method, path, path_parameters, query_params):
     body_peek = json.loads(event.get("body", "{}"))
     if body_peek.get("domain") == "sap":
+        # Landscape-level actions (sap_status, ec2_status) go to the new
+        # sap_landscape module. Every other SAP action (status/start/stop)
+        # keeps going to the existing handle_sap_action, unchanged.
+        if body_peek.get("action") in sap_landscape.ACTIONS:
+            return sap_landscape.handle_sap_landscape_action(
+                event, http_method, path, path_parameters, query_params)
         return handle_sap_action(event, http_method, path, path_parameters, query_params)
 
     body = json.loads(event.get("body", "{}"))

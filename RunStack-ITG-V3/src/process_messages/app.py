@@ -58,6 +58,7 @@ import dynatrace
 import dr_failover
 import execution_details
 import sql_healthcheck
+import sap_runs
 
 
 def handle_api_gateway_request(event: Dict[str, Any]) -> Dict[str, Any]:
@@ -251,6 +252,10 @@ def process_single_message(record: Dict[str, Any]) -> bool:
         except json.JSONDecodeError as e:
             logger.error(f"Invalid JSON in message body: {str(e)}")
             return False
+
+        # SAP full-stack run progress tick (sap_runs.py) — not a job.
+        if sap_runs.is_tick_message(payload):
+            return sap_runs.handle_run_tick(payload)
 
         if not validate_message_payload(payload):
             logger.error("Message payload validation failed")

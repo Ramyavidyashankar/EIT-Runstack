@@ -13,6 +13,8 @@ from typing import Dict, Any
 import boto3
 from botocore.exceptions import ClientError
 
+import servicenow_incident
+
 # Configure logging
 logger = logging.getLogger()
 logger.setLevel(os.getenv("LOG_LEVEL", "INFO"))
@@ -273,6 +275,17 @@ def process_dynamodb_record(record: Dict[str, Any]) -> bool:
     try:
         # Only process INSERT events (new records)
         event_name = record.get("eventName")
+
+        # Status changes: raise a ServiceNow incident if an EC2 stop/start job
+        # just failed. Never fails the record — job processing is unaffected.
+        if event_name == "MODIFY":
+            ddb = record.get("dynamodb", {})
+            servicenow_incident.handle_job_update(
+                convert_dynamodb_to_json(ddb.get("OldImage", {})) if ddb.get("OldImage") else {},
+                convert_dynamodb_to_json(ddb.get("NewImage", {})) if ddb.get("NewImage") else {},
+            )
+            return True
+
         if event_name != "INSERT":
             logger.info(f"Skipping {event_name} event - only processing INSERT events")
             return True

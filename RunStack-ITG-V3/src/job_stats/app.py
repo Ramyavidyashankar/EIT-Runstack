@@ -24,6 +24,15 @@ For every job insert / status change / delete it:
      (DAY,  YYYY-MM-DD)      jobs created that day, by current status
      (FACET, account#… / automation#… / environment#… / region#…)
                              job count per filter value (for filter lists)
+     (AUTO, <automation>)               per automation, all time
+     (AUTOM#YYYY-MM, <automation>)       per automation, by month created
+     (AUTOD#YYYY-MM-DD, <automation>)    per automation, by day created
+     (AUTOH#YYYY-MM-DDTHH, <automation>) per automation, by hour created
+                             each with the status groups, total, dur_sum /
+                             dur_n (completed runs) and last_at (newest
+                             created_at) — Dashboard "Automation Summary".
+                             <automation> is automation_label (the same name
+                             the Executions "Automation" filter uses).
    Status groups: PENDING, RUNNING, COMPLETED, FAILED (same as jobs.py).
    Each job has a marker item (JOB#<job_id>, M) holding the group it is
    currently counted under. A change moves the job from its old group to
@@ -37,6 +46,8 @@ Manual actions (aws lambda invoke --payload '{"action": …}'):
               the returned start_key); run once after deploying
    backfill_names  add the "Automation name" facet to existing jobs (once,
               after deploying that filter; idempotent and resumable)
+   backfill_automations  add existing jobs to the per-automation counters
+              (once, after deploying them; idempotent and resumable)
    verify     recount from the jobs table and report any difference
 """
 
@@ -234,6 +245,29 @@ def _counter_update(pk, sk, deltas):
     }}
 
 
+def automation_counter_keys(label, hour, day):
+    """(pk, sk) of the per-automation counters a job created in `hour` /
+    `day` contributes to."""
+    return [("AUTO", label), (f"AUTOM#{day[:7]}", label), (f"AUTOD#{day}", label), (f"AUTOH#{hour}", label)]
+
+
+def note_last_at(label, hour, day, created):
+    """Keep last_at = newest created_at on each per-automation counter.
+    Outside the transaction: a max can't be expressed as ADD, and a
+    conditional failure (an older job) must not cancel the counts."""
+    stats = _resource().Table(STATS_TABLE)
+    for pk, sk in automation_counter_keys(label, hour, day):
+        try:
+            stats.update_item(
+                Key={"pk": pk, "sk": sk}, UpdateExpression="SET last_at = :t",
+                ConditionExpression="attribute_not_exists(last_at) OR last_at < :t",
+                ExpressionAttributeValues={":t": created},
+            )
+        except ClientError as e:
+            if e.response.get("Error", {}).get("Code") != "ConditionalCheckFailedException":
+                raise
+
+
 def apply_job_state(job, removed=False):
     """Count `job` under its current status group exactly once. Returns
     'unchanged' | 'counted' | 'moved' | 'removed'."""
@@ -277,6 +311,12 @@ def apply_job_state(job, removed=False):
             deltas["dur_sum"] = deltas.get("dur_sum", 0) + new_dur
             deltas["dur_n"] = deltas.get("dur_n", 0) + 1
 
+        # Per-automation counters: every job counted after they were deployed
+        # carries marker.auto = "1"; older jobs join them through
+        # backfill_automations (not here), so nothing is counted twice.
+        m_label = (marker.get("automation") or label) if marker else label
+        auto = (old_group is None) or bool(marker and marker.get("auto"))
+
         ops = []
         cond_values = {":g": {"S": old_group}} if old_group else {}
         if new_group is None:
@@ -285,11 +325,13 @@ def apply_job_state(job, removed=False):
                                    "ExpressionAttributeValues": cond_values}})
         else:
             item = {"pk": {"S": marker_key["pk"]}, "sk": {"S": "M"}, "group": {"S": new_group},
-                    "hour": {"S": m_hour}, "day": {"S": m_day}, "account": {"S": account}, "automation": {"S": label},
+                    "hour": {"S": m_hour}, "day": {"S": m_day}, "account": {"S": account}, "automation": {"S": m_label or label},
                     "facets": {"L": [{"S": f} for f in (marker.get("facets", facets) if marker else facets)]},
                     "updated": {"S": datetime.utcnow().isoformat()}}
             if new_dur is not None:
                 item["dur"] = {"N": str(new_dur)}
+            if auto:
+                item["auto"] = {"S": "1"}
             put = {"TableName": STATS_TABLE, "Item": item}
             if old_group:
                 put.update(ConditionExpression="#g = :g", ExpressionAttributeNames={"#g": "group"}, ExpressionAttributeValues=cond_values)
@@ -300,6 +342,11 @@ def apply_job_state(job, removed=False):
             op = _counter_update(pk, sk, deltas)
             if op:
                 ops.append(op)
+        if auto and m_label:
+            for pk, sk in automation_counter_keys(m_label, m_hour, m_day):
+                op = _counter_update(pk, sk, deltas)
+                if op:
+                    ops.append(op)
         facet_delta = 1 if old_group is None else (-1 if new_group is None else 0)
         if facet_delta:
             # Remove exactly what was added: the marker's facet list.
@@ -315,6 +362,8 @@ def apply_job_state(job, removed=False):
             raise
         if old_group is None and new_group:
             _note_month(created[:7])
+            if m_label:
+                note_last_at(m_label, m_hour, m_day, created)
         return "removed" if new_group is None else ("counted" if old_group is None else "moved")
     raise RuntimeError(f"Could not update counters for job {job_id} after retries")
 
@@ -468,6 +517,81 @@ def backfill_names(start_key=None, context=None):
         kwargs["ExclusiveStartKey"] = next_key
 
 
+def backfill_automations(start_key=None, context=None, carried_retry=0):
+    """One-off, after deploying the per-automation counters: count every job
+    that was counted before them. Each job is added in ONE transaction that
+    also sets its marker's auto flag, conditional on the marker still holding
+    the same status group and not having the flag — so a job is never
+    counted twice, even if the stream moves it meanwhile (that transaction
+    then fails and the job is retried on the next run). Jobs with no marker
+    yet are counted in full by apply_job_state. Resumable with start_key;
+    writes META/automations when done."""
+    jobs = _resource().Table(JOBS_TABLE)
+    stats = _resource().Table(STATS_TABLE)
+    kwargs = {"ProjectionExpression": "job_id, created_at"}
+    if start_key:
+        kwargs["ExclusiveStartKey"] = start_key
+    seen = added = already = counted = 0
+    # Retries from earlier invocations of this pass (passed back with start_key),
+    # so META/automations is only written when the whole pass had none.
+    retry = int(carried_retry or 0)
+    while True:
+        page = jobs.scan(**kwargs)
+        for j in page.get("Items", []):
+            seen += 1
+            created = utc_created(j.get("created_at"))
+            if not created:
+                continue
+            marker = stats.get_item(Key={"pk": f"JOB#{j['job_id']}", "sk": "M"}, ConsistentRead=True).get("Item")
+            if not marker:
+                full = jobs.get_item(Key={"job_id": j["job_id"]}, ConsistentRead=True).get("Item")
+                if full and apply_job_state(full) == "counted":
+                    counted += 1
+                continue
+            if marker.get("auto"):
+                already += 1
+                continue
+            group, label = marker.get("group"), marker.get("automation")
+            hour, day = marker.get("hour", created[:13]), marker.get("day", created[:10])
+            if not group or not label:
+                continue
+            deltas = {group: 1, "total": 1}
+            if group == "COMPLETED" and marker.get("dur") is not None:
+                deltas.update(dur_sum=int(marker["dur"]), dur_n=1)
+            ops = [{"Update": {
+                "TableName": STATS_TABLE,
+                "Key": {"pk": {"S": f"JOB#{j['job_id']}"}, "sk": {"S": "M"}},
+                "UpdateExpression": "SET #a = :one",
+                "ConditionExpression": "#g = :g AND attribute_not_exists(#a)",
+                "ExpressionAttributeNames": {"#a": "auto", "#g": "group"},
+                "ExpressionAttributeValues": {":one": {"S": "1"}, ":g": {"S": group}},
+            }}] + [_counter_update(pk, sk, deltas) for pk, sk in automation_counter_keys(label, hour, day)]
+            try:
+                _dynamo().transact_write_items(TransactItems=ops)
+            except ClientError as e:
+                if e.response.get("Error", {}).get("Code") not in ("TransactionCanceledException", "TransactionConflictException"):
+                    raise
+                retry += 1   # moved by the stream meanwhile — picked up on the next run
+                continue
+            note_last_at(label, hour, day, created)
+            added += 1
+        next_key = page.get("LastEvaluatedKey")
+        if not next_key:
+            done = retry == 0
+            if done:
+                stats.put_item(Item={"pk": "META", "sk": "automations", "completed_at": datetime.utcnow().isoformat(),
+                                     "jobs_seen": seen})
+            return {"done": done, "jobs_seen": seen, "added": added, "already_counted": already,
+                    "counted_in_full": counted, "to_retry": retry,
+                    **({} if done else {"next": "invoke backfill_automations again (no start_key) to pick up the retries"})}
+        if context is not None and context.get_remaining_time_in_millis() < 60_000:
+            return {"done": False, "jobs_seen": seen, "added": added, "already_counted": already,
+                    "counted_in_full": counted, "to_retry": retry,
+                    "start_key": json.loads(json.dumps(next_key, default=str)),
+                    "next": "invoke again with action backfill_automations, this start_key and this to_retry"}
+        kwargs["ExclusiveStartKey"] = next_key
+
+
 def _plain(o):
     if isinstance(o, Decimal):
         return int(o) if o % 1 == 0 else float(o)
@@ -480,6 +604,8 @@ def lambda_handler(event, context):
         return json.loads(json.dumps(backfill(event.get("start_key"), context), default=_plain))
     if action == "backfill_names":
         return json.loads(json.dumps(backfill_names(event.get("start_key"), context), default=_plain))
+    if action == "backfill_automations":
+        return json.loads(json.dumps(backfill_automations(event.get("start_key"), context, event.get("to_retry", 0)), default=_plain))
     if action == "verify":
         return json.loads(json.dumps(verify(), default=_plain))
     records = (event or {}).get("Records", [])

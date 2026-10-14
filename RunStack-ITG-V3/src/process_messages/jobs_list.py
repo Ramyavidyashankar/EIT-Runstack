@@ -12,8 +12,11 @@ item exists). Until then jobs.py keeps using its existing scan path, so the
 pages work straight after deploy and switch over by themselves.
 
 Views (all on GET /jobs/query, so no new API Gateway route):
-  view=summary  range=24h|3d|7d|30d   cards + chart from counters
-  view=recent   limit=1–25            newest executions (Dashboard table)
+  view=summary      range=24h|3d|7d|30d|90d|all, or from_day/to_day
+                    (custom UTC dates)      cards + chart from counters
+  view=automations  same range params      per-automation totals, success,
+                                            avg duration, last execution
+  view=recent       limit=1–25             newest executions
   (default)     rows page: limit 1–100, cursor, filters, exact total
 """
 
@@ -56,11 +59,17 @@ def _variants(values):
 RANGES = {  # hours, bucket hours ('D' = daily buckets from DAY counters)
     "24h": {"hours": 24, "bucket": 1, "label": "Last 24 hours"},
     "3d": {"hours": 72, "bucket": 3, "label": "Last 3 days"},
-    "7d": {"hours": 168, "bucket": 12, "label": "Last 7 days"},
+    "7d": {"hours": 168, "bucket": 24, "label": "Last 7 days"},
     "30d": {"days": 30, "bucket": "D", "label": "Last 30 days"},
+    "90d": {"days": 90, "bucket": "W", "label": "Last 90 days"},
+    "all": {"bucket": "M", "label": "All time"},
 }
+MAX_CUSTOM_DAYS = 3660
+AUTOMATION_CACHE_SECONDS = int(os.getenv("JOBS_AUTOMATION_CACHE_SECONDS", "20"))
 
 _ready = {"value": None, "checked": 0.0}
+_auto_ready = {"value": None, "checked": 0.0}
+_auto_cache = {}
 _count_cache = {}
 _ddb = None
 
@@ -134,31 +143,111 @@ def _meta_min_month():
     return item.get("min_month")
 
 
+# ── Time windows (shared by view=summary and view=automations) ──────────────
+#
+# Every window is [start, end) in UTC and is built only from whole hours or
+# whole UTC days, so the counters answer it exactly:
+#   24h / 3d / 7d   hour-aligned, ending after the current hour (same window
+#                   as the Executions page's "Last 24 hours" / "Last 7 days")
+#   30d / 90d       UTC days, today included
+#   all             from the first month with a job to the end of today
+#   custom          from_day … to_day (UTC dates, both included)
+# The chart bucket is chosen from the window length.
+
+def _parse_day(v):
+    try:
+        return datetime.strptime(str(v), "%Y-%m-%d")
+    except (TypeError, ValueError):
+        return None
+
+
+def window(range_key=None, from_day=None, to_day=None):
+    """(window dict, error message). window: start, end, bucket kind
+    ('hour' | 'day' | 'week' | 'month'), bucket size, range, label."""
+    now = _now()
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow = today + timedelta(days=1)
+    if from_day or to_day:
+        a, b = _parse_day(from_day), _parse_day(to_day)
+        if not a or not b:
+            return None, "from_day and to_day must both be dates (YYYY-MM-DD)"
+        if b < a:
+            return None, "to_day must be on or after from_day"
+        end = min(b + timedelta(days=1), tomorrow)
+        if end <= a:
+            return None, "the range is in the future"
+        days = (end - a).days
+        if days > MAX_CUSTOM_DAYS:
+            return None, f"a custom range can cover at most {MAX_CUSTOM_DAYS} days"
+        kind, size = ("hour", 1) if days <= 2 else ("day", 1) if days <= 92 else ("week", 7) if days <= 400 else ("month", 1)
+        label = f"{a.strftime('%d %b %Y')} – {(end - timedelta(days=1)).strftime('%d %b %Y')} (UTC)"
+        return {"start": a, "end": end, "kind": kind, "size": size, "range": "custom", "label": label}, None
+    range_key = range_key or "24h"
+    spec = RANGES.get(range_key)
+    if not spec:
+        return None, f"range must be one of {list(RANGES)}"
+    if "hours" in spec:
+        end = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+        return {"start": end - timedelta(hours=spec["hours"]), "end": end, "kind": "hour", "size": spec["bucket"],
+                "range": range_key, "label": spec["label"]}, None
+    if range_key == "all":
+        try:
+            mm = _meta_min_month()
+        except Exception:   # stats table not set up yet (scan fallback)
+            mm = None
+        start = datetime.strptime(mm + "-01", "%Y-%m-%d") if mm else today
+        return {"start": start, "end": tomorrow, "kind": "month", "size": 1, "range": "all", "label": spec["label"]}, None
+    kind, size = ("day", 1) if spec["bucket"] == "D" else ("week", 7)
+    return {"start": today - timedelta(days=spec["days"] - 1), "end": tomorrow, "kind": kind, "size": size,
+            "range": range_key, "label": spec["label"]}, None
+
+
+def _next_month(d):
+    return (d.replace(day=28) + timedelta(days=4)).replace(day=1)
+
+
+def _buckets(w):
+    """[{start, end, keys}] covering the window; keys are HOUR or DAY counters."""
+    out, cur = [], w["start"]
+    while cur < w["end"]:
+        if w["kind"] == "hour":
+            nxt = cur + timedelta(hours=w["size"])
+        elif w["kind"] == "month":
+            nxt = _next_month(cur.replace(day=1))
+        else:
+            nxt = cur + timedelta(days=w["size"])
+        nxt = min(nxt, w["end"])
+        if w["kind"] == "hour":
+            keys = [("HOUR", (cur + timedelta(hours=h)).strftime("%Y-%m-%dT%H")) for h in range(int((nxt - cur).total_seconds() // 3600))]
+        else:
+            keys = [("DAY", (cur + timedelta(days=d)).strftime("%Y-%m-%d")) for d in range((nxt - cur).days)]
+        out.append({"start": cur, "end": nxt, "keys": keys})
+        cur = nxt
+    return out
+
+
+_BUCKET_NAME = {"hour": lambda w: f"{w['size']}h", "day": lambda w: "day", "week": lambda w: "week", "month": lambda w: "month"}
+
+
 # ── view=summary ─────────────────────────────────────────────────────────────
 
-def summary(range_key):
-    spec = RANGES[range_key]
+def summary(range_key=None, from_day=None, to_day=None):
+    """Summary dict, or {"error": message} for a bad range."""
+    w, err = window(range_key, from_day, to_day)
+    if err:
+        return {"error": err}
     now = _now()
-    hour_end = now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    buckets = _buckets(w)
     keys = [("TOTAL", "ALL")]
-    buckets = []
-    if spec["bucket"] == "D":
-        today = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        start = today - timedelta(days=spec["days"] - 1)
-        end = today + timedelta(days=1)
-        for d in range(spec["days"]):
-            day = start + timedelta(days=d)
-            buckets.append({"start": day, "end": day + timedelta(days=1), "keys": [("DAY", day.strftime("%Y-%m-%d"))]})
-    else:
-        start = hour_end - timedelta(hours=spec["hours"])
-        end = hour_end
-        step = spec["bucket"]
-        for b in range(spec["hours"] // step):
-            b_start = start + timedelta(hours=b * step)
-            buckets.append({"start": b_start, "end": b_start + timedelta(hours=step),
-                            "keys": [("HOUR", (b_start + timedelta(hours=h)).strftime("%Y-%m-%dT%H")) for h in range(step)]})
     for b in buckets:
         keys.extend(b["keys"])
+    # Long-running: jobs still RUNNING that started before the previous UTC
+    # hour began (so every one counted has run for over an hour). Exact from
+    # the counters: all-time RUNNING minus RUNNING in the last two hours.
+    hour_now = now.replace(minute=0, second=0, microsecond=0)
+    long_cutoff = hour_now - timedelta(hours=1)
+    recent_hours = [("HOUR", hour_now.strftime("%Y-%m-%dT%H")), ("HOUR", long_cutoff.strftime("%Y-%m-%dT%H"))]
+    keys.extend(k for k in recent_hours if k not in keys)
     items = _batch_get(keys)
 
     totals = {g: 0 for g in GROUPS}
@@ -178,24 +267,131 @@ def summary(range_key):
                             "total": sum(c.values()), **c})
     finished = totals["COMPLETED"] + totals["FAILED"]
     all_time = _group_counts(items.get(("TOTAL", "ALL")))
+    running_recent = sum(_int((items.get(k) or {}).get("RUNNING")) for k in recent_hours)
     return {
         "view": "summary",
-        "range": range_key,
-        "range_label": spec["label"],
-        "from": start.isoformat() + "Z",
-        "to": end.isoformat() + "Z",
-        "bucket": "day" if spec["bucket"] == "D" else f"{spec['bucket']}h",
+        "range": w["range"],
+        "range_label": w["label"],
+        "from": w["start"].isoformat() + "Z",
+        "to": w["end"].isoformat() + "Z",
+        "bucket": _BUCKET_NAME[w["kind"]](w),
         "totals": {**totals, "ALL": sum(totals.values())},
         "success_rate": round(100.0 * totals["COMPLETED"] / finished, 1) if finished else None,
         "avg_duration_seconds": round(dur_sum / dur_n, 1) if dur_n else None,
         "avg_duration_sample": dur_n,
         "active_now": {"RUNNING": all_time["RUNNING"], "PENDING": all_time["PENDING"]},
         "all_time": all_time,
+        "long_running": {"RUNNING": max(0, all_time["RUNNING"] - running_recent),
+                         "started_before": long_cutoff.isoformat() + "Z"},
         "buckets": out_buckets,
         "count_source": "counters",
         "complete": True,
         "generated_at": now.isoformat() + "Z",
     }
+
+
+# ── view=automations ─────────────────────────────────────────────────────────
+
+def automations_ready():
+    """True once job_stats' backfill_automations has completed."""
+    if not JOB_STATS_TABLE:
+        return False
+    now = time.time()
+    if _auto_ready["value"] is not None and now - _auto_ready["checked"] < 60:
+        return _auto_ready["value"]
+    try:
+        item = _stats().get_item(Key={"pk": "META", "sk": "automations"}).get("Item")
+        value = bool(item and item.get("completed_at"))
+    except Exception as e:
+        logger.warning(f"automation counters not available: {e}")
+        value = False
+    _auto_ready.update(value=value, checked=now)
+    return value
+
+
+def automation_partitions(w):
+    """Counter partitions covering the window: whole months, then whole
+    days, then hours at the edges. 'all' is the single all-time partition."""
+    if w["range"] == "all":
+        return ["AUTO"]
+    out, cur, end = [], w["start"], w["end"]
+    while cur < end:
+        if cur.day == 1 and cur.hour == 0 and _next_month(cur) <= end:
+            out.append(f"AUTOM#{cur.strftime('%Y-%m')}")
+            cur = _next_month(cur)
+        elif cur.hour == 0 and cur + timedelta(days=1) <= end:
+            out.append(f"AUTOD#{cur.strftime('%Y-%m-%d')}")
+            cur += timedelta(days=1)
+        else:
+            out.append(f"AUTOH#{cur.strftime('%Y-%m-%dT%H')}")
+            cur += timedelta(hours=1)
+    return out
+
+
+def _query_partition(pk):
+    client = boto3.client("dynamodb")   # low-level clients are thread-safe
+    items, kwargs = [], {"TableName": JOB_STATS_TABLE, "KeyConditionExpression": "pk = :p",
+                         "ExpressionAttributeValues": {":p": {"S": pk}}}
+    while True:
+        resp = client.query(**kwargs)
+        items.extend(resp.get("Items", []))
+        if not resp.get("LastEvaluatedKey"):
+            return items
+        kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
+
+
+def automations(range_key=None, from_day=None, to_day=None, force=False):
+    """Per-automation usage for the window, newest data from the counters.
+    Returns {"error": …} for a bad range, or available False before the
+    backfill has run."""
+    w, err = window(range_key, from_day, to_day)
+    if err:
+        return {"error": err}
+    base = {"view": "automations", "range": w["range"], "range_label": w["label"],
+            "from": w["start"].isoformat() + "Z", "to": w["end"].isoformat() + "Z"}
+    if not automations_ready():
+        return {**base, "available": False, "automations": [],
+                "reason": "Per-automation counters are not set up yet (job_stats backfill_automations)."}
+    cache_key = (w["range"], base["from"], base["to"])
+    hit = _auto_cache.get(cache_key)
+    if hit and not force and time.time() - hit[0] < AUTOMATION_CACHE_SECONDS:
+        return hit[1]
+    from concurrent.futures import ThreadPoolExecutor
+    parts = automation_partitions(w)
+    with ThreadPoolExecutor(max_workers=min(16, len(parts))) as pool:
+        results = list(pool.map(_query_partition, parts))
+    agg = {}
+    for items in results:
+        for it in items:
+            label = it["sk"]["S"]
+            a = agg.setdefault(label, {g: 0 for g in GROUPS} | {"dur_sum": 0, "dur_n": 0, "last_at": None})
+            for g in GROUPS:
+                a[g] += int(it.get(g, {}).get("N", 0))
+            a["dur_sum"] += int(it.get("dur_sum", {}).get("N", 0))
+            a["dur_n"] += int(it.get("dur_n", {}).get("N", 0))
+            last = it.get("last_at", {}).get("S")
+            if last and (a["last_at"] is None or last > a["last_at"]):
+                a["last_at"] = last
+    rows = []
+    for label, a in agg.items():
+        total = sum(a[g] for g in GROUPS)
+        if total <= 0:
+            continue
+        finished = a["COMPLETED"] + a["FAILED"]
+        rows.append({
+            "automation": label, "total": total, **{g: a[g] for g in GROUPS},
+            "success_rate": round(100.0 * a["COMPLETED"] / finished, 1) if finished else None,
+            "avg_duration_seconds": round(a["dur_sum"] / a["dur_n"], 1) if a["dur_n"] else None,
+            "avg_duration_sample": a["dur_n"],
+            "last_at": (a["last_at"] + "Z") if a["last_at"] and not a["last_at"].endswith("Z") else a["last_at"],
+        })
+    rows.sort(key=lambda r: (-r["total"], r["automation"].lower()))
+    body = {**base, "available": True, "automations": rows, "count": len(rows), "partitions_read": len(parts),
+            "generated_at": _now().isoformat() + "Z"}
+    _auto_cache[cache_key] = (time.time(), body)
+    if len(_auto_cache) > 50:
+        _auto_cache.pop(next(iter(_auto_cache)))
+    return body
 
 
 # ── Index paging ─────────────────────────────────────────────────────────────
