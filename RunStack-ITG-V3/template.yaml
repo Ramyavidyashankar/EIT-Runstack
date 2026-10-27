@@ -41,6 +41,20 @@ Parameters:
       fill in and redeploy before this goes anywhere shared/production.
     Default: ""
     
+  pServiceNowSecretArn:
+    Type: String
+    Default: ''
+    Description: >-
+      Optional Secrets Manager ARN (must be named runstack-*) holding the
+      ServiceNow OAuth settings used by process_jobs to raise incidents for
+      EC2 stop/start failures. Blank = ServiceNow incidents disabled.
+
+  pServiceNowDryRun:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: When 'true', process_jobs logs the ServiceNow incident it would raise instead of creating it.
+
   pCrossAccountRoleName:
     Type: String
     Default: runstack-cross-account-role
@@ -87,11 +101,7 @@ Parameters:
     Default: 10000
     Description: API Gateway quota limit (requests per day)
 
-  # ── DR Failover thresholds — same values applied to every AG ────────────────
-  # Not a per-AG DynamoDB table: these are policy decisions (what queue lag is
-  # tolerable), not observable facts, and are assumed identical across AGs.
-  # If a specific AG genuinely needs a different threshold later, that's the
-  # trigger to revisit this — not something to solve preemptively.
+  # DR failover thresholds — same values for every AG.
   pDrMaxLogQueueKB:
     Type: Number
     Default: 1024
@@ -222,10 +232,8 @@ Conditions:
   cCreateDrTestSqlCredentialsSecret: !Equals [!Ref pExistingDrTestSqlCredentialsSecretArn, '']
   cCreateTeamsApproveSharedSecret: !Equals [!Ref pExistingTeamsApproveSharedSecretArn, '']
   cCreateTeamsDrApprovalWebhookUrlSecret: !Equals [!Ref pExistingTeamsDrApprovalWebhookUrlSecretArn, '']
-  cSharePointSecretConfigured: !Not [!Equals [!Ref pSharePointAppSecretArn, '']]
 
 Resources:
-  # SNS Topic for notifications
   rCsaNotificationTopic:
     Type: AWS::SNS::Topic
     Metadata:
@@ -237,7 +245,6 @@ Resources:
       TopicName: !Sub '${pSolutionName}-notifications'
       DisplayName: !Sub '${pSolutionName} Notifications'
 
-  # SNS Subscription for email notifications
   rCsaNotificationSubscription:
     Type: AWS::SNS::Subscription
     Properties:
@@ -245,7 +252,6 @@ Resources:
       Protocol: email
       Endpoint: !Ref pNotificationEmail
 
-  # Cognito User Pool for application-to-application authentication
   rCsaCognitoUserPool:
     Type: AWS::Cognito::UserPool
     DeletionPolicy: Retain
@@ -260,18 +266,14 @@ Resources:
           RequireNumbers: true
           RequireSymbols: true
 
-  # Cognito User Pool Domain
   rCsaCognitoUserPoolDomain:
     Type: AWS::Cognito::UserPoolDomain
     Properties:
       Domain: !Sub '${pSolutionName}-auth-${AWS::AccountId}'
       UserPoolId: !Ref rCsaCognitoUserPool
 
-  # ── Cognito User Pool Groups ──────────────────────────────────────────────────
-  # Group membership controls access to POST /notify via Pre Token Generation trigger
-  # runstack-admins    → full access (trigger + edit schedules + view all)
-  # runstack-operators → trigger automations + view jobs
-  # runstack-readonly  → view jobs and schedules only, no trigger access
+  # Cognito groups → RunStack role (via pre-token): admins = full access,
+  # operators = trigger + view, readonly = view only.
   rCsaRunstackAdminsGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
@@ -293,13 +295,8 @@ Resources:
       GroupName: runstack-readonly
       Description: RunStack read-only access - view jobs and schedules only
 
-  # ── GDBA team group ────────────────────────────────────────────────────────
-  # Membership synced from AzureAD (same mechanism as the legacy groups
-  # above). Does NOT grant a runstack:role by itself — pre_token's
-  # LEGACY_GROUP_ROLE_MAP intentionally does not include this group, so
-  # someone can be GDBA without becoming an admin/operator/viewer. Their
-  # actual capabilities are looked up live from runstack-gdba-access,
-  # scoped per-AG, not baked into the token as a role would be.
+  # GDBA team group: grants no runstack:role by itself; capabilities come
+  # from runstack-gdba-access / runstack-team-capabilities.
   rCsaRunstackTeamGdbaGroup:
     Type: AWS::Cognito::UserPoolGroup
     Properties:
@@ -307,7 +304,6 @@ Resources:
       GroupName: runstack-team-gdba
       Description: GDBA team membership - grants capabilities looked up from runstack-gdba-access, not a RunStack role
 
-  # Cognito User Pool Resource Server
   rCsaCognitoResourceServer:
     Type: AWS::Cognito::UserPoolResourceServer
     Properties:
@@ -318,7 +314,6 @@ Resources:
         - ScopeName: notify
           ScopeDescription: Access to send notifications to RunStack API
 
-  # Cognito User Pool Client for client credentials flow
   rCsaCognitoUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     DependsOn: rCsaCognitoResourceServer
@@ -334,7 +329,6 @@ Resources:
       ExplicitAuthFlows: []
       SupportedIdentityProviders: []
 
-  # Cognito Public SPA Client — for user login via AzureAD SAML
   rCsaCognitoPublicUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     DependsOn:
@@ -360,7 +354,6 @@ Resources:
       ExplicitAuthFlows:
         - ALLOW_REFRESH_TOKEN_AUTH
 
-  # Cognito AzureAD SAML Identity Provider
   rCsaCognitoAzureADIdentityProvider:
     Type: AWS::Cognito::UserPoolIdentityProvider
     Properties:
@@ -373,7 +366,6 @@ Resources:
       AttributeMapping:
         email: 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'
 
-  # API Gateway Authorizer
   rCsaApiAuthorizer:
     Type: AWS::ApiGateway::Authorizer
     Properties:
@@ -384,8 +376,6 @@ Resources:
       ProviderARNs:
         - !GetAtt rCsaCognitoUserPool.Arn
 
-
-  # CloudWatch Log Group for API Gateway Access Logs
   rCsaApiAccessLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Retain
@@ -399,7 +389,6 @@ Resources:
       LogGroupName: !Sub '/aws/apigateway/${pSolutionName}-api-access-logs'
       RetentionInDays: 30
 
-  # IAM Role for API Gateway to write to CloudWatch Logs
   rApiGatewayCloudWatchRole:
     Type: AWS::IAM::Role
     Properties:
@@ -413,13 +402,15 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
 
-  # API Gateway Account Configuration
   rApiGatewayAccount:
     Type: AWS::ApiGateway::Account
     Properties:
       CloudWatchRoleArn: !GetAtt rApiGatewayCloudWatchRole.Arn
 
-  # API Gateway REST API
+  # Routes managed manually (not in this template): /jobs/{jobId}/execution,
+  # /jobs/{jobId}/logs, /jobs/query, /admin/team-capabilities, /admin/cognito-groups,
+  # /batch-healthcheck/options, /dr-failover/{AGName}/runs and /plans.
+  # Redeploy stage v1 after every stack deploy so they stay live.
   rCsaApi:
     Type: AWS::ApiGateway::RestApi
     Properties:
@@ -429,7 +420,6 @@ Resources:
         Types:
           - REGIONAL
 
-  # API Gateway Stage
   rCsaApiStage:
     Type: AWS::ApiGateway::Stage
     Metadata:
@@ -452,7 +442,6 @@ Resources:
           DataTraceEnabled: true
           MetricsEnabled: true
 
-  # API Gateway Usage Plan
   rCsaApiUsagePlan:
     Type: AWS::ApiGateway::UsagePlan
     DependsOn: rCsaApiStage
@@ -469,7 +458,6 @@ Resources:
         Limit: !Ref pQuotaLimit
         Period: DAY
 
-  # API Gateway Deployment
   rCsaApiDeployment:
     Type: AWS::ApiGateway::Deployment
     Metadata:
@@ -507,14 +495,9 @@ Resources:
       - rCsaApiInstancesStatusOptionsMethod
       - rCsaApiGetAssessCheckMethod
       - rCsaApiAssessCheckIdOptionsMethod
-      - rCsaApiGetJobExecutionMethod
-      - rCsaApiJobExecutionOptionsMethod
-      - rCsaApiGetJobLogsMethod
-      - rCsaApiJobLogsOptionsMethod
     Properties:
       RestApiId: !Ref rCsaApi
 
-  # API Gateway Resource
   rCsaApiNotifyResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -522,16 +505,8 @@ Resources:
       ParentId: !GetAtt rCsaApi.RootResourceId
       PathPart: notify
 
-  # API Gateway Method
-  # Consolidated wildcard permission covering every route on this API for
-  # rCsaProcessMessages, replacing individual per-route Lambda::Permission
-  # resources that were removed here. Each per-route permission added ~250-450
-  # bytes to this Lambda's resource-based policy; AWS caps that policy at
-  # 20,480 bytes total, and the accumulated statements had grown past that
-  # limit (deploy failure: "final policy size (20862) is bigger than the
-  # limit (20480)"). A single wildcard SourceArn covering the whole API
-  # avoids this ceiling entirely and scales to any number of future routes
-  # without revisiting this limit again.
+  # One wildcard permission for every route on this API (per-route
+  # permissions exceeded the 20 KB Lambda resource-policy limit).
   rCsaProcessMessagesApiPermissionAll:
     Type: AWS::Lambda::Permission
     Properties:
@@ -560,7 +535,6 @@ Resources:
         - StatusCode: 403
         - StatusCode: 500
 
-  # API Gateway Resource - /jobs
   rCsaApiJobsResourceV2:
     Type: AWS::ApiGateway::Resource
     DeletionPolicy: Delete
@@ -570,7 +544,6 @@ Resources:
       ParentId: !GetAtt rCsaApi.RootResourceId
       PathPart: jobs
 
-  # API Gateway Resource - /jobs/{jobId}
   rCsaApiJobIdResourceV2:
     Type: AWS::ApiGateway::Resource
     DeletionPolicy: Delete
@@ -580,7 +553,6 @@ Resources:
       ParentId: !Ref rCsaApiJobsResourceV2
       PathPart: "{jobId}"
 
-  # API Gateway Resource - /jobs/latest
   rCsaApiLatestJobsResourceV2:
     Type: AWS::ApiGateway::Resource
     DeletionPolicy: Delete
@@ -590,7 +562,6 @@ Resources:
       ParentId: !Ref rCsaApiJobsResourceV2
       PathPart: latest
 
-  # API Gateway Resource - /jobs/recent
   rCsaApiRecentJobsResourceV2:
     Type: AWS::ApiGateway::Resource
     DeletionPolicy: Delete
@@ -600,7 +571,6 @@ Resources:
       ParentId: !Ref rCsaApiJobsResourceV2
       PathPart: recent
 
-  # API Gateway Method - GET /jobs/{jobId}
   rCsaApiGetJobMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -620,7 +590,6 @@ Resources:
         - StatusCode: 404
         - StatusCode: 500
 
-  # API Gateway Method - GET /jobs/latest
   rCsaApiGetLatestJobsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -640,7 +609,6 @@ Resources:
         - StatusCode: 400
         - StatusCode: 500
 
-  # API Gateway Method - GET /jobs/recent
   rCsaApiGetRecentJobsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -660,7 +628,6 @@ Resources:
         - StatusCode: 400
         - StatusCode: 500
 
-  # Lambda permission for API Gateway to invoke GET /jobs/{jobId}
   rCsaApiNotifyOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -687,7 +654,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # API Gateway Method - OPTIONS /jobs/{jobId} (CORS preflight)
   rCsaApiJobIdOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -714,127 +680,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # ── Execution Details: GET /jobs/{jobId}/execution ──────────────────────────
-  # Per-server status, counts, steps and details for one execution.
-  # Read-only; process_messages checks access to the job and its targets
-  # before any SSM / CloudWatch read. Covered by the wildcard
-  # rCsaProcessMessagesApiPermissionAll Lambda permission. After deploying,
-  # redeploy the API stage so the new route is live.
-  rCsaApiJobExecutionResource:
-    Type: AWS::ApiGateway::Resource
-    Properties:
-      RestApiId: !Ref rCsaApi
-      ParentId: !Ref rCsaApiJobIdResourceV2
-      PathPart: execution
-
-  rCsaApiGetJobExecutionMethod:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      RestApiId: !Ref rCsaApi
-      ResourceId: !Ref rCsaApiJobExecutionResource
-      HttpMethod: GET
-      AuthorizationType: COGNITO_USER_POOLS
-      AuthorizerId: !Ref rCsaApiAuthorizer
-      AuthorizationScopes:
-        - !Sub '${pSolutionName}-api/notify'
-      Integration:
-        Type: AWS_PROXY
-        IntegrationHttpMethod: POST
-        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
-      MethodResponses:
-        - StatusCode: 200
-        - StatusCode: 400
-        - StatusCode: 404
-        - StatusCode: 429
-        - StatusCode: 503
-
-  rCsaApiJobExecutionOptionsMethod:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      RestApiId: !Ref rCsaApi
-      ResourceId: !Ref rCsaApiJobExecutionResource
-      HttpMethod: OPTIONS
-      AuthorizationType: NONE
-      Integration:
-        Type: MOCK
-        RequestTemplates:
-          application/json: '{"statusCode": 200}'
-        IntegrationResponses:
-          - StatusCode: 200
-            ResponseParameters:
-              method.response.header.Access-Control-Allow-Origin: "'*'"
-              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
-              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
-            ResponseTemplates:
-              application/json: ''
-      MethodResponses:
-        - StatusCode: 200
-          ResponseParameters:
-            method.response.header.Access-Control-Allow-Origin: true
-            method.response.header.Access-Control-Allow-Methods: true
-            method.response.header.Access-Control-Allow-Headers: true
-
-  # ── Execution Details: GET /jobs/{jobId}/logs ──────────────────────────
-  # Incremental stdout/stderr for one target from CloudWatch Logs.
-  # Read-only; process_messages checks access to the job and its targets
-  # before any SSM / CloudWatch read. Covered by the wildcard
-  # rCsaProcessMessagesApiPermissionAll Lambda permission. After deploying,
-  # redeploy the API stage so the new route is live.
-  rCsaApiJobLogsResource:
-    Type: AWS::ApiGateway::Resource
-    Properties:
-      RestApiId: !Ref rCsaApi
-      ParentId: !Ref rCsaApiJobIdResourceV2
-      PathPart: logs
-
-  rCsaApiGetJobLogsMethod:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      RestApiId: !Ref rCsaApi
-      ResourceId: !Ref rCsaApiJobLogsResource
-      HttpMethod: GET
-      AuthorizationType: COGNITO_USER_POOLS
-      AuthorizerId: !Ref rCsaApiAuthorizer
-      AuthorizationScopes:
-        - !Sub '${pSolutionName}-api/notify'
-      Integration:
-        Type: AWS_PROXY
-        IntegrationHttpMethod: POST
-        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
-      MethodResponses:
-        - StatusCode: 200
-        - StatusCode: 400
-        - StatusCode: 404
-        - StatusCode: 429
-        - StatusCode: 503
-
-  rCsaApiJobLogsOptionsMethod:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      RestApiId: !Ref rCsaApi
-      ResourceId: !Ref rCsaApiJobLogsResource
-      HttpMethod: OPTIONS
-      AuthorizationType: NONE
-      Integration:
-        Type: MOCK
-        RequestTemplates:
-          application/json: '{"statusCode": 200}'
-        IntegrationResponses:
-          - StatusCode: 200
-            ResponseParameters:
-              method.response.header.Access-Control-Allow-Origin: "'*'"
-              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
-              method.response.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
-            ResponseTemplates:
-              application/json: ''
-      MethodResponses:
-        - StatusCode: 200
-          ResponseParameters:
-            method.response.header.Access-Control-Allow-Origin: true
-            method.response.header.Access-Control-Allow-Methods: true
-            method.response.header.Access-Control-Allow-Headers: true
-
-  # API Gateway Method - OPTIONS /jobs/latest (CORS preflight)
   rCsaApiLatestJobsOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -861,7 +706,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # API Gateway Method - OPTIONS /jobs/recent (CORS preflight)
   rCsaApiRecentJobsOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -888,7 +732,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # API Gateway Resource - /auth
   rCsaApiAuthResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -896,7 +739,6 @@ Resources:
       ParentId: !GetAtt rCsaApi.RootResourceId
       PathPart: auth
 
-  # API Gateway Resource - /auth/callback
   rCsaApiAuthCallbackResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -904,7 +746,6 @@ Resources:
       ParentId: !Ref rCsaApiAuthResource
       PathPart: callback
 
-  # API Gateway Method - GET /auth/callback (no auth — public endpoint)
   rCsaApiGetAuthCallbackMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -921,7 +762,6 @@ Resources:
         - StatusCode: 400
         - StatusCode: 500
 
-  # OPTIONS /auth/callback
   rCsaApiAuthCallbackOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -948,7 +788,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # Lambda permission for GET /auth/callback
   rCsaApiUiResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1012,7 +851,6 @@ Resources:
       ParentId: !Ref rCsaApiSsmDocumentsResource
       PathPart: "{name}"
 
-  # API Gateway Method - GET /ssm/documents/{name}
   rCsaApiGetSsmDocumentMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1032,7 +870,6 @@ Resources:
         - StatusCode: 400
         - StatusCode: 500
 
-  # API Gateway Method - OPTIONS /ssm/documents/{name}
   rCsaApiSsmDocumentNameOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1059,7 +896,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # API Gateway Resource - /eventbridge/schedules/{name}
   rCsaApiEventBridgeScheduleNameResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1067,7 +903,6 @@ Resources:
       ParentId: !Ref rCsaApiEventBridgeSchedulesResource
       PathPart: "{name}"
 
-  # API Gateway Method - PUT /eventbridge/schedules/{name}
   rCsaApiPutEventBridgeScheduleMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1087,7 +922,6 @@ Resources:
         - StatusCode: 400
         - StatusCode: 500
 
-  # API Gateway Method - DELETE /eventbridge/schedules/{name}
   rCsaApiDeleteEventBridgeScheduleMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1107,7 +941,6 @@ Resources:
         - StatusCode: 400
         - StatusCode: 500
 
-  # API Gateway Method - POST /eventbridge/schedules
   rCsaApiPostEventBridgeScheduleMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1127,7 +960,6 @@ Resources:
         - StatusCode: 400
         - StatusCode: 500
 
-  # OPTIONS /eventbridge/schedules/{name}
   rCsaApiEventBridgeScheduleNameOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1154,7 +986,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # Lambda permissions for new methods
   rCsaGatewayResponseDefault4XX:
     Type: AWS::ApiGateway::GatewayResponse
     Properties:
@@ -1165,7 +996,6 @@ Resources:
         gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
         gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
 
-  # Gateway Response for 5XX errors (ensures CORS headers on Lambda errors)
   rCsaGatewayResponseDefault5XX:
     Type: AWS::ApiGateway::GatewayResponse
     Properties:
@@ -1176,7 +1006,6 @@ Resources:
         gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'"
         gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
 
-  # API Gateway Resource - /ssm
   rCsaApiSsmResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1184,7 +1013,6 @@ Resources:
       ParentId: !GetAtt rCsaApi.RootResourceId
       PathPart: ssm
 
-  # API Gateway Resource - /ssm/documents
   rCsaApiSsmDocumentsResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1192,7 +1020,6 @@ Resources:
       ParentId: !Ref rCsaApiSsmResource
       PathPart: documents
 
-  # API Gateway Method - GET /ssm/documents
   rCsaApiGetSsmDocumentsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1212,7 +1039,6 @@ Resources:
         - StatusCode: 400
         - StatusCode: 500
 
-  # API Gateway Method - OPTIONS /ssm/documents (CORS preflight)
   rCsaApiSsmDocumentsOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1239,7 +1065,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # API Gateway Resource - /eventbridge
   rCsaApiEventBridgeResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1247,9 +1072,6 @@ Resources:
       ParentId: !GetAtt rCsaApi.RootResourceId
       PathPart: eventbridge
 
-  # ── File Uploads (S3) ────────────────────────────────────────────────────
-
-  # API Gateway Resource - /uploads
   rCsaApiUploadsResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1257,7 +1079,6 @@ Resources:
       ParentId: !GetAtt rCsaApi.RootResourceId
       PathPart: uploads
 
-  # API Gateway Resource - /uploads/presign
   rCsaApiUploadsPresignResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1265,7 +1086,6 @@ Resources:
       ParentId: !Ref rCsaApiUploadsResource
       PathPart: presign
 
-  # API Gateway Resource - /uploads/{key+}  (greedy, to allow nested S3 keys)
   rCsaApiUploadsKeyResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1273,7 +1093,6 @@ Resources:
       ParentId: !Ref rCsaApiUploadsResource
       PathPart: "{key+}"
 
-  # GET /uploads — list uploaded files
   rCsaApiGetUploadsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1319,7 +1138,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # POST /uploads/presign — get a presigned S3 PUT URL
   rCsaApiPostUploadsPresignMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1365,7 +1183,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # DELETE /uploads/{key+} — delete an uploaded file
   rCsaApiDeleteUploadsKeyMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1411,7 +1228,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # Lambda permissions for API Gateway to invoke the uploads routes
   rCsaApiAdminResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1419,7 +1235,6 @@ Resources:
       ParentId: !GetAtt rCsaApi.RootResourceId
       PathPart: admin
 
-  # API Gateway Resource - /admin/users
   rCsaApiAdminUsersResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1427,7 +1242,6 @@ Resources:
       ParentId: !Ref rCsaApiAdminResource
       PathPart: users
 
-  # API Gateway Resource - /admin/users/{username}
   rCsaApiAdminUsersUsernameResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1435,7 +1249,6 @@ Resources:
       ParentId: !Ref rCsaApiAdminUsersResource
       PathPart: "{username}"
 
-  # API Gateway Resource - /admin/users/{username}/role
   rCsaApiAdminUsersRoleResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1443,7 +1256,6 @@ Resources:
       ParentId: !Ref rCsaApiAdminUsersUsernameResource
       PathPart: role
 
-  # GET /admin/users — list users with current role
   rCsaApiGetAdminUsersMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1489,7 +1301,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # POST /admin/users/{username}/role — change a user's role
   rCsaApiPostAdminUsersRoleMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1542,7 +1353,6 @@ Resources:
       ParentId: !Ref rCsaApiEventBridgeResource
       PathPart: schedules
 
-  # API Gateway Method - GET /eventbridge/schedules
   rCsaApiGetEventBridgeSchedulesMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1562,7 +1372,6 @@ Resources:
         - StatusCode: 400
         - StatusCode: 500
 
-  # API Gateway Method - OPTIONS /eventbridge/schedules (CORS preflight)
   rCsaApiEventBridgeSchedulesOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1589,7 +1398,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # Lambda permission for API Gateway to invoke GET /jobs/recent
   rCsaApiJobsDlqResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1597,7 +1405,6 @@ Resources:
       ParentId: !Ref rCsaApiJobsResourceV2
       PathPart: dlq
 
-  # API Gateway Method - GET /jobs/dlq
   rCsaApiGetJobsDlqMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1617,7 +1424,6 @@ Resources:
         - StatusCode: 400
         - StatusCode: 500
 
-  # API Gateway Method - DELETE /jobs/dlq
   rCsaApiDeleteJobsDlqMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1637,7 +1443,6 @@ Resources:
         - StatusCode: 400
         - StatusCode: 500
 
-  # API Gateway Method - OPTIONS /jobs/dlq (CORS preflight)
   rCsaApiJobsDlqOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1664,7 +1469,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # Lambda permission for GET /jobs/dlq
   rCsaApiInstancesResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1672,13 +1476,7 @@ Resources:
       ParentId: !GetAtt rCsaApi.RootResourceId
       PathPart: instances
 
-  # API Gateway Resource - /app-instances
-  # Note: PathPart 'app-instances' used instead of 'instances' due to a
-  # corporate network/proxy device intercepting requests whose path matched
-  # the literal string '/instances' and returning a synthetic 403
-  # IncompleteSignatureException before reaching API Gateway. Confirmed via
-  # testing on 2026-06-18 — query string appended to /instances bypassed the
-  # block, isolating it to exact-path matching outside of AWS.
+  # 'app-instances' instead of 'instances': the corporate proxy blocks the exact path /instances.
   rCsaApiAppInstancesResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1686,13 +1484,7 @@ Resources:
       ParentId: !GetAtt rCsaApi.RootResourceId
       PathPart: app-instances
 
-  # ── Machine-only agent catalog lookup (separate from /app-instances) ──────
-  # Dedicated to system/agent callers (Database Healthcheck Agent etc.) that
-  # need server_name → instance_id resolution without user-scoping. Kept as
-  # its own resource/route so /app-instances' user-scoped logic — relied on
-  # by other agents — is never touched by this one.
-
-  # API Gateway Resource - /agent
+  # /agent/instances — machine-only catalog lookup for agents (no user scoping).
   rCsaApiAgentResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1700,7 +1492,6 @@ Resources:
       ParentId: !GetAtt rCsaApi.RootResourceId
       PathPart: agent
 
-  # API Gateway Resource - /agent/instances
   rCsaApiAgentInstancesResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -1708,7 +1499,6 @@ Resources:
       ParentId: !Ref rCsaApiAgentResource
       PathPart: instances
 
-  # GET /agent/instances — machine-only catalog lookup
   rCsaApiGetAgentInstancesMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1864,7 +1654,6 @@ Resources:
       ParentId: !Ref rCsaApiDynatraceAgNameResource
       PathPart: roles
 
-  # GET /dynatrace/ags
   rCsaApiGetDynatraceAgsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1909,7 +1698,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # GET /dynatrace/ags/{AGName}/servers
   rCsaApiGetDynatraceAgServersMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -1955,7 +1743,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # GET /dynatrace/ags/{AGName}/roles
   rCsaApiGetDynatraceAgRolesMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -2050,7 +1837,6 @@ Resources:
       ParentId: !Ref rCsaApiDrFailoverStatusResource
       PathPart: "{RunId}"
 
-  # GET /dr-failover/{AGName}/config
   rCsaApiGetDrConfigMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -2096,7 +1882,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # POST /dr-failover/{AGName}/plan — pre-validation only, issues one-time token
   rCsaApiPostDrPlanMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -2142,7 +1927,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # POST /dr-failover/{AGName}/execute — requires valid token from /plan
   rCsaApiPostDrExecuteMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -2189,7 +1973,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # GET /dr-failover/{AGName}/status/{RunId}
   rCsaApiGetDrStatusMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -2476,7 +2259,6 @@ Resources:
       MethodResponses:
         - StatusCode: 200
 
-
   rCsaApiNotifySyncDbStopResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -2500,7 +2282,6 @@ Resources:
         Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
       MethodResponses:
         - StatusCode: 200
-
 
   rCsaApiNotifySyncAscsStartResource:
     Type: AWS::ApiGateway::Resource
@@ -2526,7 +2307,6 @@ Resources:
       MethodResponses:
         - StatusCode: 200
 
-
   rCsaApiNotifySyncAscsStopResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -2550,7 +2330,6 @@ Resources:
         Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
       MethodResponses:
         - StatusCode: 200
-
 
   rCsaApiNotifySyncPasStartResource:
     Type: AWS::ApiGateway::Resource
@@ -2576,7 +2355,6 @@ Resources:
       MethodResponses:
         - StatusCode: 200
 
-
   rCsaApiNotifySyncPasStopResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -2601,7 +2379,6 @@ Resources:
       MethodResponses:
         - StatusCode: 200
 
-
   rCsaApiNotifySyncAasStartResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -2625,7 +2402,6 @@ Resources:
         Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${rCsaProcessMessages.Arn}/invocations'
       MethodResponses:
         - StatusCode: 200
-
 
   rCsaApiNotifySyncAasStopResource:
     Type: AWS::ApiGateway::Resource
@@ -2675,10 +2451,6 @@ Resources:
       MethodResponses:
         - StatusCode: 200
 
-  # Added — the live manually-created route had no OPTIONS method, which
-  # meant it was never actually callable from a browser (only tools like
-  # curl/Postman that don't send a CORS preflight). The React UI's polling
-  # call fails at the preflight stage without this.
   rCsaApiDynatraceAgRolesJobIdOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -2762,7 +2534,6 @@ Resources:
       ParentId: !Ref rCsaApiInstancesResource
       PathPart: status
 
-  # API Gateway Method - POST /instances/status
   rCsaApiInstancesStatusMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -2782,7 +2553,6 @@ Resources:
         - StatusCode: 400
         - StatusCode: 500
 
-  # API Gateway Method - OPTIONS /instances/status (CORS preflight)
   rCsaApiInstancesStatusOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -2809,7 +2579,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # Lambda permission for POST /instances/status
   rCsaApiAssessResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -2817,7 +2586,6 @@ Resources:
       ParentId: !GetAtt rCsaApi.RootResourceId
       PathPart: assess
 
-  # API Gateway Resource - /assess/{checkId}
   rCsaApiAssessCheckIdResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -2825,7 +2593,6 @@ Resources:
       ParentId: !Ref rCsaApiAssessResource
       PathPart: "{checkId}"
 
-  # API Gateway Method - GET /assess/{checkId}
   rCsaApiGetAssessCheckMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -2845,7 +2612,6 @@ Resources:
         - StatusCode: 404
         - StatusCode: 500
 
-  # API Gateway Method - OPTIONS /assess/{checkId} (CORS preflight)
   rCsaApiAssessCheckIdOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -2872,7 +2638,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # Lambda permission for GET /assess/{checkId}
   rCsaApiSyntheticResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -2880,7 +2645,6 @@ Resources:
       ParentId: !GetAtt rCsaApi.RootResourceId
       PathPart: synthetic
 
-  # API Gateway Resource - /synthetic/execute
   rCsaApiSyntheticExecuteResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -2888,7 +2652,6 @@ Resources:
       ParentId: !Ref rCsaApiSyntheticResource
       PathPart: execute
 
-  # API Gateway Method - POST /synthetic/execute
   rCsaApiSyntheticExecuteMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -2909,7 +2672,6 @@ Resources:
         - StatusCode: 404
         - StatusCode: 500
 
-  # API Gateway Method - OPTIONS /synthetic/execute (CORS preflight)
   rCsaApiSyntheticExecuteOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -2936,7 +2698,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # Lambda permission for POST /synthetic/execute
   rCsaApiSyntheticJobIdResource:
     Type: AWS::ApiGateway::Resource
     Properties:
@@ -2944,7 +2705,6 @@ Resources:
       ParentId: !Ref rCsaApiSyntheticResource
       PathPart: "{syntheticJobId}"
 
-  # API Gateway Method - GET /synthetic/{syntheticJobId}
   rCsaApiGetSyntheticJobMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -2964,7 +2724,6 @@ Resources:
         - StatusCode: 404
         - StatusCode: 500
 
-  # API Gateway Method - OPTIONS /synthetic/{syntheticJobId} (CORS preflight)
   rCsaApiSyntheticJobIdOptionsMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -2991,7 +2750,6 @@ Resources:
             method.response.header.Access-Control-Allow-Methods: true
             method.response.header.Access-Control-Allow-Headers: true
 
-  # Lambda permission for GET /synthetic/{syntheticJobId}
   rApiGatewaySqsRole:
     Type: AWS::IAM::Role
     Properties:
@@ -3012,7 +2770,6 @@ Resources:
                   - sqs:SendMessage
                 Resource: !GetAtt rCsaNotificationQueue.Arn
 
-  # Dead Letter Queue
   rCsaNotificationDlq:
     Type: AWS::SQS::Queue
     DeletionPolicy: Retain
@@ -3022,7 +2779,6 @@ Resources:
       KmsMasterKeyId: alias/aws/sqs
       MessageRetentionPeriod: 1209600  # 14 days
 
-  # Main SQS Queue
   rCsaNotificationQueue:
     Type: AWS::SQS::Queue
     DeletionPolicy: Retain
@@ -3035,7 +2791,6 @@ Resources:
         deadLetterTargetArn: !GetAtt rCsaNotificationDlq.Arn
         maxReceiveCount: 3
 
-  # CloudWatch Alarm for DLQ
   rCsaDlqCwAlarm:
     Type: AWS::CloudWatch::Alarm
     Metadata:
@@ -3059,7 +2814,6 @@ Resources:
       AlarmActions:
         - !Ref rCsaNotificationTopic
 
-  # DynamoDB Table
   rCsaJobsTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -3083,8 +2837,6 @@ Resources:
           AttributeType: S
         - AttributeName: notification_id
           AttributeType: S
-        # Execution Details: explicit bulk-run grouping (sparse — only jobs
-        # created by RunStack's bulk producers carry execution_group_id).
         - AttributeName: execution_group_id
           AttributeType: S
         - AttributeName: created_at
@@ -3121,17 +2873,41 @@ Resources:
               - app_id
               - environment
 
-# ========================================================================
-# REMOVED: Security Groups and VPC Endpoints
-# These resources are now pre-configured by the network team
-# References changed to use parameters: pExistingLambdaSecurityGroupId and pExistingEndpointSecurityGroupId
-# ========================================================================
+  # Shared by all RunStack Lambdas: CRUD on runstack-* DynamoDB tables and
+  # indexes, read on runstack-* secrets. New runstack-* tables/secrets need
+  # no IAM change. Requires pSolutionName = runstack.
+  rCsaLambdaSharedDataAccessPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub '${pSolutionName}-lambda-shared-data-access-${AWS::Region}'
+      Description: RunStack Lambdas - CRUD on runstack-* DynamoDB tables and read on runstack-* secrets
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: RunStackDynamoDBAllTables
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:PutItem
+              - dynamodb:UpdateItem
+              - dynamodb:DeleteItem
+              - dynamodb:Query
+              - dynamodb:Scan
+              - dynamodb:BatchGetItem
+              - dynamodb:BatchWriteItem
+              - dynamodb:DescribeTable
+              - dynamodb:ConditionCheckItem
+            Resource:
+              - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/runstack-*'
+              - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/runstack-*/index/*'
+          - Sid: RunStackSecretsRead
+            Effect: Allow
+            Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:DescribeSecret
+            Resource: !Sub 'arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:runstack-*'
 
-  # ── Pre Token Generation Lambda ───────────────────────────────────────────────
-  # IMPORTANT: This Lambda intentionally has NO VpcConfig.
-  # Cognito Pre Token Generation triggers invoke Lambda synchronously and cannot
-  # reach functions in private subnets without a Cognito VPC endpoint.
-  # All other Lambdas in this stack are in VPC — this one must remain public.
+  # No VpcConfig: Cognito cannot invoke a VPC Lambda without a Cognito VPC endpoint.
   rCsaPreTokenFunction:
     Type: AWS::Serverless::Function
     Metadata:
@@ -3145,7 +2921,6 @@ Resources:
       FunctionName: !Sub '${pSolutionName}-pre-token'
       CodeUri: src/pre_token/
       Handler: app.lambda_handler
-      # No VpcConfig — Cognito cannot invoke VPC Lambdas without Cognito VPC endpoint
       Environment:
         Variables:
           APP_ACCESS_TABLE: !Ref rCsaAppAccessTable
@@ -3156,36 +2931,16 @@ Resources:
             - Effect: Allow
               Action:
                 - cognito-idp:AdminListGroupsForUser
-              # Using Sub instead of !GetAtt rCsaCognitoUserPool.Arn to avoid
-              # circular dependency: UserPool→PreTokenFunction→UserPool
+              # !Sub instead of !GetAtt avoids a UserPool → PreTokenFunction → UserPool cycle.
               Resource: !Sub 'arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/*'
-            # Consolidated: same action set / resource pattern as
-            # rCsaProcessMessages, so any new runstack-* table (or new
-            # action need on an existing one) needs no IAM change here.
-            - Sid: RunStackDynamoDBAllTables
-              Effect: Allow
-              Action:
-                - dynamodb:GetItem
-                - dynamodb:PutItem
-                - dynamodb:UpdateItem
-                - dynamodb:DeleteItem
-                - dynamodb:Query
-                - dynamodb:Scan
-                - dynamodb:BatchGetItem
-                - dynamodb:BatchWriteItem
-                - dynamodb:DescribeTable
-                - dynamodb:ConditionCheckItem
-              Resource:
-                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/runstack-*'
-                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/runstack-*/index/*'
             - Effect: Allow
               Action:
                 - logs:CreateLogGroup
                 - logs:CreateLogStream
                 - logs:PutLogEvents
               Resource: '*'
+        - !Ref rCsaLambdaSharedDataAccessPolicy
 
-  # Cognito permission to invoke Pre Token Lambda
   rCsaPreTokenFunctionPermission:
     Type: AWS::Lambda::Permission
     Properties:
@@ -3194,7 +2949,6 @@ Resources:
       Principal: cognito-idp.amazonaws.com
       SourceArn: !GetAtt rCsaCognitoUserPool.Arn
 
-  # IAM Role for the attach trigger custom resource Lambda
   rCsaAttachPreTokenTriggerRole:
     Type: AWS::IAM::Role
     Properties:
@@ -3223,8 +2977,7 @@ Resources:
                   - logs:PutLogEvents
                 Resource: '*'
 
-  # Custom Resource Lambda to attach Pre Token trigger to UserPool
-  # Uses AWS::Lambda::Function (not SAM) because InlineCode requires it
+  # Plain AWS::Lambda::Function (not SAM) because it uses InlineCode.
   rCsaAttachPreTokenTriggerFunction:
     Type: AWS::Lambda::Function
     Properties:
@@ -3266,7 +3019,6 @@ Resources:
       UserPoolId: !Ref rCsaCognitoUserPool
       LambdaArn: !GetAtt rCsaPreTokenFunction.Arn
 
-  # Lambda function to process SQS messages
   rCsaProcessMessages:
     Type: AWS::Serverless::Function
     Metadata:
@@ -3318,15 +3070,13 @@ Resources:
           DR_TOKENS_TABLE: !Ref rCsaDrTokensTable
           GDBA_ACCESS_TABLE: !Ref rCsaGdbaAccessTable
           TEAM_CAPABILITIES_TABLE: !Ref rCsaTeamCapabilitiesTable
-          # Execution Details (execution_details.py)
           WORKFLOW_ARN: !Ref rCsaWorkflow
           EXECUTION_GROUP_INDEX: execution-group-index
           RUNSTACK_EXECUTION_REGIONS: 'us-east-1,us-west-2'
           RUNSTACK_CENTRAL_ACCOUNT_ID: !Ref AWS::AccountId
           SSM_OUTPUT_LOG_GROUP: /aws/ssm/runstack
           SSM_CLOUDWATCH_OUTPUT_ENABLED: 'false'
-          # Same thresholds for every AG — deploy-time parameters, not a
-          # per-AG DynamoDB table. See pDrMaxLogQueueKB etc. in Parameters.
+          JOB_STATS_TABLE: runstack-job-stats
           DR_MAX_LOG_QUEUE_KB: !Ref pDrMaxLogQueueKB
           DR_MAX_TXN_MINUTES: !Ref pDrMaxTxnMinutes
           DR_CONFIRM_TIMEOUT_SEC: !Ref pDrConfirmTimeoutSec
@@ -3352,38 +3102,9 @@ Resources:
                 - ec2:AssignPrivateIpAddresses
                 - ec2:UnassignPrivateIpAddresses
               Resource: '*'
+        - !Ref rCsaLambdaSharedDataAccessPolicy
         - Version: '2012-10-17'
           Statement:
-            # ============================================================
-            # CONSOLIDATED: full CRUD on every runstack-* table + its GSIs,
-            # one statement. Any new table (and any new capability needed
-            # on an existing one, including InstanceCatalog/UiLogins) is
-            # covered automatically — no IAM edit or ServiceNow ticket
-            # needed when tables are added. Replaces the 7 individual
-            # DynamoDBCrudPolicy/ReadPolicy/WritePolicy entries plus the
-            # AppAccess/InstanceCatalog/UserRoles/UiLogins statements this
-            # Lambda used to carry.
-            # ============================================================
-            - Sid: RunStackDynamoDBAllTables
-              Effect: Allow
-              Action:
-                - dynamodb:GetItem
-                - dynamodb:PutItem
-                - dynamodb:UpdateItem
-                - dynamodb:DeleteItem
-                - dynamodb:Query
-                - dynamodb:Scan
-                - dynamodb:BatchGetItem
-                - dynamodb:BatchWriteItem
-                - dynamodb:DescribeTable
-                - dynamodb:ConditionCheckItem
-              Resource:
-                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/runstack-*'
-                - !Sub 'arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/runstack-*/index/*'
-        - Version: '2012-10-17'
-          Statement:
-            # Added to match production — used for the admin cognito-groups
-            # lookup endpoints (list groups / members of a group).
             - Sid: RunStackListCognitoGroups
               Effect: Allow
               Action:
@@ -3398,29 +3119,6 @@ Resources:
                 - ssm:SendCommand
                 - ssm:GetCommandInvocation
               Resource: '*'
-            # NOTE: SharePoint client_secret is currently hardcoded in app.py
-            # for local testing (SHAREPOINT_CLIENT_SECRET_HARDCODED). Once the
-            # real Secrets Manager secret exists, set pSharePointAppSecretArn
-            # to its ARN and add back:
-            #   - Sid: RunStackSharePointSecretRead
-            #     Effect: Allow
-            #     Action:
-            #       - secretsmanager:GetSecretValue
-            #     Resource: !Ref pSharePointAppSecretArn
-            # ^ done — runstack-sharepoint-app-secret now exists. Wrapped in
-            # Fn::If (rather than an unconditional statement) so this is
-            # omitted entirely when pSharePointAppSecretArn is blank, instead
-            # of being included with Resource: "" — an invalid empty ARN that
-            # sat unnoticed in the live IAM policy until CloudFormation's
-            # newer early-validation hook started flagging it.
-            - !If
-              - cSharePointSecretConfigured
-              - Sid: RunStackSharePointSecretRead
-                Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
-                Resource: !Ref pSharePointAppSecretArn
-              - !Ref AWS::NoValue
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
@@ -3498,43 +3196,30 @@ Resources:
               Resource: !GetAtt rCsaCognitoUserPool.Arn
         - Version: '2012-10-17'
           Statement:
-            - Sid: RunStackDynatraceFetchTokenRead
-              Effect: Allow
-              Action:
-                - secretsmanager:GetSecretValue
-              Resource: !If [cCreateDynatraceFetchSecret, !Ref rDynatraceFetchApiToken, !Ref pExistingDynatraceFetchSecretArn]
-            - Sid: RunStackDynatraceTriggerTokenRead
-              Effect: Allow
-              Action:
-                - secretsmanager:GetSecretValue
-              Resource: !If [cCreateDynatraceTriggerSecret, !Ref rDynatraceTriggerApiToken, !Ref pExistingDynatraceTriggerSecretArn]
-            - Sid: RunStackDynatraceSyntheticFetchTokenRead
-              Effect: Allow
-              Action:
-                - secretsmanager:GetSecretValue
-              Resource: !If [cCreateDynatraceSyntheticFetchSecret, !Ref rDynatraceSyntheticFetchApiToken, !Ref pExistingDynatraceSyntheticFetchSecretArn]
             - Sid: RunStackDynatraceCatalogRead
               Effect: Allow
               Action:
                 - s3:GetObject
               Resource: !Sub '${rCsaSchedulerBucket.Arn}/app-catalogs/*'
-            - Sid: RunStackDrTestSqlCredentialsRead
+        - Version: '2012-10-17'
+          Statement:
+            - Sid: RunStackWorkflowHistoryRead
               Effect: Allow
               Action:
-                - secretsmanager:GetSecretValue
-              Resource: !If [cCreateDrTestSqlCredentialsSecret, !Ref rDrTestSqlCredentials, !Ref pExistingDrTestSqlCredentialsSecretArn]
-            - Sid: RunStackTeamsApproveSharedSecretRead
+                - states:GetExecutionHistory
+                - states:DescribeExecution
+              Resource: !Sub 'arn:aws:states:${AWS::Region}:${AWS::AccountId}:execution:${pSolutionName}-workflow:*'
+            - Sid: RunStackSchedulerList
               Effect: Allow
               Action:
-                - secretsmanager:GetSecretValue
-              Resource: !If [cCreateTeamsApproveSharedSecret, !Ref rTeamsApproveSharedSecret, !Ref pExistingTeamsApproveSharedSecretArn]
-            - Sid: RunStackTeamsDrApprovalWebhookUrlRead
+                - scheduler:ListSchedules
+              Resource: '*'
+            - Sid: RunStackSsmDocumentVersions
               Effect: Allow
               Action:
-                - secretsmanager:GetSecretValue
-              Resource: !If [cCreateTeamsDrApprovalWebhookUrlSecret, !Ref rTeamsDrApprovalWebhookUrl, !Ref pExistingTeamsDrApprovalWebhookUrlSecretArn]
+                - ssm:ListDocumentVersions
+              Resource: '*'
 
-  # Lambda function to process DynamoDB streams
   rCsaProcessJobs:
     Type: AWS::Serverless::Function
     Metadata:
@@ -3556,6 +3241,10 @@ Resources:
       Environment:
         Variables:
           STEP_FUNCTION_ARN: !Ref rCsaWorkflow
+          INSTANCE_CATALOG_TABLE: !Ref rCsaInstanceCatalogTable
+          # ServiceNow incidents are disabled while SERVICENOW_SECRET_ARN is blank.
+          SERVICENOW_SECRET_ARN: !Ref pServiceNowSecretArn
+          SERVICENOW_DRY_RUN: !Ref pServiceNowDryRun
       Events:
         DynamoDBStream:
           Type: DynamoDB
@@ -3590,8 +3279,8 @@ Resources:
                 - logs:CreateLogStream
                 - logs:PutLogEvents
               Resource: '*'
+        - !Ref rCsaLambdaSharedDataAccessPolicy
 
-  # S3 Bucket for scheduler instance lists and SSM outputs
   rCsaSchedulerBucket:
     Type: AWS::S3::Bucket
     DeletionPolicy: Retain
@@ -3615,33 +3304,6 @@ Resources:
             Status: Enabled
             NoncurrentVersionExpirationInDays: 30
 
-  # S3 Bucket Policy to allow cross-account SSM to write outputs
-  #rCsaSchedulerBucketPolicy:
-  #  Type: AWS::S3::BucketPolicy
-  #  Properties:
-  #    Bucket: !Ref rCsaSchedulerBucket
-  #    PolicyDocument:
-  #      Version: '2012-10-17'
-  #      Statement:
-  #        - Sid: AllowCrossAccountSSMOutputs
-  #          Effect: Allow
-  #          Principal:
-  #            AWS: !Sub 'arn:aws:iam::*:role/${pCrossAccountRoleName}'
-  #          Action:
-  #            - s3:PutObject
-  #            - s3:PutObjectAcl
-  #            - s3:GetObject
-  #          Resource: !Sub '${rCsaSchedulerBucket.Arn}/ssm-outputs/*'
-  #        - Sid: AllowCrossAccountBucketAccess
-  #          Effect: Allow
-  #          Principal:
-  #            AWS: !Sub 'arn:aws:iam::*:role/${pCrossAccountRoleName}'
-  #          Action:
-  #            - s3:GetBucketLocation
-  #            - s3:ListBucket
-  #          Resource: !GetAtt rCsaSchedulerBucket.Arn
-
-  # Lambda function for scheduled automation
   rCsaJobScheduler:
     Type: AWS::Serverless::Function
     Metadata:
@@ -3676,6 +3338,7 @@ Resources:
             BucketName: !Ref rCsaSchedulerBucket
         - SQSSendMessagePolicy:
             QueueName: !GetAtt rCsaNotificationQueue.QueueName
+        - !Ref rCsaLambdaSharedDataAccessPolicy
         - Version: '2012-10-17'
           Statement:
             - Effect: Allow
@@ -3685,7 +3348,6 @@ Resources:
                 - logs:PutLogEvents
               Resource: '*'
 
-  # IAM Role for Step Function
   rCsaWorkflowRole:
     Type: AWS::IAM::Role
     Metadata:
@@ -3744,13 +3406,8 @@ Resources:
                   - sns:Publish
                 Resource: !Ref rCsaNotificationTopic
 
-  # Secrets Manager secrets holding the two Dynatrace API tokens used by the
-  # /synthetic/execute and /synthetic/{jobId} endpoints — Dynatrace commonly
-  # scopes a read-only token (fetch monitors) separately from a token that
-  # can trigger executions. Each is only created when its corresponding
-  # pExistingDynatrace*SecretArn param is blank. Initial values are
-  # placeholders — after deploy, update them with:
-  #   aws secretsmanager put-secret-value --secret-id <name> --secret-string '<token>'
+  # Secrets below are created only when the matching pExisting*SecretArn is blank.
+  # Set the real value after deploy: aws secretsmanager put-secret-value.
   rDynatraceFetchApiToken:
     Type: AWS::SecretsManager::Secret
     Condition: cCreateDynatraceFetchSecret
@@ -3775,10 +3432,6 @@ Resources:
       Description: Dynatrace API token (Api-Token auth) used to fetch/resolve synthetic monitors specifically
       SecretString: 'REPLACE_ME_AFTER_DEPLOY'
 
-  # DR test SQL credentials + Teams approval secrets — same
-  # create-unless-existing-ARN-supplied pattern as the Dynatrace tokens
-  # above. Initial values are placeholders — after deploy, update with:
-  #   aws secretsmanager put-secret-value --secret-id <name> --secret-string '<value>'
   rDrTestSqlCredentials:
     Type: AWS::SecretsManager::Secret
     Condition: cCreateDrTestSqlCredentialsSecret
@@ -3803,7 +3456,6 @@ Resources:
       Description: Power Automate webhook URL (contains embedded auth signature) for posting the DR approval Teams card
       SecretString: 'REPLACE_ME_AFTER_DEPLOY'
 
-  # Step Function State Machine
   rCsaWorkflow:
     Type: AWS::Serverless::StateMachine
     Metadata:
@@ -3822,7 +3474,6 @@ Resources:
         NotificationTopicArn: !Ref rCsaNotificationTopic
       Role: !GetAtt rCsaWorkflowRole.Arn
 
-  # CloudWatch Alarm for API Gateway Throttling
   rCsaApiThrottleAlarm:
     Type: AWS::CloudWatch::Alarm
     Metadata:
@@ -3849,7 +3500,6 @@ Resources:
       AlarmActions:
         - !Ref rCsaNotificationTopic
 
-  # CloudWatch Alarm for Lambda Concurrent Executions
   rCsaLambdaConcurrencyAlarm:
     Type: AWS::CloudWatch::Alarm
     Metadata:
@@ -3871,8 +3521,6 @@ Resources:
       AlarmActions:
         - !Ref rCsaNotificationTopic
 
-
-  # ── App Access Table ─────────────────────────────────────────────────────────
   rCsaAppAccessTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -3894,10 +3542,7 @@ Resources:
         - Key: Solution
           Value: !Ref pSolutionName
 
-  # Split from runstack-app-access: that table is scoping-only (which apps a
-  # user can see). This table is role-only (admin/operator/viewer) — one row
-  # per person, eliminating the "which row do I set role on" ambiguity that
-  # came from storing a global property per-app-row.
+  # One role per user (admin/operator/viewer); runstack-app-access holds app scoping only.
   rCsaUserRolesTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -3915,11 +3560,7 @@ Resources:
         - Key: Solution
           Value: !Ref pSolutionName
 
-  # ── UI Local Login Table ──────────────────────────────────────────────────────
-  # Separate from runstack-user-roles / Cognito — used only so the React UI
-  # can identify the person at the browser for button-level role gating in
-  # the UI itself (Admin/Operator/Viewer). Does not affect AzureAD, the
-  # agent, or any machine-token (Dynatrace/EventBridge) flows.
+  # Local UI login for button-level role gating only; not used by AzureAD or machine tokens.
   rCsaUiLoginsTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -3937,13 +3578,6 @@ Resources:
         - Key: Solution
           Value: !Ref pSolutionName
 
-  # ── Instance Catalog Table ────────────────────────────────────────────────────
-  # Recreated under IaC — was manually created, ITG test data only,
-  # confirmed safe to delete-and-recreate (not production yet). Delete the
-  # manual table/API resources BEFORE deploying this template.
-  # Schema confirmed via live scan: AppId (S, HASH only, no sort key/GSI),
-  # ApplicationName (S), Enabled (BOOL), Agents (L of M: Selection (S), AgentName (S)),
-  # LastUpdated (S).
   rCsaTidalAgentMappingTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -3961,14 +3595,6 @@ Resources:
         - Key: Solution
           Value: !Ref pSolutionName
 
-  # NOTE: The original rCsaDrConfigTable (per-AG instance identity + thresholds)
-  # was removed. Instance identity (which host is currently Primary/DR replica)
-  # is now derived live from the Dynatrace + SQL role query every time — a
-  # static "east/west" config went stale the moment a failover happened, since
-  # roles flip. Thresholds are the same across all AGs (see pDrMaxLogQueueKB
-  # etc. below), so they're deploy-time parameters, not per-AG DynamoDB rows.
-
-  # ── DR Run Log Table (plan/execute history, queryable by AG) ──────────────────
   rCsaDrRunLogTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -3999,7 +3625,6 @@ Resources:
         - Key: Solution
           Value: !Ref pSolutionName
 
-  # ── DR Confirmation Tokens (short-lived, TTL-expiring, plan→execute gate) ──────
   rCsaDrTokensTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Delete
@@ -4020,13 +3645,7 @@ Resources:
         - Key: Solution
           Value: !Ref pSolutionName
 
-  # ── GDBA Team Access (capability → scope, single-team table) ──────────────────
-  # PK = capability only (not team_name + capability) — this table is
-  # deliberately scoped to one team. Reusable for any future GDBA activity,
-  # not just DR: add a new capability row, no schema change. `scope` is
-  # either the string "ALL" or a list of resource IDs (AG names today;
-  # instance IDs, app_ids, etc. for future capabilities — the check code
-  # decides what the ID means, not the table).
+  # PK = capability; scope is "ALL" or a list of resource IDs (AG names today).
   rCsaGdbaAccessTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -4044,16 +3663,8 @@ Resources:
         - Key: Solution
           Value: !Ref pSolutionName
 
-  # ── Team Capabilities (generic multi-team access, PK=team, SK=capability) ─────
-  # Generalized successor to rCsaGdbaAccessTable. One row per (team, capability):
-  #   enabled  - bool, whether the capability is currently switched on
-  #   scope    - "ALL" or a list of resource IDs the capability applies to
-  #   updated_by / updated_at - audit fields
-  # A reserved capability value "_meta" holds team-level config on a separate
-  # item: { team, capability: "_meta", cognito_group, description }. This lets
-  # new teams/capabilities be onboarded by adding rows only — no template or
-  # Lambda env var changes required. rCsaGdbaAccessTable is left untouched;
-  # existing GDBA checks keep reading it as-is.
+  # Multi-team access: PK team, SK capability (enabled, scope). A "_meta" item
+  # holds team config (cognito_group, description).
   rCsaTeamCapabilitiesTable:
     Type: AWS::DynamoDB::Table
     DeletionPolicy: Retain
@@ -4105,7 +3716,6 @@ Resources:
         - Key: Solution
           Value: !Ref pSolutionName
 
-  # ── Catalog Sync Lambda ───────────────────────────────────────────────────────
   rCsaCatalogSyncFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -4122,14 +3732,12 @@ Resources:
           CATALOG_S3_KEY: app-catalogs/instance-catalog.csv
           LOG_LEVEL: INFO
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref rCsaInstanceCatalogTable
+        - !Ref rCsaLambdaSharedDataAccessPolicy
         - S3ReadPolicy:
             BucketName: !Sub '${pSolutionName}-job-scheduler-${AWS::AccountId}-${AWS::Region}'
       Tags:
         Solution: !Ref pSolutionName
 
-  # ── Catalog Sync Schedule ─────────────────────────────────────────────────────
   rCsaCatalogSyncSchedule:
     Type: AWS::Events::Rule
     Properties:
@@ -4149,7 +3757,6 @@ Resources:
       Principal: events.amazonaws.com
       SourceArn: !GetAtt rCsaCatalogSyncSchedule.Arn
 
-  # ── API Gateway - GET /app-instances ───────────────────────────────────────────
   rCsaApiGetAppInstancesMethod:
     Type: AWS::ApiGateway::Method
     Properties:
