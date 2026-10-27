@@ -23,6 +23,13 @@ Steps:
 
 Never raises: any problem is logged and job processing carries on unchanged.
 Disabled (no-op) unless SERVICENOW_SECRET_ARN is set.
+
+The result is also saved on the job as `incident` (best effort), so GET /jobs
+and the agents can show it:
+  {"status": "created" | "dry_run" | "exists" | "not_raised",
+   "number", "url", "assignment_group", "phase", "correlation_id", "at", "error"}
+Saving it causes one more MODIFY stream event; the failure checks below ignore
+it (the status / health_outcome did not change), so no second incident.
 SERVICENOW_DRY_RUN=true (the default) does every step except the final POST and
 logs the incident payload instead — set it to false to create real incidents.
 
@@ -50,6 +57,11 @@ logger = logging.getLogger()
 
 SECRET_ARN = os.getenv("SERVICENOW_SECRET_ARN", "")
 CATALOG_TABLE = os.getenv("INSTANCE_CATALOG_TABLE", "runstack-instance-catalog")
+JOBS_TABLE = os.getenv("JOBS_TABLE", "runstack-jobs-table")
+# Display names for the agent / email; the secret may override them with
+# "cloudops_group_name" / "linux_l3_group_name".
+GROUP_NAMES = {"cloudops_group_sys_id": "DXC IT-PublicCloudOps",
+               "linux_l3_group_sys_id": "DXCIT_LinuxL3"}
 HTTP_TIMEOUT = int(os.getenv("SERVICENOW_HTTP_TIMEOUT", "5"))
 # Dry run: token, duplicate check and CI lookup run for real; the incident is
 # NOT created — the payload is logged instead ("SERVICENOW DRY RUN").
@@ -72,12 +84,20 @@ def handle_job_update(old_job, new_job):
         failure = _failed_power_action(old_job, new_job) or _failed_start_health(old_job, new_job)
         if not failure:
             return
-        number = _raise_incident(new_job, failure)
-        if number:
-            logger.info(f"servicenow: {number} raised for job {new_job.get('job_id')} "
+    except Exception as e:   # never affect job processing
+        logger.error(f"servicenow: failure check error for job {new_job.get('job_id')}: {e}")
+        return
+
+    try:
+        result = _raise_incident(new_job, failure)
+        if result and result.get("status") == "created":
+            logger.info(f"servicenow: {result.get('number')} raised for job {new_job.get('job_id')} "
                         f"(phase {failure['phase']}, {new_job.get('resource_id')})")
     except Exception as e:   # never affect job processing
         logger.error(f"servicenow: incident not raised for job {new_job.get('job_id')}: {e}")
+        result = {"status": "not_raised", "error": str(e)[:300]}
+    if result:
+        _record_on_job(new_job, failure, result)
 
 
 def _power_action(job):
@@ -176,15 +196,16 @@ def _raise_incident(job, failure):
     group = cfg.get(failure["group_key"])
     if not group:
         logger.warning(f"servicenow: secret has no {failure['group_key']}; phase {failure['phase']} incident skipped")
-        return None
+        return {"status": "not_raised",
+                "error": f"No assignment group configured for phase {failure['phase']}"}
     token = _get_token(cfg)
 
     # Duplicate guard: one incident per job and phase, even if the stream redelivers.
     existing = _get(base, token, "incident", {"sysparm_query": f"correlation_id={failure['correlation']}",
-                                              "sysparm_fields": "number", "sysparm_limit": "1"})
+                                              "sysparm_fields": "number,sys_id", "sysparm_limit": "1"})
     if existing:
         logger.info(f"servicenow: {existing[0].get('number')} already exists for {failure['correlation']}")
-        return None
+        return {"status": "exists", "number": existing[0].get("number"), "sys_id": existing[0].get("sys_id")}
 
     catalog = _catalog_entry(instance_id)
     server = job.get("server_name") or catalog.get("server_name") or catalog.get("name") or ""
@@ -229,12 +250,50 @@ def _raise_incident(job, failure):
     if DRY_RUN:
         logger.warning("SERVICENOW DRY RUN — incident NOT created. Would POST to "
                        f"{base}/api/now/table/incident: {json.dumps(payload)}")
-        return "DRY-RUN"
+        return {"status": "dry_run", "ci_found": bool(ci_sys_id)}
 
     status, body = _http("POST", f"{base}/api/now/table/incident", _headers(token), json.dumps(payload).encode())
     if status not in (200, 201):
         raise RuntimeError(f"create incident failed: HTTP {status} {str(body)[:300]}")
-    return (body.get("result") or {}).get("number")
+    created = body.get("result") or {}
+    return {"status": "created", "number": created.get("number"), "sys_id": created.get("sys_id"),
+            "ci_found": bool(ci_sys_id)}
+
+
+def _record_on_job(job, failure, result):
+    """Best effort: save the incident result on the job for GET /jobs and the agents.
+    Never raises. Writes only the `incident` attribute; status is untouched."""
+    job_id = job.get("job_id")
+    if not job_id:
+        return
+    try:
+        cfg = _config or {}
+        base = (cfg.get("instance_url") or "").rstrip("/")
+        group_name = cfg.get(failure["group_key"].replace("_sys_id", "_name")) or GROUP_NAMES.get(failure["group_key"], "")
+        item = {
+            "status": result.get("status"),
+            "phase": failure["phase"],
+            "title": failure["title"],
+            "assignment_group": group_name,
+            "correlation_id": failure["correlation"],
+            "at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        if result.get("number"):
+            item["number"] = result["number"]
+        if result.get("sys_id") and base:
+            item["url"] = f"{base}/nav_to.do?uri=incident.do%3Fsys_id%3D{result['sys_id']}"
+        if "ci_found" in result:
+            item["ci_found"] = result["ci_found"]
+        if result.get("error"):
+            item["error"] = result["error"]
+        boto3.resource("dynamodb").Table(JOBS_TABLE).update_item(
+            Key={"job_id": job_id},
+            UpdateExpression="SET incident = :i",
+            ConditionExpression="attribute_exists(job_id)",
+            ExpressionAttributeValues={":i": item},
+        )
+    except Exception as e:
+        logger.warning(f"servicenow: could not save incident result on job {job_id}: {e}")
 
 
 def _find_ci(base, token, server):

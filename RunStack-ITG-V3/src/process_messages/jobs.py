@@ -5,7 +5,7 @@ de-indented) from the original code. No logic changes.
 """
 
 from shared import *
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 
 def handle_jobs_dlq_list(event, http_method, path, path_parameters, query_params):
@@ -320,11 +320,47 @@ def _job_fingerprint(job):
     ssm = ssm_connectivity_summary(job) if job.get("ssm_info_raw") else {}
     return (job.get("status"), job.get("ec2_state"), job.get("health_outcome"),
             tuple(sorted(k for k in job if isinstance(k, str) and k.startswith("seen_"))),
-            checks.get("summary"), ssm.get("ping_status"))
+            checks.get("summary"), ssm.get("ping_status"),
+            (job.get("incident") or {}).get("status"))
+
+
+# A just-failed EC2 stop/start (or a start whose health check failed) gets a
+# ServiceNow incident from process_jobs a few seconds later. Within this window
+# the long poll also waits for that result, so the agent can show it.
+INCIDENT_WAIT_WINDOW_SECONDS = int(os.getenv("INCIDENT_WAIT_WINDOW_SECONDS", "90"))
+_FAILED_STATUSES = ("FAILED", "TIMED_OUT")
+
+
+def _seconds_since(iso_ts):
+    try:
+        ts = datetime.fromisoformat(str(iso_ts).replace("Z", "+00:00"))
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - ts).total_seconds()
+    except (TypeError, ValueError):
+        return None
+
+
+def _awaiting_incident(job):
+    if INCIDENT_WAIT_WINDOW_SECONDS <= 0 or not job or job.get("incident"):
+        return False
+    doc = str(((job.get("automation_data") or {}).get("DocumentName")) or "").lower()
+    if doc not in _EC2_POWER_DOCS:
+        return False
+    if str(job.get("status") or "").upper() in _FAILED_STATUSES:
+        since = _seconds_since(job.get("updated_at"))
+    elif job.get("health_outcome") in ("impaired", "timeout"):
+        since = _seconds_since(job.get("health_outcome_at") or job.get("updated_at"))
+    else:
+        return False
+    return since is not None and since <= INCIDENT_WAIT_WINDOW_SECONDS
 
 
 def _long_poll_job(event, job_id, job):
-    if JOB_LONGPOLL_SECONDS <= 0 or _is_browser_request(event) or not _is_running_ec2_power_job(job):
+    def worth_waiting(j):
+        return _is_running_ec2_power_job(j) or _awaiting_incident(j)
+
+    if JOB_LONGPOLL_SECONDS <= 0 or _is_browser_request(event) or not worth_waiting(job):
         return job
     start = _job_fingerprint(job)
     deadline = _lp_time.time() + JOB_LONGPOLL_SECONDS
@@ -334,7 +370,7 @@ def _long_poll_job(event, job_id, job):
         if fresh is None:
             return job
         job = fresh
-        if _job_fingerprint(job) != start or not _is_running_ec2_power_job(job):
+        if _job_fingerprint(job) != start or not worth_waiting(job):
             break
     return job
 
@@ -415,6 +451,10 @@ def handle_job_detail(event, http_method, path, path_parameters, query_params):
             # automation ran (empty for other jobs / older jobs).
             "state_transitions": ec2_state_transitions(job),
             "live_state_checked_at": job.get("live_state_checked_at"),
+            # ServiceNow incident raised by process_jobs for a failed EC2
+            # stop/start (status: created / dry_run / exists / not_raised).
+            # Null when no incident applies or it is not recorded yet.
+            "incident": job.get("incident"),
             # EC2-Action jobs only (null for other job types): EC2 status
             # checks (3/3) and SSM connectivity collected by the workflow.
             # Also on EC2 start jobs, which now wait for start-up health.

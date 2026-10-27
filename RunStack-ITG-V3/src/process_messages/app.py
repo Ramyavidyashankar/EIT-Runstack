@@ -40,7 +40,7 @@ This file (app.py) stays the Lambda entry point: SQS message processing
 """
 
 from shared import *
-
+import uipath
 import sap_sync
 import ec2_sync
 import notify
@@ -188,6 +188,8 @@ def handle_api_gateway_request(event: Dict[str, Any]) -> Dict[str, Any]:
             return auth.handle_ui_login(event, http_method, path, path_parameters, query_params)
         elif "/tidal/apps/" in path and path.endswith("/agents") and http_method == "GET":
             return tidal.handle_tidal_agents(event, http_method, path, path_parameters, query_params)
+        elif "/uipath/robots/" in path and path.endswith("/running-job") and http_method == "GET":
+            return uipath.handle_uipath_running_job(event, http_method, path, path_parameters, query_params)
         # SQL Health Check page (Database Operations): options for the form.
         elif path.endswith("/batch-healthcheck/options") and http_method == "GET":
             return sql_healthcheck.handle_healthcheck_options(event, http_method, path, path_parameters, query_params)
