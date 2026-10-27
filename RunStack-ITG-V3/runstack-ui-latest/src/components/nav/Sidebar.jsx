@@ -3,6 +3,7 @@
 //   Expanded (232 px)   icon + label; Administration opens as a submenu.
 //   Collapsed (64 px)   icons only; the name shows as a tooltip on hover and
 //                       keyboard focus; Administration opens as a flyout menu.
+//   The ☰ button in the header switches between the two (Layout.jsx).
 //   Small screens       a drawer over the page, opened from the header's Menu
 //                       button and closed by choosing a page, Esc or the
 //                       backdrop (Layout.jsx).
@@ -79,7 +80,7 @@ function AdminNoAccess({ teams, onGo, menu }) {
   );
 }
 
-export default function Sidebar({ onNavigate, collapsed, onToggleCollapsed, drawer = false, onClose }) {
+export default function Sidebar({ onNavigate, collapsed, drawer = false, onClose }) {
   const { role, groups } = useAuth();
   const { pathname } = useLocation();
   const hasAppAccess = useAppAccess();
@@ -164,13 +165,6 @@ export default function Sidebar({ onNavigate, collapsed, onToggleCollapsed, draw
         )}
       </nav>
 
-      {!drawer && (
-        <button type="button" className="rs-side-collapse" onClick={onToggleCollapsed} aria-expanded={!collapsed}
-          aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'} data-tip={iconsOnly ? 'Expand navigation' : undefined}>
-          <Chevron dir={collapsed ? 'right' : 'left'} />
-          <span className="rs-side-label">Collapse</span>
-        </button>
-      )}
     </aside>
   );
 }

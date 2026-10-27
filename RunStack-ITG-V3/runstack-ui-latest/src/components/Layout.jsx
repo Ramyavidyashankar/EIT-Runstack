@@ -2,8 +2,9 @@
 //
 // App shell: a slim dark navy header (components/nav/AppHeader.jsx) above a
 // collapsible left sidebar (components/nav/Sidebar.jsx) and one scrolling
-// content area. The collapsed/expanded choice is remembered in this browser.
-// Below 900 px the sidebar becomes a drawer opened from the header.
+// content area. The header's ☰ button collapses / expands the sidebar; the
+// choice is remembered in this browser. Below 900 px the sidebar becomes a
+// drawer that the same button opens.
 import React from 'react';
 import ReactDOM from 'react-dom';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -166,7 +167,8 @@ export default function Layout({ children }) {
     <NavigationContext.Provider value={go}>
     <div className={`rs-shell${collapsed && !drawer ? ' is-collapsed' : ''}${drawer ? ' is-drawer' : ''}`}>
       <a href="#rs-main" className="rs-skip-link">Skip to content</a>
-      <AppHeader onNavigate={go} navOpen={navOpen} onToggleNav={() => setNavOpen((v) => !v)} />
+      <AppHeader onNavigate={go} drawer={drawer} navOpen={drawer ? navOpen : !collapsed}
+        onToggleNav={drawer ? () => setNavOpen((v) => !v) : toggleCollapsed} />
       <div className="rs-shell-body">
         {drawer ? (navOpen && (
           <>
@@ -174,7 +176,7 @@ export default function Layout({ children }) {
             <div id="rs-side-drawer"><Sidebar onNavigate={go} drawer onClose={() => setNavOpen(false)} /></div>
           </>
         )) : (
-          <Sidebar onNavigate={go} collapsed={collapsed} onToggleCollapsed={toggleCollapsed} />
+          <Sidebar onNavigate={go} collapsed={collapsed} />
         )}
         <main id="rs-main" ref={contentRef} tabIndex={-1} className="rs-shell-main">
           <div className={`rs-nav-progress${busy ? ' is-busy' : ''}`} role="progressbar" aria-hidden={!busy} aria-label="Loading" />

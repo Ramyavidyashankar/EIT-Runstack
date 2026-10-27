@@ -377,10 +377,9 @@ table { font-size: var(--fs-body); }
 .rs-profile-name{ font-size: 13px; font-weight: 600; color: #FFFFFF; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rs-profile-role{ font-size: 12px; color: #B4C0D3; white-space: nowrap; }
 
-.rs-menu-toggle { display: none; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: var(--radius-md);
+.rs-menu-toggle { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: var(--radius-md);
                   color: #FFFFFF; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16); cursor: pointer; flex: none; }
-.rs-menu-toggle:hover, .rs-menu-toggle[aria-expanded="true"] { background: var(--navy-800); }
-.rs-shell.is-drawer .rs-menu-toggle { display: inline-flex; }
+.rs-menu-toggle:hover, .rs-shell.is-drawer .rs-menu-toggle[aria-expanded="true"] { background: var(--navy-800); }
 
 .rs-alert-dot   { width: 8px; height: 8px; border-radius: 50%; background: #F87171; box-shadow: 0 0 0 2px var(--navy-900); flex: none; }
 .rs-count-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; padding: 0 6px; margin-left: 8px; border-radius: 999px;
@@ -449,14 +448,6 @@ table { font-size: var(--fs-body); }
   white-space: nowrap; box-shadow: var(--shadow-md, 0 4px 12px rgba(15,23,42,0.18)); pointer-events: none; }
 .rs-sidebar.is-collapsed .rs-side-link[aria-expanded="true"]::after { display: none; }
 .rs-menu--flyout { top: 0 !important; left: calc(100% + 10px); }
-
-.rs-side-collapse { flex: none; display: flex; align-items: center; gap: 10px; text-align: left; margin: 0 10px 12px; min-height: 36px; padding: 0 12px; position: relative;
-                  border: 1px solid rgba(255,255,255,0.10); border-radius: var(--radius-md); background: none; color: #B4C0D3;
-                  font: 500 13px/1 var(--font-sans); cursor: pointer; white-space: nowrap; }
-.rs-side-collapse:hover { color: #FFFFFF; background: rgba(255,255,255,0.05); }
-.rs-side-collapse:focus-visible { outline: 2px solid var(--navy-accent); outline-offset: -2px; }
-.rs-sidebar.is-collapsed .rs-side-collapse { margin: 0 8px 12px; padding: 0; justify-content: center; }
-.rs-sidebar.is-collapsed .rs-side-collapse .rs-side-label { display: none; }
 
 /* Small screens: the sidebar is a drawer over the page */
 .rs-side-backdrop { position: fixed; inset: var(--header-h) 0 0 0; background: rgba(15,23,42,0.32); z-index: 44; }

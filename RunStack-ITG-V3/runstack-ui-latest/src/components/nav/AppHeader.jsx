@@ -4,7 +4,7 @@
 //
 // Global information only: branding, the environment and the account menu.
 // Page navigation lives in the left sidebar (nav/Sidebar.jsx); the ☰ button
-// shows on small screens, where the sidebar becomes a drawer.
+// collapses / expands it (on small screens it opens it as a drawer).
 
 import React from 'react';
 import { useAuth } from '../../auth/AuthContext';
@@ -64,19 +64,21 @@ function ProfileMenu() {
   );
 }
 
-export default function AppHeader({ onNavigate, navOpen, onToggleNav }) {
+export default function AppHeader({ onNavigate, drawer = false, navOpen, onToggleNav }) {
   const click = (e) => {
     if (!isPlainClick(e)) return;
     e.preventDefault();
     onNavigate('/');
   };
+  // Wide screens: collapse / expand the sidebar. Small screens: open / close the drawer.
+  const toggleLabel = drawer ? (navOpen ? 'Close navigation' : 'Open navigation') : (navOpen ? 'Collapse navigation' : 'Expand navigation');
   return (
     <header className="rs-header">
       <div className="rs-header-inner">
         <div className="rs-header-left">
-          <button id="rs-menu-toggle" type="button" className="rs-menu-toggle" aria-expanded={!!navOpen} aria-controls="rs-side-drawer"
-            aria-label={navOpen ? 'Close navigation' : 'Open navigation'} onClick={onToggleNav}>
-            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden><path d={navOpen ? 'M4 4l8 8M12 4l-8 8' : 'M2.5 4h11M2.5 8h11M2.5 12h11'} stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" /></svg>
+          <button id="rs-menu-toggle" type="button" className="rs-menu-toggle" aria-expanded={!!navOpen}
+            aria-controls={drawer ? 'rs-side-drawer' : undefined} aria-label={toggleLabel} title={toggleLabel} onClick={onToggleNav}>
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden><path d={drawer && navOpen ? 'M4 4l8 8M12 4l-8 8' : 'M2.5 4h11M2.5 8h11M2.5 12h11'} stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" /></svg>
           </button>
           <a href="/" className="rs-brand" onClick={click} aria-label="RunStack home">
             <img src="/dxc-logo-color.svg" alt="DXC" className="rs-brand-logo" />
