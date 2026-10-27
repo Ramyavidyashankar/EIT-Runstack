@@ -2837,10 +2837,6 @@ Resources:
           AttributeType: S
         - AttributeName: notification_id
           AttributeType: S
-        - AttributeName: execution_group_id
-          AttributeType: S
-        - AttributeName: created_at
-          AttributeType: S
       KeySchema:
         - AttributeName: job_id
           KeyType: HASH
@@ -2851,27 +2847,6 @@ Resources:
               KeyType: HASH
           Projection:
             ProjectionType: ALL
-        - IndexName: execution-group-index
-          KeySchema:
-            - AttributeName: execution_group_id
-              KeyType: HASH
-            - AttributeName: created_at
-              KeyType: RANGE
-          Projection:
-            ProjectionType: INCLUDE
-            NonKeyAttributes:
-              - status
-              - resource_id
-              - server_name
-              - account_id
-              - region
-              - updated_at
-              - automation_type
-              - exec_outcome
-              - initiated_by
-              - notification_id
-              - app_id
-              - environment
 
   # Shared by all RunStack Lambdas: CRUD on runstack-* DynamoDB tables and
   # indexes, read on runstack-* secrets. New runstack-* tables/secrets need
