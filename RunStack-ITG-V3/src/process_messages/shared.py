@@ -101,7 +101,7 @@ SHAREPOINT_CLIENT_SECRET_HARDCODED = ""
 SHAREPOINT_SITE_HOSTNAME_HARDCODED = "dxcportal.sharepoint.com"
 SHAREPOINT_SITE_PATH_HARDCODED = "/sites/dxcitRundeck"
 SHAREPOINT_FOLDER_PATH = "MSSQL Auto-update SQL Version"
-SHAREPOINT_TARGET_FILE_NAME = "GDBA MSSQL Auto Version Update Details.xlsx"
+SHAREPOINT_TARGET_FILE_NAME = "GDBA MSSQL Auto Version Update Details bkp21.xlsx"
 
 SHAREPOINT_TENANT_ID = os.getenv("SHAREPOINT_TENANT_ID", "") or SHAREPOINT_TENANT_ID_HARDCODED
 SHAREPOINT_APP_SECRET_ARN = os.getenv("SHAREPOINT_APP_SECRET_ARN", "")
@@ -964,7 +964,10 @@ def get_sap_components(sid: str) -> list:
         response = table.query(
             KeyConditionExpression=boto3.dynamodb.conditions.Key("sid").eq(sid)
         )
-        return response.get("Items", [])
+        # Rows whose component starts with "_" hold SID settings (e.g. the
+        # "_CONFIG" row read by sap_runs.py for approval / notifications),
+        # not SAP components.
+        return [i for i in response.get("Items", []) if not str(i.get("component", "")).startswith("_")]
     except Exception as e:
         logger.error(f"Error fetching SAP components for {sid}: {e}")
         return []
@@ -1196,6 +1199,7 @@ def acquire_action_lock(resource_id: str, user_email: str, job_id: str, ttl_seco
             return {
                 "locked_by": existing.get("locked_by", "unknown"),
                 "locked_at": existing.get("locked_at", "unknown"),
+                "job_id": existing.get("job_id"),
             }
         raise
 
@@ -1206,7 +1210,11 @@ def check_and_acquire_lock(event, lock_key, ttl_seconds=None, job_id="n/a (debou
     user_email = user_email or "unknown"
 
     lock_conflict = acquire_action_lock(lock_key, user_email, job_id=job_id, ttl_seconds=ttl_seconds)
-    if lock_conflict and lock_conflict.get("locked_by") != user_email:
+    # A server held by a SAP full-stack run (sap_runs.py) is locked for
+    # everyone, including the user who started that run: an EC2 stop/start
+    # from the EC2 agent or UI must never interrupt the run's own steps.
+    if lock_conflict and (lock_conflict.get("locked_by") != user_email
+                          or str(lock_conflict.get("job_id") or "").startswith("sap-run-")):
         return lock_conflict
     return None
 
@@ -1565,7 +1573,7 @@ def require_team_capability(event: Dict[str, Any], team: str, capability: str,
 # inconsistent ("itg", "ITG", "Development", "Test", "Production", empty
 # string) — verify actual values in your catalog match one of these before
 # relying on this gate, or normalize the catalog data / this set together.
-EC2_ALLOWED_ENVIRONMENTS = {"ITG", "DEV", "DEVELOPMENT", "STAGING", "TEST"}
+EC2_ALLOWED_ENVIRONMENTS = {"ITG", "DEV", "DEVELOPMENT", "STAGING", "TEST", "TESTING"}
 
 # Temporary, Phase 1 only: whether a read-only EC2 status check is exempt
 # from the environment restriction above (i.e. can still run against

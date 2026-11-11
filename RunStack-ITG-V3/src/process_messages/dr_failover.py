@@ -469,6 +469,12 @@ def handle_dr_approve(event, http_method, path, path_parameters, query_params):
         if body.get("secret") != approve_secret or not approve_secret:
             return {"statusCode": 403, "headers": CORS_HEADERS, "body": json.dumps({"error": "forbidden"})}
 
+        # SAP full-stack run approvals (sap_runs.py) reuse this Teams callback
+        # and its shared secret; everything else below is the DR failover path.
+        if body.get("kind") == "sap_run":
+            import sap_runs
+            return sap_runs.handle_teams_decision(body)
+
         token = body.get("confirmation_token")
         decision = body.get("decision")
 
